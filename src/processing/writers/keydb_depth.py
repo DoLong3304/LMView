@@ -1,7 +1,7 @@
 """
-KeyDB order-book depth writer for Flink stream processing.
+Redis Sentinel order-book depth writer for Flink stream processing.
 
-Receives partial order-book depth snapshots and writes to KeyDB hashes.
+Receives partial order-book depth snapshots and writes to Redis hashes.
 """
 
 import json
@@ -9,27 +9,21 @@ import logging
 import os
 import time
 
-import redis
 from pyflink.datastream.functions import FlatMapFunction
-
-REDIS_HOST = os.environ.get("REDIS_HOST", "keydb")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+from common.flink_redis_sentinel import get_flink_redis
 
 log = logging.getLogger(__name__)
 
 
 class DepthWriter(FlatMapFunction):
-    """Writes order-book snapshots to ``orderbook:{symbol}`` hashes in KeyDB."""
+    """Writes order-book snapshots to ``orderbook:{symbol}`` hashes in Redis Sentinel."""
 
     BATCH_SIZE = 50
     FLUSH_INTERVAL = 0.3
 
     def open(self, runtime_context):
-        self._r = redis.Redis(
-            host=REDIS_HOST, port=REDIS_PORT, db=0,
-            decode_responses=True,
-            socket_keepalive=True,
-        )
+        # Get Redis master connection via Sentinel
+        self._r = get_flink_redis()
         self._buffer: list[dict] = []
         self._last_flush = time.time()
 

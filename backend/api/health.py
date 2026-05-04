@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter
 
 from backend.core.database import get_redis, get_influx, get_trino_connection
+from backend.core.redis_sentinel import get_redis_health
 
 router = APIRouter(prefix="/api", tags=["health"])
 
@@ -21,15 +22,19 @@ async def health():
     checks = {}
     latencies = {}
 
-    keydb_start = time.perf_counter()
+    # Redis Sentinel cluster health
+    redis_start = time.perf_counter()
     try:
+        redis_health_info = await get_redis_health()
+        checks["redis"] = redis_health_info
+
+        # Also test connection
         r = await get_redis()
         await r.ping()
-        checks["keydb"] = "ok"
     except Exception as e:
-        checks["keydb"] = str(e)
+        checks["redis"] = {"status": "error", "error": str(e)}
     finally:
-        latencies["keydb_ms"] = round((time.perf_counter() - keydb_start) * 1000, 2)
+        latencies["redis_ms"] = round((time.perf_counter() - redis_start) * 1000, 2)
 
     influx_start = time.perf_counter()
     try:
@@ -52,7 +57,13 @@ async def health():
     finally:
         latencies["trino_ms"] = round((time.perf_counter() - trino_start) * 1000, 2)
 
-    status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
+    # Determine overall status
+    redis_ok = isinstance(checks.get("redis"), dict) and checks["redis"].get("status") in ["ok", "healthy"]
+    influx_ok = checks.get("influxdb") == "ok"
+    trino_ok = checks.get("trino") == "ok"
+
+    status = "ok" if (redis_ok and influx_ok and trino_ok) else "degraded"
+
     total_latency_ms = round((time.perf_counter() - overall_start) * 1000, 2)
     return {
         "status": status,

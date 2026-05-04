@@ -1,4 +1,4 @@
-#!/bin/bash
+﻿#!/bin/bash
 set -e
 
 SPARK_HOME="${SPARK_HOME:-/opt/spark}"

@@ -2,7 +2,7 @@
 Technical indicator writer for Flink stream processing.
 
 Receives closed 1m klines, maintains rolling close-price buffers per symbol,
-computes SMA20, SMA50, EMA12, EMA26, and writes results to KeyDB + InfluxDB.
+computes SMA20, SMA50, EMA12, EMA26, and writes results to Redis Sentinel + InfluxDB.
 """
 
 import json
@@ -11,13 +11,11 @@ import os
 import time
 from collections import deque
 
-import redis
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from pyflink.datastream.functions import FlatMapFunction
+from common.flink_redis_sentinel import get_flink_redis
 
-REDIS_HOST    = os.environ.get("REDIS_HOST", "keydb")
-REDIS_PORT    = int(os.environ.get("REDIS_PORT", "6379"))
 INFLUX_URL    = os.environ.get("INFLUX_URL",    "http://influxdb:8086")
 INFLUX_TOKEN  = os.environ.get("INFLUX_TOKEN",  "")
 INFLUX_ORG    = os.environ.get("INFLUX_ORG",    "vi")
@@ -30,7 +28,7 @@ class IndicatorWriter(FlatMapFunction):
     """Computes SMA/EMA indicators from closed 1m klines.
 
     Outputs:
-        - ``indicator:latest:{symbol}`` hash in KeyDB
+        - ``indicator:latest:{symbol}`` hash in Redis Sentinel
         - ``indicators`` measurement in InfluxDB
     """
 
@@ -39,11 +37,8 @@ class IndicatorWriter(FlatMapFunction):
     MAX_HISTORY = 60  # keep last 60 closes (enough for SMA50 + buffer)
 
     def open(self, runtime_context):
-        self._r = redis.Redis(
-            host=REDIS_HOST, port=REDIS_PORT, db=0,
-            decode_responses=True,
-            socket_keepalive=True,
-        )
+        # Get Redis master connection via Sentinel
+        self._r = get_flink_redis()
         self._influx_client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
         self._write_api = self._influx_client.write_api(write_options=SYNCHRONOUS)
         self._closes: dict[str, deque] = {}

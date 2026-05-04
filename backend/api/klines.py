@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from backend.core.constants import INTERVAL_SECONDS, INFLUX_1M_RETENTION_DAYS, MAX_RAW_CANDLES, LIVE_MAX_BASE_ROWS, MAX_BACKFILL_PAGES
 from backend.core.database import get_redis
+from backend.core.redis_sentinel import get_redis_master
 from backend.services.candle_service import (
     validate_symbol,
     validate_interval,
@@ -78,7 +79,9 @@ async def get_klines(
     # Cache result (skip for scroll queries)
     if not endTime:
         ttl_ms = 200 if interval == "1s" else 1500
-        pipe = r.pipeline()
+        # Use master for write operations
+        r_master = await get_redis_master()
+        pipe = r_master.pipeline()
         pipe.set(cache_key, json.dumps(result))
         pipe.pexpire(cache_key, ttl_ms)
         await pipe.execute()

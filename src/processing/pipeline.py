@@ -15,27 +15,29 @@ import logging
 import os
 import sys
 
-# ── Ensure src/ is on Python path for writer imports ─────────────────────────
+# ── Ensure src/ and processing/ are on Python path ───────────────────────────
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from pyflink.common import Configuration, Types
 from pyflink.datastream import CheckpointingMode, StreamExecutionEnvironment
 from pyflink.table import StreamTableEnvironment
 
-from processing.writers.keydb_ticker import KeyDBWriter
-from processing.writers.keydb_kline import KeyDBKlineWriter
-from processing.writers.keydb_depth import DepthWriter
-from processing.writers.influxdb_ticker import InfluxDBWriter
-from processing.writers.influxdb_kline import InfluxDBKlineWriter
-from processing.writers.indicators import IndicatorWriter
-from processing.writers.kline_aggregator import KlineWindowAggregator
+# Import from writers package (uploaded via --pyFiles)
+from writers.keydb_ticker import KeyDBWriter
+from writers.keydb_kline import KeyDBKlineWriter
+from writers.keydb_depth import DepthWriter
+from writers.influxdb_ticker import InfluxDBWriter
+from writers.influxdb_kline import InfluxDBKlineWriter
+from writers.indicators import IndicatorWriter
+from writers.kline_aggregator import KlineWindowAggregator
 
 # ── Config (read at module level for Flink compatibility) ────────────────────
-KAFKA_BOOTSTRAP  = os.environ.get("KAFKA_BOOTSTRAP",   "kafka:9092")
+KAFKA_BOOTSTRAP  = os.environ.get("KAFKA_BOOTSTRAP",   "kafka-1:9092,kafka-2:9092,kafka-3:9092")
 MINIO_ENDPOINT   = os.environ.get("MINIO_ENDPOINT",    "http://minio:9000")
 MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY",  "")
 MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY",  "")
-FLINK_PARALLELISM = int(os.environ.get("FLINK_PARALLELISM", "1"))
+FLINK_PARALLELISM = int(os.environ.get("FLINK_PARALLELISM", "12"))
 SCHEMA_REGISTRY_URL = os.environ.get(
     "SCHEMA_REGISTRY_URL",
     "http://schema-registry:8080/apis/ccompat/v7",

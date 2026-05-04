@@ -1,8 +1,8 @@
 """
-KeyDB kline candle writer for Flink stream processing.
+Redis Sentinel kline candle writer for Flink stream processing.
 
-Writes 1s and 1m candles to KeyDB sorted sets with interval-specific TTLs.
-Batch-buffered to reduce KeyDB round trips.
+Writes 1s and 1m candles to Redis sorted sets with interval-specific TTLs.
+Batch-buffered to reduce Redis round trips.
 """
 
 import json
@@ -10,11 +10,8 @@ import logging
 import os
 import time
 
-import redis
 from pyflink.datastream.functions import FlatMapFunction
-
-REDIS_HOST = os.environ.get("REDIS_HOST", "keydb")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+from common.flink_redis_sentinel import get_flink_redis
 
 KEYDB_1S_RETENTION_DAYS = int(os.environ.get("KEYDB_1S_RETENTION_DAYS", "1"))
 KEYDB_1M_RETENTION_DAYS = int(os.environ.get("KEYDB_1M_RETENTION_DAYS", "7"))
@@ -23,7 +20,7 @@ log = logging.getLogger(__name__)
 
 
 class KeyDBKlineWriter(FlatMapFunction):
-    """Writes kline candles to KeyDB with interval-specific TTL.
+    """Writes kline candles to Redis Sentinel with interval-specific TTL.
 
     - ``candle:1s:{symbol}`` → TTL KEYDB_1S_RETENTION_DAYS
     - ``candle:1m:{symbol}`` → TTL KEYDB_1M_RETENTION_DAYS
@@ -37,11 +34,8 @@ class KeyDBKlineWriter(FlatMapFunction):
     FLUSH_INTERVAL = 0.5
 
     def open(self, runtime_context):
-        self._r = redis.Redis(
-            host=REDIS_HOST, port=REDIS_PORT, db=0,
-            decode_responses=True,
-            socket_keepalive=True,
-        )
+        # Get Redis master connection via Sentinel
+        self._r = get_flink_redis()
         self._write_count: dict[str, int] = {}
         self._buffer: list[dict] = []
         self._last_flush = time.time()

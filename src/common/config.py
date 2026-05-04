@@ -11,7 +11,7 @@ import os
 from datetime import datetime, timezone
 
 # ── Kafka ────────────────────────────────────────────────────────────────────
-KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "kafka:9092")
+KAFKA_BOOTSTRAP = os.environ.get("KAFKA_BOOTSTRAP", "kafka-1:9092,kafka-2:9092,kafka-3:9092")
 
 KAFKA_TOPIC_TICKER = "crypto_ticker"
 KAFKA_TOPIC_TRADES = "crypto_trades"

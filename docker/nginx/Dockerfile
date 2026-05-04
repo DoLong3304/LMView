@@ -35,11 +35,11 @@ RUN mkdir -p /var/www/certbot
 
 # Copy entrypoint that templates the domain into nginx config
 COPY docker/nginx/entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 # Copy periodic nginx reload helper so renewed certs are picked up automatically
 COPY scripts/nginx_auto_reload.sh /usr/local/bin/nginx_auto_reload.sh
-RUN chmod +x /usr/local/bin/nginx_auto_reload.sh
+RUN sed -i 's/\r$//' /usr/local/bin/nginx_auto_reload.sh && chmod +x /usr/local/bin/nginx_auto_reload.sh
 
 EXPOSE 80 443
 

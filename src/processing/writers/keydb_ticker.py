@@ -1,5 +1,5 @@
 """
-KeyDB ticker writer for Flink stream processing.
+Redis Sentinel ticker writer for Flink stream processing.
 
 Batch-buffered: accumulates ticker updates and flushes via
 a single Redis pipeline to minimize round trips.
@@ -10,17 +10,14 @@ import logging
 import os
 import time
 
-import redis
 from pyflink.datastream.functions import FlatMapFunction
-
-REDIS_HOST = os.environ.get("REDIS_HOST", "keydb")
-REDIS_PORT = int(os.environ.get("REDIS_PORT", "6379"))
+from common.flink_redis_sentinel import get_flink_redis
 
 log = logging.getLogger(__name__)
 
 
 class KeyDBWriter(FlatMapFunction):
-    """Batch-buffered ticker writer to KeyDB."""
+    """Batch-buffered ticker writer to Redis Sentinel."""
 
     BATCH_SIZE = 100
     FLUSH_INTERVAL = 0.5
@@ -28,11 +25,8 @@ class KeyDBWriter(FlatMapFunction):
     TICKER_HISTORY_TTL_SEC = 600
 
     def open(self, runtime_context):
-        self._r = redis.Redis(
-            host=REDIS_HOST, port=REDIS_PORT, db=0,
-            decode_responses=True,
-            socket_keepalive=True,
-        )
+        # Get Redis master connection via Sentinel
+        self._r = get_flink_redis()
         self._buffer: list[dict] = []
         self._last_flush = time.time()
         self._write_count: dict[str, int] = {}
