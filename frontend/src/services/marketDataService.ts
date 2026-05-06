@@ -138,7 +138,9 @@ export async function fetchCandles(
   endTime: number | null = null,
 ): Promise<Candle[]> {
   if (DATA_SOURCE === "api") {
-    let url = `${API_BASE_URL}/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(timeframe)}&limit=${limit}`;
+    // Normalize interval to lowercase for backend API
+    const interval = timeframe.toLowerCase();
+    let url = `${API_BASE_URL}/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}`;
     if (endTime) {
       // Convert seconds to milliseconds for backend API
       url += `&endTime=${endTime * 1000}`;
@@ -174,7 +176,9 @@ export function subscribeCandle(
   onCandle: (candle: Candle) => void,
 ): () => void {
   if (DATA_SOURCE === "api") {
-    const wsUrl = `${getWsBaseUrl()}/stream?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(timeframe)}`;
+    // Normalize interval to lowercase for backend API
+    const interval = timeframe.toLowerCase();
+    const wsUrl = `${getWsBaseUrl()}/stream?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`;
     const ws = new WebSocket(wsUrl);
     ws.onmessage = (e: MessageEvent) => {
       const k: RawKline = JSON.parse(e.data as string);
@@ -237,9 +241,11 @@ export async function fetchHistoricalCandles(
   interval: string = "1h",
 ): Promise<Candle[]> {
   if (DATA_SOURCE === "api") {
+    // Normalize interval to lowercase for backend API
+    const normalizedInterval = interval.toLowerCase();
     const params = new URLSearchParams({
       symbol,
-      interval,
+      interval: normalizedInterval,
       startTime: String(startMs),
       endTime: String(endMs),
       limit: String(limit),

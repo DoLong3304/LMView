@@ -33,9 +33,25 @@ def validate_symbol(symbol: str) -> str:
     return s
 
 
+def normalize_interval(interval: str) -> str:
+    """Normalize interval to lowercase standard form (1h, 4h, 1d, 1w)."""
+    return interval.strip().lower()
+
+
+def interval_to_seconds(interval: str) -> int:
+    """Convert interval string to seconds. Returns 0 if invalid."""
+    normalized = normalize_interval(interval)
+    return INTERVAL_SECONDS.get(normalized, 0)
+
+
+def interval_to_ms(interval: str) -> int:
+    """Convert interval string to milliseconds. Returns 0 if invalid."""
+    return interval_to_seconds(interval) * 1000
+
+
 def validate_interval(interval: str) -> tuple[str, int]:
     """Normalize interval and return (interval, seconds). Raises 400 if unsupported."""
-    interval = interval.strip().lower()
+    interval = normalize_interval(interval)
     target_sec = INTERVAL_SECONDS.get(interval)
     if target_sec is None:
         raise HTTPException(400, f"Unsupported interval: {interval}")
@@ -65,38 +81,108 @@ def to_candle_rows(rows: list[tuple]) -> list[dict]:
 
 
 def merge_unique(existing: list[dict], incoming: list[dict]) -> list[dict]:
-    """Merge candle rows by openTime, preferring the latest version per timestamp."""
+    """Merge candle rows by openTime, preferring higher-quality candles.
+
+    Quality priority:
+    1. Closed/final candle (if 'is_closed' or 'x' field exists)
+    2. Higher volume (more complete data)
+    3. Later in merge order (incoming preferred if equal quality)
+    """
     if not incoming:
         return existing
-    merged: dict[int, dict] = {int(c["openTime"]): c for c in existing}
-    for c in incoming:
+
+    merged: dict[int, dict] = {}
+
+    # First pass: add all existing candles
+    for c in existing:
         merged[int(c["openTime"])] = c
+
+    # Second pass: merge incoming, choosing better candle on conflict
+    for c in incoming:
+        t = int(c["openTime"])
+        if t not in merged:
+            merged[t] = c
+        else:
+            existing_candle = merged[t]
+            # Choose better candle based on quality
+            if _is_better_candle(c, existing_candle):
+                merged[t] = c
+
     return sorted(merged.values(), key=lambda x: x["openTime"])
 
 
+def _is_better_candle(new: dict, old: dict) -> bool:
+    """Return True if new candle is better quality than old candle.
+
+    Priority:
+    1. Closed/final candle wins over partial
+    2. Higher volume wins (more complete data)
+    3. If equal, prefer new (incoming)
+    """
+    # Check if either candle has closed/final flag
+    new_closed = new.get("is_closed") or new.get("x")
+    old_closed = old.get("is_closed") or old.get("x")
+
+    # Priority 1: Closed candle wins
+    if new_closed and not old_closed:
+        return True
+    if old_closed and not new_closed:
+        return False
+
+    # Priority 2: Higher volume wins
+    new_vol = float(new.get("volume", 0))
+    old_vol = float(old.get("volume", 0))
+
+    if new_vol > old_vol:
+        return True
+    if old_vol > new_vol:
+        return False
+
+    # Priority 3: If equal quality, prefer new (incoming)
+    return True
+
+
 def aggregate(candles: list[dict], target_ms: int) -> list[dict]:
-    """Re-sample OHLCV candles into larger-interval buckets."""
+    """Re-sample OHLCV candles into larger-interval buckets.
+
+    Correctly handles:
+    - Out-of-order input candles
+    - Duplicate openTime (deduped via merge_unique first)
+    - open = open of earliest timestamp in bucket
+    - close = close of latest timestamp in bucket
+    - high = max(high), low = min(low), volume = sum(volume)
+    """
     if not candles:
         return []
-    buckets: dict[int, dict] = {}
+
+    # First dedup any duplicate timestamps using merge_unique
+    candles = merge_unique([], candles)
+
+    # Group candles into buckets
+    buckets: dict[int, list[dict]] = {}
     for c in candles:
         key = (c["openTime"] // target_ms) * target_ms
         if key not in buckets:
-            buckets[key] = {
-                "openTime": key,
-                "open": c["open"],
-                "high": c["high"],
-                "low": c["low"],
-                "close": c["close"],
-                "volume": c["volume"],
-            }
-        else:
-            b = buckets[key]
-            b["high"] = max(b["high"], c["high"])
-            b["low"] = min(b["low"], c["low"])
-            b["close"] = c["close"]
-            b["volume"] = round(b["volume"] + c["volume"], 8)
-    return sorted(buckets.values(), key=lambda x: x["openTime"])
+            buckets[key] = []
+        buckets[key].append(c)
+
+    # Aggregate each bucket with correct OHLCV logic
+    result = []
+    for bucket_time, bucket_candles in buckets.items():
+        # Sort by openTime to get correct open/close
+        bucket_candles.sort(key=lambda x: x["openTime"])
+
+        agg = {
+            "openTime": bucket_time,
+            "open": bucket_candles[0]["open"],      # First candle's open
+            "close": bucket_candles[-1]["close"],   # Last candle's close
+            "high": max(c["high"] for c in bucket_candles),
+            "low": min(c["low"] for c in bucket_candles),
+            "volume": round(sum(c["volume"] for c in bucket_candles), 8),
+        }
+        result.append(agg)
+
+    return sorted(result, key=lambda x: x["openTime"])
 
 
 # ─── InfluxDB queries ────────────────────────────────────────────────────────

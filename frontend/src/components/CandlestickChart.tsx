@@ -93,11 +93,15 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [historicalRange, setHistoricalRange] = useState<HistoricalRange | null>(null);
+  const [isLiveMode, setIsLiveMode] = useState(true);
   const [noData, setNoData] = useState(false);
   const isLoadingMoreRef = useRef(false);
   const earliestTimestampRef = useRef<number | null>(null);
   const noMoreDataRef = useRef(false);
   const scrollCooldownRef = useRef(0);
+  const unsubscribeRef = useRef<(() => void) | null>(null);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const historicalRequestIdRef = useRef(0);
 
   const getTimeframeSeconds = useCallback((tf: string) => {
     return SERVICE_TIMEFRAMES[(tf || "").toLowerCase()]?.seconds || 3600;
@@ -487,9 +491,104 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     [indSettings, onCandlesChange, setInitialVisibleRange, timeframe],
   );
 
+  // Historical mode handlers
+  const handleHistoricalRange = useCallback(
+    async (range: HistoricalRange) => {
+      // Increment request ID to invalidate pending requests
+      historicalRequestIdRef.current += 1;
+      const currentRequestId = historicalRequestIdRef.current;
+
+      // Auto-switch from 1s to 1m in historical mode
+      let effectiveTimeframe = timeframe;
+      if (timeframe === "1s") {
+        effectiveTimeframe = "1m";
+        setTimeframe("1m");
+      }
+
+      setHistoricalRange(range);
+      setIsLiveMode(false);
+      setIsLoading(true);
+      setFetchError(null);
+
+      // Unsubscribe WebSocket
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+
+      // Stop poll interval
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+
+      try {
+        const requestSymbol = symbol;
+        const requestInterval = effectiveTimeframe.toLowerCase();
+
+        // Fetch historical data
+        let data = await fetchHistoricalCandles(
+          requestSymbol,
+          range.startMs,
+          range.endMs,
+          500,
+          requestInterval,
+        );
+
+        // Check if this request is still valid (not superseded by newer request)
+        if (currentRequestId !== historicalRequestIdRef.current) {
+          return; // Newer request has been made, discard this result
+        }
+
+        // Check if user changed context mid-request
+        if (symbolRef.current !== requestSymbol || timeframeRef.current !== requestInterval) {
+          return;
+        }
+
+        // Check if user went back to live mode
+        if (isLiveMode) {
+          return;
+        }
+
+        data = await preloadInitialCandles({
+          data,
+          requestSymbol,
+          requestInterval,
+          isHistoricalMode: true,
+        });
+
+        // Final check before applying data
+        if (currentRequestId !== historicalRequestIdRef.current || isLiveMode) {
+          return;
+        }
+
+        applyDataToChart(data, requestInterval);
+        setIsLoading(false);
+      } catch (err) {
+        // Only show error if this request is still current
+        if (currentRequestId === historicalRequestIdRef.current) {
+          setIsLoading(false);
+          setFetchError(t("failedLoadCandles"));
+          console.error("[Historical] Load error:", err);
+        }
+      }
+    },
+    [symbol, timeframe, isLiveMode, preloadInitialCandles, applyDataToChart, t],
+  );
+
+  const handleBackToLive = useCallback(() => {
+    // Invalidate any pending historical requests
+    historicalRequestIdRef.current += 1;
+
+    setHistoricalRange(null);
+    setIsLiveMode(true);
+    setFetchError(null);
+    // The live mode useEffect will trigger and reconnect WebSocket + poll
+  }, []);
+
   // Load data when symbol or timeframe changes (live mode) + auto-refresh
   useEffect(() => {
-    if (!candleRef.current || historicalRange) return;
+    if (!candleRef.current || !isLiveMode) return;
     let cancelled = false;
     const is1s = timeframe === "1s";
 
@@ -606,6 +705,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       },
     );
 
+    // Store unsubscribe function in ref
+    unsubscribeRef.current = unsub;
+
     // Incremental poll: fetch only the last few candles and merge
     // instead of full-reload which causes chart flickering.
     const pollIncremental = () => {
@@ -670,73 +772,36 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     const pollInterval = is1s ? 1500 : 3000;
     const pollId = setInterval(pollIncremental, pollInterval);
 
+    // Store poll interval in ref
+    pollIntervalRef.current = pollId;
+
     return () => {
       cancelled = true;
       if (pollId) clearInterval(pollId);
       if (unsub) unsub();
+      pollIntervalRef.current = null;
+      unsubscribeRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     symbol,
     timeframe,
-    historicalRange,
+    isLiveMode,
     retryCount,
     applyDataToChart,
     preloadInitialCandles,
   ]);
 
   // Load historical data when date range is set
+  // (Removed - now handled by handleHistoricalRange callback)
+
+  // Refetch historical data when symbol/timeframe changes in historical mode
   useEffect(() => {
-    if (!candleRef.current || !historicalRange) return;
-    let cancelled = false;
-    setIsLoading(true);
-    setFetchError(null);
-    const interval = timeframe.toLowerCase();
-    (async () => {
-      try {
-        const requestSymbol = symbol;
-        const requestInterval = interval;
-        let data = await fetchHistoricalCandles(
-          requestSymbol,
-          historicalRange.startMs,
-          historicalRange.endMs,
-          2000,
-          requestInterval,
-        );
-        if (cancelled) return;
-
-        data = await preloadInitialCandles({
-          data,
-          requestSymbol,
-          requestInterval,
-          isHistoricalMode: true,
-        });
-        if (cancelled) return;
-
-        applyDataToChart(data, requestInterval);
-        setIsLoading(false);
-        if (data.length === 0) {
-          setFetchError("No historical data for this range");
-        }
-      } catch {
-        if (cancelled) return;
-        setIsLoading(false);
-        setFetchError("Failed to load historical data");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
+    if (!isLiveMode && historicalRange) {
+      handleHistoricalRange(historicalRange);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    symbol,
-    historicalRange,
-    timeframe,
-    retryCount,
-    applyDataToChart,
-    preloadInitialCandles,
-  ]);
+  }, [symbol, timeframe]);
 
   // Re-layout chart when chart tab becomes visible again
   useEffect(() => {
@@ -831,18 +896,28 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   }, [symbol, timeframe]);
 
   const TFBtn = useCallback(
-    ({ tf }: { tf: string }) => (
-      <button
-        onClick={() => setTimeframe(tf)}
-        className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${timeframe === tf ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
-      >
-        {tf}
-      </button>
-    ),
-    [timeframe],
+    ({ tf }: { tf: string }) => {
+      const isActive = timeframe === tf;
+      const isDisabled = !isLiveMode && tf === "1s";
+      return (
+        <button
+          onClick={() => !isDisabled && setTimeframe(tf)}
+          disabled={isDisabled}
+          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
+            isActive
+              ? "bg-blue-600 text-white"
+              : isDisabled
+                ? "text-gray-600 cursor-not-allowed"
+                : "text-gray-400 hover:text-white hover:bg-gray-700"
+          }`}
+          title={isDisabled ? "1s not available in historical mode" : undefined}
+        >
+          {tf}
+        </button>
+      );
+    },
+    [timeframe, isLiveMode],
   );
-
-  const historicalTimeframes = TIMEFRAMES.filter((tf) => tf !== "1s");
 
   return (
     <div className="flex flex-col h-full bg-gray-900 rounded-lg overflow-hidden">
@@ -877,7 +952,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           )}
         </div>
         <div className="flex items-center gap-1">
-          {(historicalRange ? historicalTimeframes : TIMEFRAMES).map((tf) => (
+          {TIMEFRAMES.map((tf) => (
             <TFBtn key={tf} tf={tf} />
           ))}
         </div>
@@ -910,28 +985,25 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           </div>
           {/* Historical date-range picker */}
           <DateRangePicker
-            active={!!historicalRange}
-            onApply={(range) => {
-              if (timeframe === "1s") setTimeframe("1m");
-              setHistoricalRange(range);
-            }}
-            onClear={() => setHistoricalRange(null)}
+            active={!isLiveMode}
+            onApply={handleHistoricalRange}
+            onClear={handleBackToLive}
           />
         </div>
       </div>
 
       {/* Historical mode banner */}
-      {historicalRange && (
+      {!isLiveMode && historicalRange && (
         <div className="flex items-center justify-between px-3 py-1.5 bg-amber-900/40 border-b border-amber-700/50">
           <span className="text-xs text-amber-300">
             {new Date(historicalRange.startMs).toLocaleString()} &mdash;{" "}
             {new Date(historicalRange.endMs).toLocaleString()} ({timeframe})
           </span>
           <button
-            onClick={() => setHistoricalRange(null)}
+            onClick={handleBackToLive}
             className="text-xs text-amber-400 hover:text-white underline"
           >
-            {t("returnToLive")}
+            {t("live")}
           </button>
         </div>
       )}

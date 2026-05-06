@@ -253,6 +253,114 @@ dist/assets/index-*.js          471.79 kB │ gzip: 146.62 kB
 
 All changes made by AI assistant, in reverse chronological order.
 
+### 2026-05-05 — Session 8: Multi-Timeframe Candles & Historical Mode
+
+**Task:** Implement end-to-end multi-timeframe support (1s, 1m, 5m, 15m, 1h, 4h, 1d, 1w) with historical date range picker and improved data aggregation logic.
+
+**Changes:**
+
+**Backend:**
+1. **`backend/services/candle_service.py` (+85 lines)** — Major improvements:
+   - Added `normalize_interval()`: Normalize interval to lowercase (1M → 1m, "  1H  " → 1h)
+   - Added `interval_to_seconds()`: Convert interval string to seconds, returns 0 if invalid
+   - Added `interval_to_ms()`: Convert interval string to milliseconds
+   - Fixed `aggregate()` function (CRITICAL BUG FIX):
+     * Old behavior: Used input order for open/close (WRONG)
+     * New behavior: Sorts each bucket by timestamp, uses earliest for open, latest for close
+     * Handles out-of-order input correctly
+     * Deduplicates via `merge_unique()` first
+   - Enhanced `merge_unique()` with quality prioritization:
+     * Priority 1: Closed/final candle (is_closed flag)
+     * Priority 2: Higher volume (more complete data)
+     * Priority 3: If equal, prefer incoming (latest)
+   - Added `_is_better_candle()` helper for quality comparison
+
+2. **`backend/api/klines.py` (+30 lines)** — Enhanced enrichment logic:
+   - Improved `_enrich_with_live_ticker()` with staleness checking
+   - Now queries source interval (1m) to verify ticker freshness against sub-candle data
+   - Only enriches if ticker is fresher than BOTH latest candle AND latest sub-candle
+   - Prevents stale ticker from overwriting fresh data
+
+3. **`tests/unit/test_candle_service.py` (+150 lines)** — Comprehensive new tests (14 new tests):
+   - `TestNormalizeInterval`: 3 tests for lowercase/uppercase/whitespace normalization
+   - `TestIntervalToSeconds`: 3 tests for valid/uppercase/invalid intervals
+   - `TestIntervalToMs`: 2 tests for millisecond conversion
+   - `TestMergeUnique` enhancements:
+     * `test_overlap_prefers_closed_candle`: Closed wins over partial
+     * `test_overlap_prefers_higher_volume`: Higher volume wins if both partial
+     * `test_idempotent_replay`: Replaying same batch is idempotent
+     * `test_out_of_order_merge`: Out-of-order candles sorted correctly
+   - `TestAggregate` enhancements:
+     * `test_aggregate_out_of_order_input`: open/close based on timestamps, not input order
+     * `test_aggregate_duplicate_timestamps`: Dedup before aggregating
+     * `test_aggregate_1m_to_15m`: 1m → 15m aggregation (15 candles → 1 bar)
+     * `test_aggregate_1m_to_1h`: 1m → 1h aggregation (60 candles → 1 bar)
+     * `test_aggregate_multiple_buckets`: Creates multiple buckets correctly
+     * `test_aggregate_preserves_closed_flag_priority`: Respects merge_unique priority
+
+4. **`tests/integration/test_candle_idempotency.py` (NEW, 120 lines)** — Integration tests:
+   - `test_partial_vs_closed_candle_merge`: Prefer closed over partial
+   - `test_replay_idempotency`: Same batch replayed is idempotent
+   - `test_mixed_quality_candles`: Quality-based selection works
+   - `test_staleness_check_logic`: Staleness check prevents old ticker overwriting fresh data
+
+**Frontend:**
+1. **`frontend/src/services/marketDataService.ts` (+9 lines)** — Interval normalization:
+   - `fetchCandles()`: Normalize interval to lowercase before API call
+   - `subscribeCandle()`: Normalize interval for WebSocket connection
+   - `fetchHistoricalCandles()`: Normalize interval before sending to API
+   - Reason: UI uses uppercase (1H, 4H, 1D, 1W), backend expects lowercase (1h, 4h, 1d, 1w)
+
+2. **`frontend/src/components/CandlestickChart.tsx` (+145 lines)** — Historical mode implementation:
+   - Added state: `isLiveMode`, `historicalRange`, `unsubscribeRef`, `pollIntervalRef`, `historicalRequestIdRef`
+   - Added `handleHistoricalRange()`: Request handler for date range selection with request ID tracking
+   - Added `handleBackToLive()`: Return to live mode
+   - Enhanced `useEffect` for live mode: Properly manages WebSocket subscription and poll interval refs
+   - Added historical mode handler: Only refetch when symbol/timeframe changes in historical mode
+   - Enhanced timeframe buttons: Disable 1s in historical mode (not available in historical)
+   - Fixed 1s → 1m auto-switch when entering historical mode
+   - Request cancellation: Uses request ID to prevent race conditions (newer request invalidates older)
+
+**Infrastructure:**
+- `backfill_90days.log`: Log file from InfluxDB backfill process
+
+**Test Coverage:**
+| Category | Before | Added | Total |
+|---|---|---|---|
+| Unit | 40 | 14 | 54 |
+| Integration | 0 | 4 | 4 |
+| **Total** | **40** | **18** | **58** |
+
+**Key Bug Fixes:**
+1. **Aggregate function (CRITICAL)**: Now handles out-of-order input correctly
+   - Example: Input `[candle_120s, candle_0s, candle_60s]` now correctly uses open from 0s, close from 120s
+2. **Ticker enrichment staleness**: Prevents stale ticker from overwriting fresh candle data
+3. **Interval normalization**: Ensures frontend uppercase intervals (1H) work correctly with lowercase backend (1h)
+4. **Historical mode**: Added request ID tracking to prevent race conditions during mode switching
+
+**Technical Debt Addressed:**
+- Merge logic now respects data quality (closed > high volume > partial)
+- Aggregate logic is timestamp-based, not input-order-based
+- Interval handling is centralized and normalized
+- Historical mode doesn't block live mode data updates
+
+**Deferred (Future PRs):**
+- Physical materialization of 5m/15m/1h/4h/1d/1w in Flink/Spark (still uses aggregate fallback)
+- Iceberg MERGE/upsert for idempotent batch writes
+- Performance benchmarks for large historical ranges
+
+**Notes/Gotchas discovered:**
+- Aggregate function bug would only manifest with out-of-order 1m candles → higher intervals. Most queries work by coincidence if 1m candles arrive in order.
+- Request ID pattern prevents race conditions when switching between live/historical modes rapidly
+- Interval normalization must happen at both API request (frontend) and response parsing (backend)
+- Closed candle priority is essential for correctness when same timestamp appears in multiple sources
+
+**Impact:**
+- Backend: Fix for critical aggregation bug + new interval helpers
+- Frontend: Full historical mode with date range picker + interval normalization
+- Tests: 18 new tests covering multi-timeframe logic and data quality
+- Data correctness: All intervals (1s-1w) now supported end-to-end
+
 ### 2026-05-02 — Session 7: Comprehensive Test Suite
 
 **Task:** Implement the remaining tests across all 5 test categories (unit, integration, e2e, security, performance).
