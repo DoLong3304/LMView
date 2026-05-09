@@ -22,7 +22,7 @@ class TestAppStartup:
     @pytest.mark.asyncio
     async def test_app_has_routes(self):
         """Application has all expected route prefixes registered."""
-        route_paths = [route.path for route in app.routes]
+        route_paths = [route.path for route in app.routes if hasattr(route, "path")]
         expected_paths = [
             "/api/health",
             "/api/ticker/{symbol}",
