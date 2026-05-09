@@ -16,8 +16,8 @@
 7. [Lớp API (Backend)](#7-lớp-api-backend)
 8. [Lớp Frontend (React)](#8-lớp-frontend-react)
 9. [Chi tiết từng file source code](#9-chi-tiết-từng-file-source-code)
-10. [Kafka topics và Avro schemas](#10-kafka-topics-và-avro-schemas)
-11. [KeyDB — cấu trúc key và TTL](#11-keydb--cấu-trúc-key-và-ttl)
+10. [Kafka HA topics và Avro schemas](#10-kafka-topics-và-avro-schemas)
+11. [Redis Sentinel HA — cấu trúc key và TTL](#11-keydb--cấu-trúc-key-và-ttl)
 12. [InfluxDB — measurement và retention](#12-influxdb--measurement-và-retention)
 13. [Iceberg / MinIO — cold storage](#13-iceberg--minio--cold-storage)
 14. [Dagster — Orchestration & Scheduling](#14-dagster--orchestration--scheduling)
@@ -28,17 +28,17 @@
 
 ## 1. Tổng quan dự án
 
-**Lambda Architecture for TradingView-Style Platform** là một hệ thống real-time xử lý và hiển thị giá tiền điện tử, hoạt động hoàn toàn trên Docker (21 services theo `docker-compose.yml` hiện tại). Hệ thống theo dõi ~400 cặp USDT Spot từ Binance, xử lý dữ liệu theo kiến trúc Lambda gồm 3 lớp: **Speed layer** (Flink), **Batch layer** (Spark), **API layer** (FastAPI + KeyDB), và hiển thị qua dashboard TradingView-style (React + lightweight-charts).
+**Lambda Architecture for TradingView-Style Platform** là một hệ thống real-time xử lý và hiển thị giá tiền điện tử, hoạt động hoàn toàn trên Docker (21 services theo `docker-compose.yml` hiện tại). Hệ thống theo dõi ~400 cặp USDT Spot từ Binance, xử lý dữ liệu theo kiến trúc Lambda gồm 3 lớp: **Speed layer** (Flink), **Batch layer** (Spark), **API layer** (FastAPI + Redis Sentinel HA), và hiển thị qua dashboard TradingView-style (React + lightweight-charts).
 
 **Tech stack:**
 
 | Thành phần | Công nghệ | Phiên bản |
 |---|---|---|
-| Message broker | Apache Kafka (KRaft mode) | 3.9.0 |
+| Message broker | Apache Kafka HA (KRaft mode) | 3.9.0 |
 | Schema registry | Apicurio (Confluent-compatible) | 2.6.2 |
 | Stream processing | Apache Flink | 1.18.1 |
 | Batch processing | Apache Spark | 3.5 |
-| Hot cache | KeyDB (Redis-compatible) | latest |
+| Hot cache | Redis Sentinel HA (Redis-compatible) | latest |
 | Time-series DB | InfluxDB | 2.7 |
 | Cold storage | Apache Iceberg + MinIO | 1.5.2 + latest |
 | Federated query | Trino | 442 |
@@ -63,7 +63,7 @@ Kiến trúc Lambda chia dữ liệu xử lý thành 3 đường song song:
                          └──────────────────────────┬──────────────────────────────┘
                                                     │
                                             [src/producer/main.py]
-                                         Avro serialize → Kafka
+                                         Avro serialize → Kafka HA
                                                     │
                ┌────────────────────────────────────┼──────────────────────────────────┐
                │                                    │                                  │
@@ -96,7 +96,7 @@ Kiến trúc Lambda chia dữ liệu xử lý thành 3 đường song song:
                │
                ▼
          ┌────────────┐    ┌──────────┐    ┌──────────┐
-         │  KeyDB     │    │ InfluxDB │    │  Iceberg │
+         │  Redis Sentinel HA     │    │ InfluxDB │    │  Iceberg │
          │ (hot cache)│    │ (warm)   │    │ (cold)   │
          └─────┬──────┘    └────┬─────┘    └────┬─────┘
                │               │                │
@@ -116,9 +116,9 @@ Kiến trúc Lambda chia dữ liệu xử lý thành 3 đường song song:
 
 **Tại sao Lambda Architecture?**
 
-- **Speed layer** (Flink): Xử lý real-time với độ trễ < 2s, lưu vào KeyDB + InfluxDB
+- **Speed layer** (Flink): Xử lý real-time với độ trễ < 2s, lưu vào Redis Sentinel HA + InfluxDB
 - **Batch layer** (Spark): Xử lý lại chính xác dữ liệu lịch sử, lưu vào Iceberg (MinIO)
-- **API layer** (FastAPI): Merge 2 nguồn theo độ ưu tiên: KeyDB → InfluxDB → Trino/Iceberg
+- **API layer** (FastAPI): Merge 2 nguồn theo độ ưu tiên: Redis Sentinel HA → InfluxDB → Trino/Iceberg
 
 ---
 
@@ -129,14 +129,14 @@ Kiến trúc Lambda chia dữ liệu xử lý thành 3 đường song song:
 ```
 Binance WS (!ticker@arr, batch mỗi 14-30s)
   → src/producer/main.py → Avro serialize
-  → Kafka topic: crypto_ticker
+  → Kafka HA topic: crypto_ticker
   → Flink: KeyDBWriter / InfluxDBWriter
   → KeyDB: ticker:latest:{symbol} (hash)
   → InfluxDB: market_ticks measurement
 
 Binance WS (@kline_1s mỗi symbol, 1 message/giây)
   → src/producer/main.py → Avro serialize
-  → Kafka topic: crypto_klines (interval=1s)
+  → Kafka HA topic: crypto_klines (interval=1s)
   → Flink: KeyDBKlineWriter → candle:1s:{symbol} (sorted set, TTL 8h)
   → Flink: InfluxDBKlineWriter → InfluxDB candles (interval=1s)
   → Flink KlineWindowAggregator:
@@ -149,16 +149,16 @@ Binance WS (@kline_1s mỗi symbol, 1 message/giây)
   → Flink: InfluxDBKlineWriter → InfluxDB candles (interval=1m)
   → Flink: IndicatorWriter (chỉ is_closed=True)
        → SMA20, SMA50, EMA12, EMA26
-       → KeyDB indicator:latest:{symbol}
+       → Redis Sentinel HA indicator:latest:{symbol}
        → InfluxDB indicators measurement
 
 Binance WS (@aggTrade mỗi symbol)
-  → Kafka: crypto_trades
-  → Flink: TradeWriter → KeyDB trades:{symbol} (list, max 100)
+  → Kafka HA: crypto_trades
+  → Flink: TradeWriter → Redis Sentinel HA trades:{symbol} (list, max 100)
 
 Binance WS (@depth20@100ms mỗi symbol)
-  → Kafka: crypto_depth
-  → Flink: DepthWriter → KeyDB orderbook:{symbol} (hash)
+  → Kafka HA: crypto_depth
+  → Flink: DepthWriter → Redis Sentinel HA orderbook:{symbol} (hash)
 ```
 
 ### 3.2 Batch path (lịch sử)
@@ -186,7 +186,7 @@ Dagster schedule (weekly Sunday 03:00 UTC):
 GET /api/klines?symbol=BTCUSDT&interval=5m&limit=200
   → klines.py:
     1. Kiểm tra Redis cache klines_cache:{symbol}:{interval}:{limit} (100ms TTL)
-    2. Nếu miss: đọc KeyDB candle:1m (7 ngày gần nhất) qua ZRANGEBYSCORE
+    2. Nếu miss: đọc Redis Sentinel HA candle:1m (7 ngày gần nhất) qua ZRANGEBYSCORE
     3. Nếu không đủ limit: fallback InfluxDB range(start: -90d) → thêm data, dedup
     4. Client-side aggregate: 1m → 5m/15m/1h/4h/1d/1w (bucketing theo interval)
     5. Merge in-progress candle:
@@ -196,7 +196,7 @@ GET /api/klines?symbol=BTCUSDT&interval=5m&limit=200
 
 GET /api/klines?symbol=BTCUSDT&interval=5m&limit=200&endTime=1772965200000 (scroll-left)
   → klines.py:
-    - Bỏ qua cache và KeyDB (chỉ 7 ngày, không đủ cho scroll xa)
+    - Bỏ qua cache và Redis Sentinel HA (chỉ 7 ngày, không đủ cho scroll xa)
     - start_ms = endTime - limit * interval_seconds * 1000
     - Query InfluxDB: range(start: RFC3339_start, stop: RFC3339_end) (absolute range)
     - Aggregate 1m → 5m nếu cần
@@ -215,7 +215,7 @@ WS /api/stream?symbol=BTCUSDT&interval=1m
 
 ## 4. Lớp Data (Data Layer)
 
-### 4.1 Apache Kafka 3.9.0 (KRaft mode)
+### 4.1 Apache Kafka HA 3.9.0 (KRaft mode)
 
 - **Không cần Zookeeper** — KRaft built-in Raft consensus tự quản lý metadata
 - **Config quan trọng:** `KAFKA_NUM_PARTITIONS=3`, retention 48h, LZ4 compression
@@ -234,7 +234,7 @@ WS /api/stream?symbol=BTCUSDT&interval=1m
 - Flink consumer: `AvroDeserializer` dùng schema_id để lookup schema, deserialize message
 - **Port:** 8085 → internal 8080
 
-### 4.3 KeyDB (Redis-compatible hot cache)
+### 4.3 Redis Sentinel HA (Redis-compatible hot cache)
 
 High-performance fork của Redis hỗ trợ multi-threading và Server Assisted Client Caching.
 
@@ -291,10 +291,10 @@ Lưu metadata cho 2 mục đích:
 
 Job tạo ra **5 processing pipelines song song:**
 
-#### Pipeline 1 — Ticker → KeyDB + InfluxDB
+#### Pipeline 1 — Ticker → Redis Sentinel HA + InfluxDB
 
 ```
-Source: crypto_ticker (Kafka, Avro)
+Source: crypto_ticker (Kafka HA, Avro)
   ↓
 KeyDBWriter (MapFunction):
   - Buffer 100 messages, flush mỗi 0.5s
@@ -306,10 +306,10 @@ InfluxDBWriter (MapFunction):
   - Ghi market_ticks measurement
 ```
 
-#### Pipeline 2 — Raw 1s candles → KeyDB + InfluxDB
+#### Pipeline 2 — Raw 1s candles → Redis Sentinel HA + InfluxDB
 
 ```
-Source: crypto_klines (Kafka, Avro, filter: interval="1s")
+Source: crypto_klines (Kafka HA, Avro, filter: interval="1s")
   ↓
 KeyDBKlineWriter:
   - ZREMRANGEBYSCORE(key, ts, ts)  # dedup
@@ -323,7 +323,7 @@ InfluxDBKlineWriter:
 #### Pipeline 3 — 1s → 1m Window Aggregation
 
 ```
-Source: crypto_klines (Kafka, Avro, filter: interval="1s")
+Source: crypto_klines (Kafka HA, Avro, filter: interval="1s")
   ↓
 KlineWindowAggregator (KeyedProcessFunction, key=symbol):
   [State: MapState<kline_start_ms, candle_json>]
@@ -356,20 +356,20 @@ KeyDBKlineWriter  InfluxDBKlineWriter  IndicatorWriter
  candle:1m          candles(1m)          SMA/EMA
 ```
 
-#### Pipeline 4 — Depth → KeyDB
+#### Pipeline 4 — Depth → Redis Sentinel HA
 
 ```
-Source: crypto_depth (Kafka, Avro)
+Source: crypto_depth (Kafka HA, Avro)
   ↓
 DepthWriter (MapFunction):
   - Buffer 50, flush 0.3s
   - HSET orderbook:{symbol} bids (json) asks (json) ts last_update_id
 ```
 
-#### Pipeline 5 — Trades → KeyDB
+#### Pipeline 5 — Trades → Redis Sentinel HA
 
 ```
-Source: crypto_trades (Kafka, Avro)
+Source: crypto_trades (Kafka HA, Avro)
   ↓
 TradeWriter (MapFunction):
   - LPUSH trades:{symbol} json
@@ -394,7 +394,7 @@ Spark chỉ chạy khi được gọi bởi Dagster (không idle). Các jobs:
 --mode influx:
   Query InfluxDB tìm gap (khoảng thiếu dữ liệu)
   Fill gap từ Binance REST 1m API
-  Use case: máy tắt, Kafka consumer lag, Flink job crash
+  Use case: máy tắt, Kafka HA consumer lag, Flink job crash
 
 --mode iceberg:
   Gọi Spark job để ghi Iceberg (dùng Spark DataFrame API)
@@ -477,7 +477,7 @@ app.include_router(ticker.router)
 
 @app.get("/api/health")
 async def health():
-    # ping KeyDB + InfluxDB + Trino
+    # ping Redis Sentinel HA + InfluxDB + Trino
     # trả về {"status": "healthy", "services": {...}}
 ```
 
@@ -500,13 +500,13 @@ async def get_redis() -> aioredis.Redis:
 
 **Endpoint:** `GET /api/klines?symbol=&interval=&limit=&endTime=`
 
-**`_base_interval(interval)`** — quyết định resolution nào query từ KeyDB/InfluxDB:
+**`_base_interval(interval)`** — quyết định resolution nào query từ Redis Sentinel HA/InfluxDB:
 
 | Request interval | Query interval | Source |
 |---|---|---|
-| `1s` | `1s` | `candle:1s` (KeyDB) |
-| `1m` | `1m` | `candle:1m` (KeyDB) |
-| `5m`, `15m` | `1m` | `candle:1m` (KeyDB) → aggregate |
+| `1s` | `1s` | `candle:1s` (Redis Sentinel HA) |
+| `1m` | `1m` | `candle:1m` (Redis Sentinel HA) |
+| `5m`, `15m` | `1m` | `candle:1m` (Redis Sentinel HA) → aggregate |
 | `1h`, `4h` | `1m` | `candle:1m` → aggregate (hoặc `1h` nếu span dài) |
 | `1d`, `1w` | `1h` | InfluxDB 1h → aggregate |
 
@@ -617,14 +617,14 @@ elif interval in ("1m", "5m", ...):
 
 | Method | Endpoint | Source | Mô tả |
 |---|---|---|---|
-| GET | `/api/klines` | KeyDB → InfluxDB | OHLCV candles, hỗ trợ scroll-left qua `endTime` |
-| WS | `/api/stream` | KeyDB (real-time) | Live candle stream, 0.5s interval |
-| GET | `/api/ticker/{symbol}` | KeyDB `ticker:latest` | Price, bid, ask, 24h change |
-| GET | `/api/ticker` | KeyDB scan | Tất cả tickers |
-| GET | `/api/orderbook/{symbol}` | KeyDB `orderbook` | Top-20 bid/ask depth |
-| GET | `/api/trades/{symbol}` | KeyDB `trades` | 100 giao dịch gần nhất |
-| GET | `/api/symbols` | KeyDB scan | Danh sách tất cả symbols |
-| GET | `/api/indicators/{symbol}` | KeyDB `indicator:latest` | SMA20/50, EMA12/26 |
+| GET | `/api/klines` | Redis Sentinel HA → InfluxDB | OHLCV candles, hỗ trợ scroll-left qua `endTime` |
+| WS | `/api/stream` | Redis Sentinel HA (real-time) | Live candle stream, 0.5s interval |
+| GET | `/api/ticker/{symbol}` | Redis Sentinel HA `ticker:latest` | Price, bid, ask, 24h change |
+| GET | `/api/ticker` | Redis Sentinel HA scan | Tất cả tickers |
+| GET | `/api/orderbook/{symbol}` | Redis Sentinel HA `orderbook` | Top-20 bid/ask depth |
+| GET | `/api/trades/{symbol}` | Redis Sentinel HA `trades` | 100 giao dịch gần nhất |
+| GET | `/api/symbols` | Redis Sentinel HA scan | Danh sách tất cả symbols |
+| GET | `/api/indicators/{symbol}` | Redis Sentinel HA `indicator:latest` | SMA20/50, EMA12/26 |
 | GET | `/api/klines/historical` | Trino → Iceberg | Long-range date queries |
 | GET | `/api/health` | All backends | Health check |
 
@@ -808,12 +808,12 @@ onVisibleLogicalRangeChanged(range):
 | File | Dòng code | Chức năng chính |
 |---|---|---|
 | `src/processing/pipeline.py` | ~210 | Flink job entry point (writers split into modules) |
-| `src/producer/main.py` | ~260 | Binance WS → Kafka Avro producer |
+| `src/producer/main.py` | ~260 | Binance WS → Kafka HA Avro producer |
 | `src/lakehouse/pipeline.py` | ~220 | Spark Structured Streaming → Iceberg |
 | `src/batch/backfill.py` | ~510 | Multi-mode backfill script (Spark/direct) |
 | `src/batch/aggregate.py` | ~120 | Spark 1m→1h aggregation + retention |
 | `src/batch/maintenance.py` | ~130 | Iceberg compaction + snapshot expiry |
-| `src/common/` | - | Shared infrastructure (Kafka, Avro, config, logging) |
+| `src/common/` | - | Shared infrastructure (Kafka HA, Avro, config, logging) |
 | `src/exchanges/` | - | Exchange abstractions (Binance, etc.) |
 | `frontend/src/components/CandlestickChart.tsx` | ~1020 | Main chart component (TypeScript) |
 | `frontend/src/services/marketDataService.ts` | ~388 | API service layer |
@@ -838,7 +838,7 @@ onVisibleLogicalRangeChanged(range):
 
 ---
 
-## 10. Kafka topics và Avro schemas
+## 10. Kafka HA topics và Avro schemas
 
 ### `crypto_ticker` (`schemas/ticker.avsc`)
 
@@ -908,7 +908,7 @@ onVisibleLogicalRangeChanged(range):
 
 ---
 
-## 11. KeyDB — cấu trúc key và TTL
+## 11. Redis Sentinel HA — cấu trúc key và TTL
 
 | Key pattern | Type | TTL | Nội dung | Viết bởi |
 |---|---|---|---|---|
@@ -1131,8 +1131,8 @@ docker compose up -d --build producer
 | InfluxDB UI | 8086 | http://localhost:8086 |
 | MinIO Console | 9001 | http://localhost:9001 |
 | Schema Registry | 8085 | http://localhost:8085 |
-| KeyDB | 6379 | keydb:6379 (internal) |
-| Kafka | 9092 | kafka:9092 (internal) |
+| Redis Sentinel HA | 6379 | keydb:6379 (internal) |
+| Kafka HA | 9092 | kafka:9092 (internal) |
 | PostgreSQL | 5432 | postgres:5432 (internal) |
 
 ### Kiểm tra health
@@ -1144,7 +1144,7 @@ docker compose ps
 # Flink job đang chạy
 docker exec flink-jobmanager flink list
 
-# KeyDB
+# Redis Sentinel HA
 docker exec keydb keydb-cli ping  # PONG
 
 # InfluxDB (số candles BTCUSDT)
@@ -1165,7 +1165,7 @@ docker compose logs -f fastapi
 # Flink TaskManager real-time logs
 docker compose logs -f flink-taskmanager | grep -v "heartbeat"
 
-# Producer logs (confirm Kafka write)
+# Producer logs (confirm Kafka HA write)
 docker compose logs -f producer
 
 # Dagster run logs
@@ -1176,7 +1176,7 @@ docker compose logs -f producer
 
 ## 16. Các vấn đề đã gặp và cách sửa
 
-### Bug 1: KeyDB ZADD tạo duplicate entries (dedup ratio 5.8x)
+### Bug 1: Redis Sentinel HA ZADD tạo duplicate entries (dedup ratio 5.8x)
 
 **Vấn đề:** Cùng 1 `kline_start` ghi nhiều lần (vì Flink xử lý nhiều updates của cùng giây), `ZADD` với member khác nhau tạo nhiều entries trong sorted set.
 
@@ -1220,7 +1220,7 @@ def on_timer(self, timestamp, ctx, out):
 
 ### Bug 3: klines.py dedup giữ partial candle
 
-**Vấn đề:** Khi merge KeyDB (newer) và InfluxDB (older), cùng timestamp xuất hiện ở cả 2 → dedup giữ random → đôi khi giữ partial candle từ Flink (volume thấp) thay vì closed candle từ InfluxDB (volume đầy đủ).
+**Vấn đề:** Khi merge Redis Sentinel HA (newer) và InfluxDB (older), cùng timestamp xuất hiện ở cả 2 → dedup giữ random → đôi khi giữ partial candle từ Flink (volume thấp) thay vì closed candle từ InfluxDB (volume đầy đủ).
 
 **Sửa (`klines.py`):**
 ```python

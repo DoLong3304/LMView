@@ -21,11 +21,11 @@
 
 | Layer | Technology | Version |
 |---|---|---|
-| Message broker | Apache Kafka (KRaft) | 3.9.0 |
+| Message broker | Apache Kafka HA (KRaft) | 3.9.0 |
 | Schema registry | Apicurio | 2.6.2 |
 | Stream processing | Apache Flink (PyFlink) | 1.18.1 (Python 3.10.12) |
 | Batch processing | Apache Spark | 3.5 (Python 3.10) |
-| Hot cache | KeyDB | latest |
+| Hot cache | Redis Sentinel HA | latest |
 | Time-series DB | InfluxDB | 2.7 |
 | Cold storage | Iceberg + MinIO | 1.5.2 + latest |
 | Federated query | Trino | 442 |
@@ -46,7 +46,7 @@
 |---|---|---|
 | `src/processing/pipeline.py` | ~210 | Flink job entry point (writers are split into modules) |
 | `src/batch/backfill.py` | ~510 | Multi-mode backfill (Spark/direct) |
-| `src/producer/main.py` | ~260 | Exchange-agnostic WS → Kafka producer |
+| `src/producer/main.py` | ~260 | Exchange-agnostic WS → Kafka HA producer |
 | `frontend/src/components/CandlestickChart.tsx` | ~1020 | Main chart component (TypeScript) |
 | `frontend/src/services/marketDataService.ts` | ~388 | Frontend API service layer |
 | `backend/services/candle_service.py` | ~280 | Core OHLCV business logic (shared) |
@@ -75,9 +75,9 @@ project-root/
 │   └── models/                # Pydantic response models
 │       ├── candle.py, ticker.py, health.py
 ├── src/                       # Data processing layer
-│   ├── common/                # Shared config, Kafka, Avro, logging
+│   ├── common/                # Shared config, Kafka HA, Avro, logging
 │   ├── exchanges/             # Exchange abstraction (binance/ implementations)
-│   ├── producer/              # Kafka quad-stream producer
+│   ├── producer/              # Kafka HA quad-stream producer
 │   ├── processing/            # Flink pipeline and writers
 │   ├── lakehouse/             # Spark structured streaming to Iceberg
 │   └── batch/                 # Historical backfill and maintenance jobs
@@ -130,7 +130,7 @@ project-root/
    - Singleton connections in `backend/core/database.py`
    - Environment variables read from `backend/core/config.py`
    - Flux queries for InfluxDB, SQL for Trino
-   - Avro serialization for Kafka (Confluent wire format)
+   - Avro serialization for Kafka HA (Confluent wire format)
 2. **TypeScript (frontend):** Follow existing patterns:
    - React 19 functional components with hooks (`.tsx` extension, strict TypeScript)
    - Vite 6 for build tooling (`import.meta.env` for environment variables)
@@ -156,7 +156,7 @@ project-root/
 
 ### 2.4 Testing & Verification
 
-1. Before finalizing changes, verify the logic is consistent across layers (e.g., Flink writer → KeyDB key → FastAPI reader → Frontend consumer).
+1. Before finalizing changes, verify the logic is consistent across layers (e.g., Flink writer → Redis Sentinel HA key → FastAPI reader → Frontend consumer).
 2. If modifying API endpoints, ensure frontend `marketDataService.ts` is updated accordingly.
 3. If changing docker-compose, verify dependencies and health checks are correct.
 
@@ -164,7 +164,7 @@ project-root/
 
 1. **Time units:** lightweight-charts uses seconds, all backend APIs use milliseconds. Frontend converts: `openTime / 1000 → time`.
 2. **Timeframe casing:** Frontend uses uppercase `1H`, `4H`, `1D`, `1W` but `.toLowerCase()` before API calls.
-3. **KeyDB dedup:** Sorted sets deduplicate by `(score, member)` pair — always `ZREMRANGEBYSCORE` before `ZADD` for klines.
+3. **Redis Sentinel HA dedup:** Sorted sets deduplicate by `(score, member)` pair — always `ZREMRANGEBYSCORE` before `ZADD` for klines.
 4. **Ticker staleness:** `!ticker@arr` has 14–30s delay. Only use ticker to enrich candle close if `ticker.event_time > last_1s_candle.kline_start`.
 5. **WS vs Poll coordination:** WS is authoritative for live bar (1m+), poll should skip the last candle to avoid flicker.
 6. **InfluxDB scroll-left:** Must use absolute `range(start: RFC3339, stop: RFC3339)` for `endTime` queries, not relative `range(start: -Nh)`.
@@ -194,11 +194,11 @@ project-root/
 - Flink parallelism: 1
 - Flink TaskManager slots: 2
 - TaskManager memory: 6144m (cap 7168m)
-- KeyDB maxmemory: 2560mb
+- Redis Sentinel HA maxmemory: 2560mb
 - InfluxDB 1m retention: 90 days
-- KeyDB 1s TTL: 8h (28800s)
-- KeyDB 1m TTL: 7d (604800s)
-- Kafka retention: 48h
+- Redis Sentinel HA 1s TTL: 8h (28800s)
+- Redis Sentinel HA 1m TTL: 7d (604800s)
+- Kafka HA retention: 48h
 - Dagster schedules: daily 04:00 (aggregate), weekly Sunday 03:00 (iceberg maintenance)
 - HTTPS: Let's Encrypt via certbot + DuckDNS dynamic DNS
 
@@ -252,6 +252,28 @@ dist/assets/index-*.js          471.79 kB │ gzip: 146.62 kB
 ## 4. Changelog
 
 All changes made by AI assistant, in reverse chronological order.
+
+### 2026-05-09 — Session 9: High Availability Architecture Migration
+
+**Task:** Inspect the system and update the documentation to reflect the migration from a standalone KeyDB instance to a Redis Sentinel HA cluster, and from a single Kafka node to a Kafka HA KRaft cluster.
+
+**Changes:**
+1. **Infrastructure Analysis:**
+   - **Kafka HA:** Inspected `docker-compose.yml` to confirm the deployment of 3 Kafka KRaft brokers (`kafka-1`, `kafka-2`, `kafka-3`) with replication factor 3.
+   - **Redis Sentinel HA:** Confirmed the replacement of KeyDB with a Redis cluster consisting of 1 Master, 2 Replicas, and 3 Sentinel nodes.
+2. **Backend Code Analysis:**
+   - Verified the `RedisSentinelManager` implementation in `backend/core/redis_sentinel.py` handling auto-discovery, failover, and read/write splitting (writes to master, reads to replica).
+3. **Documentation Update:**
+   - Updated all text references of `KeyDB` to `Redis Sentinel HA` in `TRACKING.md`, `DOCUMENTATION.md`, and `README.md`.
+   - Updated all text references of `Kafka` to `Kafka HA` across the documentation.
+   - Intentionally preserved legacy class names (`KeyDBWriter`), filenames (`keydb_ticker.py`), and system dependencies (`kafka-python`) to ensure alignment with existing codebase structure.
+
+**Notes/Gotchas discovered:**
+- The PyFlink writers are still named using the `keydb_` prefix (e.g., `keydb_ticker.py`, `KeyDBKlineWriter`), even though the underlying connection configuration (`REDIS_SENTINELS`) has been updated to point to the new Sentinel cluster.
+- `src/common/config.py` still contains a default `REDIS_HOST = "keydb"`, though it is overridden by the HA environment variables.
+
+**Impact:**
+- Docs: Updated architecture documentation to accurately describe the new HA layers without breaking existing code references.
 
 ### 2026-05-05 — Session 8: Multi-Timeframe Candles & Historical Mode
 
@@ -408,7 +430,7 @@ All changes made by AI assistant, in reverse chronological order.
 **Changes:**
 1. **Producer Image Rebuild & Python Downgrade** — The `producer` container failed to start due to a stale code reference (`src/producer_binance.py`). During the rebuild, compilation of `fastavro` failed under `python:3.14-slim`. Downgraded the `producer` Dockerfile to `python:3.11-slim` to ensure C-extension compatibility.
 2. **Nginx Port Conflict** — `dagster-webserver` and `nginx` both attempted to bind to host port `3000`. Removed the `3000:80` mapping for `nginx` in `docker-compose.override.yml`, as Nginx already serves frontend/API traffic correctly on port `80`.
-3. **Binance WebSocket Timeout** — The Flink job was missing the `crypto_ticker` Kafka topic because the `!ticker@arr` stream silently timed out. Switched the `WS_TICKER_URL` to `!miniTicker@arr` in `src/exchanges/binance/client.py`, which is lighter and reliably connects.
+3. **Binance WebSocket Timeout** — The Flink job was missing the `crypto_ticker` Kafka HA topic because the `!ticker@arr` stream silently timed out. Switched the `WS_TICKER_URL` to `!miniTicker@arr` in `src/exchanges/binance/client.py`, which is lighter and reliably connects.
 4. **Flink Dependency Distribution** — The Flink job crashed with `ModuleNotFoundError: No module named 'processing'`. Updated `scripts/auto_submit_jobs.sh` to correctly pass `--pyFiles /app/src` so the Flink TaskManagers have access to the local Python modules.
 
 **Notes/Gotchas discovered:**
@@ -417,7 +439,7 @@ All changes made by AI assistant, in reverse chronological order.
 - Binance `!ticker@arr` stream might time out or be rate-limited depending on payload size/region; `!miniTicker@arr` is a safer alternative.
 
 **Impact:**
-- Infrastructure: Restored stability across producer, Flink, and frontend networking. Data correctly flows into KeyDB and InfluxDB again.
+- Infrastructure: Restored stability across producer, Flink, and frontend networking. Data correctly flows into Redis Sentinel HA and InfluxDB again.
 
 ### 2026-04-28 — Session 5: Frontend TypeScript Migration
 

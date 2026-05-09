@@ -4,12 +4,12 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi)](backend/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](frontend/)
 [![Apache Flink](https://img.shields.io/badge/Apache_Flink-1.18.1-E6522C?logo=apacheflink)](src/processing/)
-[![Apache Kafka](https://img.shields.io/badge/Apache_Kafka-3.9.0-231F20?logo=apachekafka)](docker-compose.yml)
+[![Apache Kafka HA](https://img.shields.io/badge/Apache_Kafka-3.9.0-231F20?logo=apachekafka)](docker-compose.yml)
 
 Dự án streaming giá crypto real-time từ Binance WebSocket, xử lý bằng Flink + Spark theo kiến trúc **Lambda** (speed layer + batch layer), phục vụ qua FastAPI + React dashboard.
 
-- **Speed layer** (Flink): Kafka → KeyDB + InfluxDB — phục vụ dashboard real-time, cache, time-series chart
-- **Batch layer** (Spark): Kafka → Iceberg trên MinIO — lưu trữ dài hạn, phân tích lịch sử
+- **Speed layer** (Flink): Kafka HA → Redis Sentinel HA + InfluxDB — phục vụ dashboard real-time, cache, time-series chart
+- **Batch layer** (Spark): Kafka HA → Iceberg trên MinIO — lưu trữ dài hạn, phân tích lịch sử
 - **Query**: Trino SQL trực tiếp lên Iceberg
 - **Orchestration**: Dagster tự động chạy backfill, aggregation, maintenance
 - **Serving layer**: FastAPI (REST + WebSocket) → Nginx reverse proxy → React SPA
@@ -44,7 +44,7 @@ cp .env.example .env
 # 1. Build & start toàn bộ 21 services
 docker compose up -d --build
 
-# 2. Submit Flink streaming job (6 writer: ticker/kline/indicator/depth → KeyDB + InfluxDB)
+# 2. Submit Flink streaming job (6 writer: ticker/kline/indicator/depth → Redis Sentinel HA + InfluxDB)
 docker exec flink-jobmanager flink run -d -py /app/src/processing/pipeline.py --pyFiles /app/src
 
 # 3. Submit Spark streaming job (3 query: ticker/trades/klines → Iceberg)
@@ -81,8 +81,8 @@ docker exec spark-master /opt/spark/bin/spark-submit \
 | Spark History        | http://localhost:18080 | —                    | —                        |
 | Trino UI             | http://localhost:8083  | (any)                | —                        |
 | Dagster UI           | http://localhost:3000  | —                    | —                        |
-| KeyDB                | localhost:6379         | —                    | —                        |
-| Kafka                | localhost:9092         | —                    | —                        |
+| Redis Sentinel HA                | localhost:6379         | —                    | —                        |
+| Kafka HA                | localhost:9092         | —                    | —                        |
 | **Nginx (Frontend)** | http://localhost:80    | —                    | —                        |
 | **FastAPI**          | http://localhost:8080  | —                    | —                        |
 
@@ -95,13 +95,13 @@ cryptoprice_local/
 ├── .env.example                    # Template — copy sang .env rồi sửa
 ├── spark-defaults.conf             # Spark config
 ├── src/
-│   ├── producer/main.py            # [Auto] Binance WS → Kafka
-│   ├── processing/pipeline.py      # [Manual] Flink: Kafka → KeyDB + InfluxDB
-│   ├── lakehouse/pipeline.py       # [Manual] Spark Streaming: Kafka → Iceberg
+│   ├── producer/main.py            # [Auto] Binance WS → Kafka HA
+│   ├── processing/pipeline.py      # [Manual] Flink: Kafka HA → Redis Sentinel HA + InfluxDB
+│   ├── lakehouse/pipeline.py       # [Manual] Spark Streaming: Kafka HA → Iceberg
 │   ├── batch/backfill.py           # [Manual] Backfill InfluxDB + Iceberg
 │   ├── batch/aggregate.py          # [Dagster 04:00] Gộp nến 1m → 1h
 │   ├── batch/maintenance.py        # [Dagster CN 03:00] Compact/expire Iceberg
-│   ├── common/                     # Shared infrastructure (Kafka, Avro, config, logging)
+│   ├── common/                     # Shared infrastructure (Kafka HA, Avro, config, logging)
 │   └── exchanges/                  # Exchange abstractions (Binance, etc.)
 ├── backend/                        # FastAPI serving layer (MVC Architecture)
 │   ├── app.py                      # App + lifespan + CORS + health check
@@ -109,7 +109,7 @@ cryptoprice_local/
 │   ├── models/                     # Pydantic schemas
 │   ├── services/                   # Business logic (candle_service)
 │   └── api/                        # Route handlers
-│       ├── klines.py               # GET /api/klines — nến OHLCV (KeyDB + InfluxDB)
+│       ├── klines.py               # GET /api/klines — nến OHLCV (Redis Sentinel HA + InfluxDB)
 │       ├── historical.py           # GET /api/klines/historical — nến lịch sử (Trino/Iceberg)
 │       ├── ticker.py               # GET /api/ticker + /api/ticker/{symbol}
 │       ├── orderbook.py            # GET /api/orderbook/{symbol}
@@ -142,22 +142,22 @@ cryptoprice_local/
 
 ### `src/producer/main.py` — Quad-Stream Producer
 
-Tự chạy khi `docker compose up`. Kết nối **7 WebSocket** tới Binance cho **400 symbols USDT**, đẩy vào 4 Kafka topics:
+Tự chạy khi `docker compose up`. Kết nối **7 WebSocket** tới Binance cho **400 symbols USDT**, đẩy vào 4 Kafka HA topics:
 
-| Stream | Kafka Topic     | Dữ liệu                                           | Tần suất                |
+| Stream | Kafka HA Topic     | Dữ liệu                                           | Tần suất                |
 | :----- | :-------------- | :------------------------------------------------ | :---------------------- |
 | Ticker | `crypto_ticker` | Giá, bid/ask, volume 24h, % thay đổi              | ~2s/symbol              |
 | Trades | `crypto_trades` | Giao dịch aggregated (price, qty, buyer/seller)   | Real-time               |
 | Klines | `crypto_klines` | Nến OHLCV 1 giây (open, high, low, close, volume) | Mỗi giây + khi đóng nến |
 | Depth  | `crypto_depth`  | Order book 20 levels bid/ask                      | 100ms                   |
 
-Kafka: 3 partitions/topic, LZ4 compression, 48h retention.
+Kafka HA: 3 partitions/topic, LZ4 compression, 48h retention.
 
 Giới hạn 200 symbols/connection để tránh bị Binance rate-limit (502). Tự reconnect khi mất kết nối.
 
 ### `src/processing/pipeline.py` — Flink Streaming Job
 
-Submit thủ công 1 lần, chạy liên tục. Đọc từ 3 Kafka topics, chạy **6 writer song song**:
+Submit thủ công 1 lần, chạy liên tục. Đọc từ 3 Kafka HA topics, chạy **6 writer song song**:
 
 | Writer                | Input                  | Output                                                 | Chức năng                                                                 |
 | :-------------------- | :--------------------- | :----------------------------------------------------- | :------------------------------------------------------------------------ |
@@ -165,14 +165,14 @@ Submit thủ công 1 lần, chạy liên tục. Đọc từ 3 Kafka topics, ch�
 | `InfluxDBWriter`      | crypto_ticker          | `market_ticks` measurement                             | Time-series giá cho Grafana/chart                                         |
 | `KeyDBKlineWriter`    | crypto_klines          | `candle:1s:{symbol}` + `candle:1m:{symbol}` + `candle:latest:{symbol}` | Cache nến real-time (1s/1m) theo TTL                                      |
 | `InfluxDBKlineWriter` | crypto_klines          | `candles` measurement                                  | Time-series nến OHLCV                                                     |
-| `IndicatorWriter`     | crypto_klines (closed) | `indicator:latest:{symbol}` + `indicators` measurement | Tính SMA20, SMA50, EMA12, EMA26 từ giá đóng nến. Ghi cả KeyDB và InfluxDB |
+| `IndicatorWriter`     | crypto_klines (closed) | `indicator:latest:{symbol}` + `indicators` measurement | Tính SMA20, SMA50, EMA12, EMA26 từ giá đóng nến. Ghi cả Redis Sentinel HA và InfluxDB |
 | `DepthWriter`         | crypto_depth           | `orderbook:{symbol}`                                   | Top 20 bid/ask + best_bid/ask + spread. TTL 60s                           |
 
 ### `src/lakehouse/pipeline.py` — Spark Streaming to Iceberg
 
-Submit thủ công 1 lần, chạy liên tục. Đọc 3 Kafka topics, ghi vào **3 bảng Iceberg** trên MinIO:
+Submit thủ công 1 lần, chạy liên tục. Đọc 3 Kafka HA topics, ghi vào **3 bảng Iceberg** trên MinIO:
 
-| Query        | Kafka Topic   | Iceberg Table | Ghi chú                          |
+| Query        | Kafka HA Topic   | Iceberg Table | Ghi chú                          |
 | :----------- | :------------ | :------------ | :------------------------------- |
 | ticker_query | crypto_ticker | `coin_ticker` | ~1M rows/giờ                     |
 | trades_query | crypto_trades | `coin_trades` | ~2M rows/giờ                     |
@@ -230,16 +230,16 @@ Cung cấp REST API + WebSocket cho frontend. Kết nối 3 data source tuỳ th
 
 | Router          | Endpoint              | Data Source                  | Chức năng                                    |
 | :-------------- | :-------------------- | :--------------------------- | :------------------------------------------- |
-| `klines.py`     | `GET /api/klines`     | KeyDB (`1s`) → InfluxDB (`1m+`) → Trino/Iceberg (deep history) | Nến OHLCV + aggregate server-side |
+| `klines.py`     | `GET /api/klines`     | Redis Sentinel HA (`1s`) → InfluxDB (`1m+`) → Trino/Iceberg (deep history) | Nến OHLCV + aggregate server-side |
 | `historical.py` | `GET /api/klines/historical` | InfluxDB + Trino → Iceberg | Nến lịch sử theo khoảng ngày (tối đa 1 năm) |
-| `ticker.py`     | `GET /api/ticker`, `GET /api/ticker/{symbol}` | KeyDB | Giá real-time (all symbols hoặc theo symbol) |
-| `orderbook.py`  | `GET /api/orderbook/{symbol}` | KeyDB (+ fallback Binance REST) | Sổ lệnh 20 levels bid/ask |
-| `trades.py`     | `GET /api/trades/{symbol}` | KeyDB                        | Tick history gần nhất                        |
-| `symbols.py`    | `GET /api/symbols`    | KeyDB scan                   | Danh sách coin đang có dữ liệu               |
-| `indicators.py` | `GET /api/indicators/{symbol}` | KeyDB                  | SMA20, SMA50, EMA12, EMA26                   |
-| `websocket.py`  | `WS /api/stream?symbol=&interval=` | KeyDB              | Streaming nến real-time (500ms interval)     |
+| `ticker.py`     | `GET /api/ticker`, `GET /api/ticker/{symbol}` | Redis Sentinel HA | Giá real-time (all symbols hoặc theo symbol) |
+| `orderbook.py`  | `GET /api/orderbook/{symbol}` | Redis Sentinel HA (+ fallback Binance REST) | Sổ lệnh 20 levels bid/ask |
+| `trades.py`     | `GET /api/trades/{symbol}` | Redis Sentinel HA                        | Tick history gần nhất                        |
+| `symbols.py`    | `GET /api/symbols`    | Redis Sentinel HA scan                   | Danh sách coin đang có dữ liệu               |
+| `indicators.py` | `GET /api/indicators/{symbol}` | Redis Sentinel HA                  | SMA20, SMA50, EMA12, EMA26                   |
+| `websocket.py`  | `WS /api/stream?symbol=&interval=` | Redis Sentinel HA              | Streaming nến real-time (500ms interval)     |
 
-Health check: `GET /api/health` — ping KeyDB, InfluxDB, Trino.
+Health check: `GET /api/health` — ping Redis Sentinel HA, InfluxDB, Trino.
 
 ### `frontend/` — React Dashboard
 
@@ -267,7 +267,7 @@ Các file legacy đã được loại bỏ khỏi `src/` trong hiện trạng re
 
 | Database            | Vai trò         | Dữ liệu                   | Key/Measurement                                                           |
 | :------------------ | :-------------- | :------------------------ | :------------------------------------------------------------------------ |
-| **KeyDB**           | Cache real-time | 400 symbols               | `ticker:latest:*`, `candle:1s:*`, `candle:1m:*`, `candle:latest:*`, `indicator:latest:*`, `orderbook:*` |
+| **Redis Sentinel HA**           | Cache real-time | 400 symbols               | `ticker:latest:*`, `candle:1s:*`, `candle:1m:*`, `candle:latest:*`, `indicator:latest:*`, `orderbook:*` |
 | **InfluxDB**        | Time-series     | 1m candles (retention 90d), indicators, market ticks | `market_ticks`, `candles`, `indicators`                                   |
 | **Iceberg** (MinIO) | Data lake       | Lưu trữ dài hạn           | `coin_ticker`, `coin_trades`, `coin_klines`, `coin_klines_hourly`         |
 | **Trino**           | SQL query       | Query Iceberg             | `iceberg.crypto_lakehouse.*`                                              |
@@ -313,7 +313,7 @@ docker exec keydb redis-cli HGETALL "indicator:latest:BTCUSDT"
 docker exec keydb redis-cli HKEYS "orderbook:BTCUSDT"
 docker exec trino trino --execute "SELECT count(*) FROM iceberg.crypto_lakehouse.coin_ticker"
 
-# Kafka topics
+# Kafka HA topics
 docker exec kafka /opt/kafka/bin/kafka-topics.sh --list --bootstrap-server kafka:9092
 
 # Serving layer
