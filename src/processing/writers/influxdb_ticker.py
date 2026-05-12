@@ -56,10 +56,13 @@ class InfluxDBWriter(FlatMapFunction):
         try:
             if isinstance(value, (str, bytes)):
                 value = json.loads(value)
+
+            exchange = value.get("exchange", "binance")
+
             point = (
                 Point("market_ticks")
                 .tag("symbol",   value["symbol"])
-                .tag("exchange", "binance")
+                .tag("exchange", exchange)
                 .field("price",             float(value.get("close", 0)))
                 .field("bid",               float(value.get("bid", 0)))
                 .field("ask",               float(value.get("ask", 0)))

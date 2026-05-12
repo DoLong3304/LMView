@@ -5,3 +5,4 @@ influxdb-client==1.46.0
 trino==0.330.0
 pydantic==2.10.4
 httpx==0.28.1
+prometheus-fastapi-instrumentator==6.1.0

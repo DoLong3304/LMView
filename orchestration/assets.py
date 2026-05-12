@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -26,6 +27,9 @@ SPARK_PACKAGES = ",".join([
     "org.apache.hadoop:hadoop-aws:3.3.4",
     "org.postgresql:postgresql:42.7.2",
 ])
+
+# Add project src to Python path for news modules
+sys.path.insert(0, str(PROJECT_DIR / "src"))
 
 def _run_spark_job(context: AssetExecutionContext, script_name: str, extra_args: Optional[List[str]] = None) -> None:
     logger = get_dagster_logger()
@@ -138,14 +142,93 @@ schedule_daily_aggregate = ScheduleDefinition(
     description="Runs daily at 04:00 AM to aggregate 1m candles into 1h and clean up old 1m data.",
 )
 
+@asset(
+    description="Scrapes crypto news from CryptoPanic and publishes sentiment analysis to Kafka"
+)
+def news_sentiment_pipeline(context: AssetExecutionContext) -> None:
+    """Fetch news, analyze sentiment, and publish to Kafka.
+
+    Runs every 5 minutes via schedule_news_sentiment.
+    """
+    logger = get_dagster_logger()
+
+    try:
+        from news.scraper import NewsScraper
+        from news.sentiment_analyzer import SentimentAnalyzer
+        from common.kafka_client import init_producer, send_to_kafka, flush_and_close
+        from common.avro_serializer import AvroSerializer
+        from common.config import SCHEMA_REGISTRY_URL
+        import time
+
+        logger.info("Starting news sentiment pipeline...")
+
+        # Initialize components
+        scraper = NewsScraper()
+        analyzer = SentimentAnalyzer()
+
+        # Initialize Kafka producer
+        init_producer()
+        avro_serializer = AvroSerializer(SCHEMA_REGISTRY_URL)
+        schema_path = PROJECT_DIR / "schemas" / "news.avsc"
+        avro_serializer.register("crypto_news_sentiment", str(schema_path))
+
+        # Fetch latest news
+        news_items = scraper.fetch_latest(
+            currencies=["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "MATIC", "DOT", "AVAX"],
+            limit=20,
+            filter_type="hot"
+        )
+
+        logger.info(f"Fetched {len(news_items)} news items")
+
+        # Process each news item
+        published_count = 0
+        for item in news_items:
+            try:
+                # Analyze sentiment
+                title = item.get("title", "")
+                sentiment_score = analyzer.analyze(title)
+
+                # Format for Kafka
+                record = scraper.format_for_kafka(item, sentiment_score)
+
+                # Publish to Kafka
+                send_to_kafka("crypto_news_sentiment", record, avro_serializer)
+                published_count += 1
+
+                logger.info(
+                    f"Published: {title[:60]}... | sentiment={sentiment_score:.3f} | symbols={record['symbols']}"
+                )
+
+            except Exception as e:
+                logger.error(f"Failed to process news item: {e}")
+                continue
+
+        # Flush Kafka producer
+        flush_and_close()
+
+        logger.info(f"News sentiment pipeline completed. Published {published_count}/{len(news_items)} items.")
+
+    except Exception as e:
+        logger.error(f"News sentiment pipeline failed: {e}")
+        raise
+
+
 defs = Definitions(
     assets=[
         backfill_historical,
         aggregate_candles,
         iceberg_table_maintenance,
+        news_sentiment_pipeline,
     ],
     schedules=[
         schedule_weekly_maintenance,
         schedule_daily_aggregate,
+        ScheduleDefinition(
+            name="schedule_news_sentiment",
+            target=news_sentiment_pipeline,
+            cron_schedule="*/5 * * * *",  # Every 5 minutes
+            execution_timezone="UTC",
+        ),
     ],
 )

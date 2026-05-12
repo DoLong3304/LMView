@@ -11,7 +11,8 @@ RUN python3 -m ensurepip --upgrade 2>/dev/null || true && \
         dagster-webserver==1.8.* \
         dagster-postgres \
         requests \
-        pyarrow && \
+        pyarrow \
+        vaderSentiment==3.3.2 && \
     # Downgrade grpcio-health-checking to a version compatible with protobuf 4.x \
     pip3 install --no-cache-dir --force-reinstall \
         "grpcio-health-checking>=1.44.0,<1.62.0"

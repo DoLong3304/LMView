@@ -22,9 +22,9 @@ log = logging.getLogger(__name__)
 class KeyDBKlineWriter(FlatMapFunction):
     """Writes kline candles to Redis Sentinel with interval-specific TTL.
 
-    - ``candle:1s:{symbol}`` → TTL KEYDB_1S_RETENTION_DAYS
-    - ``candle:1m:{symbol}`` → TTL KEYDB_1M_RETENTION_DAYS
-    - ``candle:latest:{symbol}`` → latest candle info (1m+ only)
+    - ``candle:1s:{exchange}:{symbol}`` → TTL KEYDB_1S_RETENTION_DAYS
+    - ``candle:1m:{exchange}:{symbol}`` → TTL KEYDB_1M_RETENTION_DAYS
+    - ``candle:latest:{exchange}:{symbol}`` → latest candle info (1m+ only)
     """
 
     TTL_1S = max(KEYDB_1S_RETENTION_DAYS, 1) * 86_400
@@ -54,6 +54,7 @@ class KeyDBKlineWriter(FlatMapFunction):
             pipe = self._r.pipeline()
             for item in self._buffer:
                 symbol = item["symbol"]
+                exchange = item["exchange"]
                 interval = item["interval"]
                 kline_start = item["kline_start"]
                 candle_json = item["candle_json"]
@@ -65,10 +66,12 @@ class KeyDBKlineWriter(FlatMapFunction):
                 pipe.expire(history_key, ttl_sec)
 
                 if interval != "1s":
-                    pipe.hset(f"candle:latest:{symbol}", mapping=item["latest_mapping"])
+                    latest_key = f"candle:latest:{exchange}:{symbol}"
+                    pipe.hset(latest_key, mapping=item["latest_mapping"])
 
-                count = self._write_count.get(symbol, 0) + 1
-                self._write_count[symbol] = count
+                count_key = f"{exchange}:{symbol}"
+                count = self._write_count.get(count_key, 0) + 1
+                self._write_count[count_key] = count
                 if count % self.CLEANUP_EVERY == 0:
                     cutoff = kline_start - (ttl_sec * 1000)
                     pipe.zremrangebyscore(history_key, 0, cutoff)
@@ -88,6 +91,7 @@ class KeyDBKlineWriter(FlatMapFunction):
             symbol = value.get("symbol")
             if not symbol:
                 return []
+            exchange = value.get("exchange", "binance")
             interval = value.get("interval", "1m")
             if interval not in ("1s", "1m"):
                 return []
@@ -105,15 +109,17 @@ class KeyDBKlineWriter(FlatMapFunction):
                 "x": bool(value["is_closed"]),
             })
 
+            # New key format includes exchange
             if interval == "1s":
-                history_key = f"candle:1s:{symbol}"
+                history_key = f"candle:1s:{exchange}:{symbol}"
                 ttl_sec = self.TTL_1S
             else:
-                history_key = f"candle:1m:{symbol}"
+                history_key = f"candle:1m:{exchange}:{symbol}"
                 ttl_sec = self.TTL_1M
 
             self._buffer.append({
                 "symbol": symbol,
+                "exchange": exchange,
                 "interval": interval,
                 "kline_start": kline_start,
                 "candle_json": candle_json,
@@ -130,6 +136,7 @@ class KeyDBKlineWriter(FlatMapFunction):
                     "is_closed":    int(value["is_closed"]),
                     "kline_start":  kline_start,
                     "interval":     interval,
+                    "exchange":     exchange,
                 },
             })
 

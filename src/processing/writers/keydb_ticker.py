@@ -45,11 +45,15 @@ class KeyDBWriter(FlatMapFunction):
             pipe = self._r.pipeline()
             for value in self._buffer:
                 symbol = value["symbol"]
+                exchange = value["exchange"]
                 event_time = value["event_time"]
                 price = value["price"]
                 volume = value["volume"]
+
+                # New key format: ticker:latest:{exchange}:{symbol}
+                key = f"ticker:latest:{exchange}:{symbol}"
                 pipe.hset(
-                    f"ticker:latest:{symbol}",
+                    key,
                     mapping={
                         "price":      price,
                         "bid":        value["bid"],
@@ -57,16 +61,21 @@ class KeyDBWriter(FlatMapFunction):
                         "volume":     volume,
                         "change24h":  value["change24h"],
                         "event_time": event_time,
+                        "exchange":   exchange,
                     },
                 )
-                pipe.zadd(f"ticker:history:{symbol}", {f"{price}:{volume}": event_time})
-                pipe.expire(f"ticker:history:{symbol}", self.TICKER_HISTORY_TTL_SEC)
 
-                count = self._write_count.get(symbol, 0) + 1
-                self._write_count[symbol] = count
+                # History key also includes exchange
+                history_key = f"ticker:history:{exchange}:{symbol}"
+                pipe.zadd(history_key, {f"{price}:{volume}": event_time})
+                pipe.expire(history_key, self.TICKER_HISTORY_TTL_SEC)
+
+                count_key = f"{exchange}:{symbol}"
+                count = self._write_count.get(count_key, 0) + 1
+                self._write_count[count_key] = count
                 if count % self.CLEANUP_EVERY == 0:
                     cutoff = event_time - 300_000
-                    pipe.zremrangebyscore(f"ticker:history:{symbol}", 0, cutoff)
+                    pipe.zremrangebyscore(history_key, 0, cutoff)
             pipe.execute()
         except Exception as e:
             log.error("[KeyDB] flush error (dropped %d records): %s",
@@ -84,6 +93,7 @@ class KeyDBWriter(FlatMapFunction):
                 return []
             self._buffer.append({
                 "symbol":     symbol,
+                "exchange":   value.get("exchange", "binance"),
                 "event_time": int(value.get("event_time", 0)),
                 "price":      float(value.get("close", 0)),
                 "bid":        float(value.get("bid", 0)),

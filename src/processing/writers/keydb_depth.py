@@ -16,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 class DepthWriter(FlatMapFunction):
-    """Writes order-book snapshots to ``orderbook:{symbol}`` hashes in Redis Sentinel."""
+    """Writes order-book snapshots to ``orderbook:{exchange}:{symbol}`` hashes in Redis Sentinel."""
 
     BATCH_SIZE = 50
     FLUSH_INTERVAL = 0.3
@@ -41,20 +41,25 @@ class DepthWriter(FlatMapFunction):
             pipe = self._r.pipeline()
             for rec in self._buffer:
                 symbol = rec["symbol"]
+                exchange = rec["exchange"]
                 bids = rec["bids"]
                 asks = rec["asks"]
-                pipe.hset(f"orderbook:{symbol}", mapping={
+
+                # New key format: orderbook:{exchange}:{symbol}
+                key = f"orderbook:{exchange}:{symbol}"
+                pipe.hset(key, mapping={
                     "bids":           json.dumps(bids),
                     "asks":           json.dumps(asks),
                     "last_update_id": rec["last_update_id"],
                     "event_time":     rec["event_time"],
+                    "exchange":       exchange,
                     "bid_depth":      len(bids),
                     "ask_depth":      len(asks),
                     "best_bid":       float(bids[0][0]) if bids else 0,
                     "best_ask":       float(asks[0][0]) if asks else 0,
                     "spread":         round(float(asks[0][0]) - float(bids[0][0]), 8) if bids and asks else 0,
                 })
-                pipe.expire(f"orderbook:{symbol}", 300)
+                pipe.expire(key, 300)
             pipe.execute()
         except Exception as e:
             log.error("[Depth] flush error (dropped %d records): %s",
@@ -74,6 +79,7 @@ class DepthWriter(FlatMapFunction):
 
             self._buffer.append({
                 "symbol":         symbol,
+                "exchange":       value.get("exchange", "binance"),
                 "bids":           value.get("bids", []),
                 "asks":           value.get("asks", []),
                 "last_update_id": int(value.get("last_update_id", 0)),

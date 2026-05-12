@@ -61,10 +61,12 @@ class InfluxDBKlineWriter(FlatMapFunction):
             if value.get("interval") != "1m" or not bool(value.get("is_closed", False)):
                 return []
 
+            exchange = value.get("exchange", "binance")
+
             point = (
                 Point("candles")
                 .tag("symbol",   value["symbol"])
-                .tag("exchange", "binance")
+                .tag("exchange", exchange)
                 .tag("interval", value.get("interval", "1m"))
                 .field("open",         float(value["open"]))
                 .field("high",         float(value["high"]))

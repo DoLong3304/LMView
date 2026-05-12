@@ -88,6 +88,7 @@ def run():
         CREATE TABLE kafka_ticker (
             event_time             BIGINT,
             symbol                 STRING,
+            exchange               STRING,
             `close`                DOUBLE,
             bid                    DOUBLE,
             ask                    DOUBLE,
@@ -108,7 +109,7 @@ def run():
 
     table = t_env.sql_query("""
         SELECT
-            event_time, symbol, `close`, bid, ask,
+            event_time, symbol, exchange, `close`, bid, ask,
             h24_volume, h24_quote_volume, h24_price_change_pct, h24_trade_count
         FROM kafka_ticker
     """)
@@ -118,13 +119,14 @@ def run():
         return json.dumps({
             "event_time":           row[0],
             "symbol":               row[1],
-            "close":                row[2],
-            "bid":                  row[3],
-            "ask":                  row[4],
-            "h24_volume":           row[5],
-            "h24_quote_volume":     row[6],
-            "h24_price_change_pct": row[7],
-            "h24_trade_count":      row[8],
+            "exchange":             row[2],
+            "close":                row[3],
+            "bid":                  row[4],
+            "ask":                  row[5],
+            "h24_volume":           row[6],
+            "h24_quote_volume":     row[7],
+            "h24_price_change_pct": row[8],
+            "h24_trade_count":      row[9],
         })
 
     ds_dict = ds_row.map(row_to_dict, output_type=Types.STRING())
@@ -139,6 +141,7 @@ def run():
         CREATE TABLE kafka_klines (
             event_time   BIGINT,
             symbol       STRING,
+            exchange     STRING,
             kline_start  BIGINT,
             kline_close  BIGINT,
             `interval`   STRING,
@@ -163,7 +166,7 @@ def run():
 
     kline_table = t_env.sql_query("""
         SELECT
-            event_time, symbol, kline_start, kline_close, `interval`,
+            event_time, symbol, exchange, kline_start, kline_close, `interval`,
             `open`, high, low, `close`, volume, quote_volume, trade_count, is_closed
         FROM kafka_klines
     """)
@@ -172,12 +175,12 @@ def run():
     def kline_row_to_dict(row):
         return json.dumps({
             "event_time":   row[0],  "symbol":       row[1],
-            "kline_start":  row[2],  "kline_close":  row[3],
-            "interval":     row[4],  "open":         row[5],
-            "high":         row[6],  "low":          row[7],
-            "close":        row[8],  "volume":       row[9],
-            "quote_volume": row[10], "trade_count":  row[11],
-            "is_closed":    row[12],
+            "exchange":     row[2],  "kline_start":  row[3],
+            "kline_close":  row[4],  "interval":     row[5],
+            "open":         row[6],  "high":         row[7],
+            "low":          row[8],  "close":        row[9],
+            "volume":       row[10], "quote_volume": row[11],
+            "trade_count":  row[12], "is_closed":    row[13],
         })
 
     ds_kline_dict = ds_kline_row.map(kline_row_to_dict, output_type=Types.STRING())
@@ -216,6 +219,7 @@ def run():
         CREATE TABLE kafka_depth (
             event_time     BIGINT,
             symbol         STRING,
+            exchange       STRING,
             last_update_id BIGINT,
             bids           STRING,
             asks           STRING
