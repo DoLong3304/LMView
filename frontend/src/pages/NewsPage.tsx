@@ -1,31 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  Typography,
-  Grid,
-  Chip,
-  Avatar,
-  Box,
-  TextField,
-  Select,
-  MenuItem,
-  FormControl,
-  InputLabel,
-  CircularProgress,
-  Link,
-  Divider,
-  Tab,
-  Tabs
-} from '@mui/material';
-import {
   TrendingUp,
   TrendingDown,
-  AccessTime,
-  Language,
-  Search as SearchIcon
-} from '@mui/icons-material';
+  Clock,
+  Search,
+  ExternalLink,
+  Flame
+} from 'lucide-react';
 
 interface NewsArticle {
   id: string;
@@ -58,7 +39,7 @@ const NewsPage: React.FC = () => {
   const [selectedSource, setSelectedSource] = useState('all');
   const [selectedSymbol, setSelectedSymbol] = useState('all');
   const [timeRange, setTimeRange] = useState(24);
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState('latest');
 
   // Fetch news data
   useEffect(() => {
@@ -129,14 +110,14 @@ const NewsPage: React.FC = () => {
   };
 
   const getSentimentColor = (score: number) => {
-    if (score > 0.05) return '#4caf50'; // Green
-    if (score < -0.05) return '#f44336'; // Red
-    return '#9e9e9e'; // Gray
+    if (score > 0.05) return 'text-green-400 bg-green-400/10 border-green-400/20';
+    if (score < -0.05) return 'text-red-400 bg-red-400/10 border-red-400/20';
+    return 'text-gray-400 bg-gray-400/10 border-gray-400/20';
   };
 
   const getSentimentIcon = (score: number) => {
-    if (score > 0.05) return <TrendingUp />;
-    if (score < -0.05) return <TrendingDown />;
+    if (score > 0.05) return <TrendingUp size={14} className="mr-1" />;
+    if (score < -0.05) return <TrendingDown size={14} className="mr-1" />;
     return null;
   };
 
@@ -158,267 +139,263 @@ const NewsPage: React.FC = () => {
   const symbols = ['all', 'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'MATIC', 'DOT', 'AVAX'];
 
   return (
-    <Box sx={{ p: 3 }}>
+    <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto text-gray-100">
       {/* Header */}
-      <Typography variant="h4" gutterBottom>
-        📰 Crypto News Feed
-      </Typography>
-      <Typography variant="body2" color="text.secondary" gutterBottom>
-        Real-time news from 12+ sources • Updated every 5 minutes
-      </Typography>
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold mb-2 flex items-center">
+          <span className="mr-3 text-2xl">📰</span> Crypto News Feed
+        </h1>
+        <p className="text-sm text-gray-400">
+          Real-time news from 12+ sources • Updated every 5 minutes
+        </p>
+      </div>
 
       {/* Filters */}
-      <Card sx={{ mb: 3, mt: 2 }}>
-        <CardContent>
-          <Grid container spacing={2} alignItems="center">
-            <Grid item xs={12} md={4}>
-              <TextField
-                fullWidth
-                placeholder="Search news..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                InputProps={{
-                  startAdornment: <SearchIcon sx={{ mr: 1, color: 'text.secondary' }} />
-                }}
-              />
-            </Grid>
+      <div className="bg-gray-800/60 backdrop-blur-md rounded-xl border border-gray-700 p-4 mb-6 shadow-lg shadow-black/20">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+          <div className="md:col-span-4 relative">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search size={16} className="text-gray-500" />
+            </div>
+            <input
+              type="text"
+              placeholder="Search news..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              className="w-full bg-gray-900 border border-gray-700 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block pl-10 p-2.5 text-white placeholder-gray-400 transition-colors"
+            />
+          </div>
 
-            <Grid item xs={12} md={2}>
-              <FormControl fullWidth>
-                <InputLabel>Source</InputLabel>
-                <Select
-                  value={selectedSource}
-                  onChange={(e) => setSelectedSource(e.target.value)}
-                  label="Source"
-                >
-                  {sources.map(source => (
-                    <MenuItem key={source} value={source}>
-                      {source === 'all' ? 'All Sources' : source}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
+          <div className="md:col-span-2">
+            <select
+              value={selectedSource}
+              onChange={(e) => setSelectedSource(e.target.value)}
+              className="bg-gray-900 border border-gray-700 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 outline-none transition-colors"
+            >
+              {sources.map(source => (
+                <option key={source} value={source}>
+                  {source === 'all' ? 'All Sources' : source}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <Grid item xs={12} md={2}>
-              <FormControl fullWidth>
-                <InputLabel>Symbol</InputLabel>
-                <Select
-                  value={selectedSymbol}
-                  onChange={(e) => setSelectedSymbol(e.target.value)}
-                  label="Symbol"
-                >
-                  {symbols.map(symbol => (
-                    <MenuItem key={symbol} value={symbol}>
-                      {symbol === 'all' ? 'All Symbols' : symbol}
-                    </MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Grid>
+          <div className="md:col-span-2">
+            <select
+              value={selectedSymbol}
+              onChange={(e) => setSelectedSymbol(e.target.value)}
+              className="bg-gray-900 border border-gray-700 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 outline-none transition-colors"
+            >
+              {symbols.map(symbol => (
+                <option key={symbol} value={symbol}>
+                  {symbol === 'all' ? 'All Symbols' : symbol}
+                </option>
+              ))}
+            </select>
+          </div>
 
-            <Grid item xs={12} md={2}>
-              <FormControl fullWidth>
-                <InputLabel>Time Range</InputLabel>
-                <Select
-                  value={timeRange}
-                  onChange={(e) => setTimeRange(Number(e.target.value))}
-                  label="Time Range"
-                >
-                  <MenuItem value={1}>Last Hour</MenuItem>
-                  <MenuItem value={6}>Last 6 Hours</MenuItem>
-                  <MenuItem value={24}>Last 24 Hours</MenuItem>
-                  <MenuItem value={72}>Last 3 Days</MenuItem>
-                  <MenuItem value={168}>Last Week</MenuItem>
-                </Select>
-              </FormControl>
-            </Grid>
+          <div className="md:col-span-2">
+            <select
+              value={timeRange}
+              onChange={(e) => setTimeRange(Number(e.target.value))}
+              className="bg-gray-900 border border-gray-700 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 outline-none transition-colors"
+            >
+              <option value={1}>Last Hour</option>
+              <option value={6}>Last 6 Hours</option>
+              <option value={24}>Last 24 Hours</option>
+              <option value={72}>Last 3 Days</option>
+              <option value={168}>Last Week</option>
+            </select>
+          </div>
 
-            <Grid item xs={12} md={2}>
-              <Typography variant="body2" color="text.secondary">
-                {articles.length} articles
-              </Typography>
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
+          <div className="md:col-span-2 text-right">
+            <span className="text-sm font-medium text-gray-400 bg-gray-900 px-3 py-1.5 rounded-full border border-gray-700 inline-block">
+              {articles.length} articles
+            </span>
+          </div>
+        </div>
+      </div>
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onChange={(_, v) => setActiveTab(v)} sx={{ mb: 2 }}>
-        <Tab label="Latest News" />
-        <Tab label="Trending" />
-      </Tabs>
-
-      <Grid container spacing={3}>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main Content */}
-        <Grid item xs={12} md={8}>
-          {loading ? (
-            <Box display="flex" justifyContent="center" p={5}>
-              <CircularProgress />
-            </Box>
-          ) : (
-            <Box>
-              {articles.map((article) => (
-                <Card key={article.id} sx={{ mb: 2 }}>
-                  <CardContent>
-                    <Grid container spacing={2}>
-                      {/* Image */}
-                      {article.image_url && (
-                        <Grid item xs={12} md={3}>
-                          <img
-                            src={article.image_url}
-                            alt={article.title}
-                            style={{ width: '100%', borderRadius: 8 }}
-                            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                          />
-                        </Grid>
-                      )}
+        <div className="lg:col-span-2">
+          {/* Tabs */}
+          <div className="flex space-x-1 border-b border-gray-700 mb-6">
+            <button
+              onClick={() => setActiveTab('latest')}
+              className={`py-2 px-4 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'latest'
+                  ? 'border-blue-500 text-blue-400'
+                  : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'
+              }`}
+            >
+              Latest News
+            </button>
+            <button
+              onClick={() => setActiveTab('trending')}
+              className={`py-2 px-4 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'trending'
+                  ? 'border-blue-500 text-blue-400'
+                  : 'border-transparent text-gray-400 hover:text-gray-300 hover:border-gray-600'
+              }`}
+            >
+              Trending
+            </button>
+          </div>
 
-                      {/* Content */}
-                      <Grid item xs={12} md={article.image_url ? 9 : 12}>
+          {loading ? (
+            <div className="flex justify-center items-center py-20">
+              <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {articles.map((article) => (
+                <div key={article.id} className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden hover:border-gray-600 transition-colors shadow-lg shadow-black/10">
+                  <div className="flex flex-col md:flex-row">
+                    {/* Image */}
+                    {article.image_url && (
+                      <div className="md:w-1/3 xl:w-1/4 relative overflow-hidden bg-gray-900 group">
+                        <img
+                          src={article.image_url}
+                          alt={article.title}
+                          className="w-full h-full object-cover min-h-[160px] md:min-h-full transition-transform duration-500 group-hover:scale-105"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      </div>
+                    )}
+
+                    {/* Content */}
+                    <div className="p-5 flex-1 flex flex-col justify-between">
+                      <div>
                         {/* Source & Time */}
-                        <Box display="flex" alignItems="center" mb={1}>
-                          <Chip
-                            label={article.source}
-                            size="small"
-                            sx={{ mr: 1 }}
-                          />
-                          <Typography variant="caption" color="text.secondary" display="flex" alignItems="center">
-                            <AccessTime sx={{ fontSize: 14, mr: 0.5 }} />
+                        <div className="flex items-center mb-3 text-xs">
+                          <span className="bg-blue-900/40 text-blue-300 border border-blue-800/50 px-2 py-0.5 rounded-md font-medium mr-3">
+                            {article.source}
+                          </span>
+                          <span className="flex items-center text-gray-400">
+                            <Clock size={12} className="mr-1" />
                             {formatTimeAgo(article.published_at)}
-                          </Typography>
-                        </Box>
+                          </span>
+                        </div>
 
                         {/* Title */}
-                        <Link
+                        <a
                           href={article.url}
                           target="_blank"
                           rel="noopener noreferrer"
-                          underline="hover"
-                          color="inherit"
+                          className="group"
                         >
-                          <Typography variant="h6" gutterBottom>
+                          <h3 className="text-lg font-bold mb-2 text-gray-100 group-hover:text-blue-400 transition-colors flex items-start">
                             {article.title}
-                          </Typography>
-                        </Link>
+                            <ExternalLink size={14} className="ml-1.5 mt-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                          </h3>
+                        </a>
 
                         {/* Summary */}
-                        <Typography variant="body2" color="text.secondary" paragraph>
+                        <p className="text-sm text-gray-400 mb-4 line-clamp-2">
                           {article.summary}
-                        </Typography>
+                        </p>
+                      </div>
 
-                        {/* Metadata */}
-                        <Box display="flex" flexWrap="wrap" gap={1} alignItems="center">
-                          {/* Sentiment */}
-                          <Chip
-                            icon={getSentimentIcon(article.sentiment_score) || undefined}
-                            label={`Sentiment: ${article.sentiment_score.toFixed(2)}`}
-                            size="small"
-                            sx={{
-                              backgroundColor: getSentimentColor(article.sentiment_score),
-                              color: 'white'
-                            }}
-                          />
+                      {/* Metadata */}
+                      <div className="flex flex-wrap gap-2 items-center mt-auto">
+                        {/* Sentiment */}
+                        <span className={`flex items-center text-xs px-2 py-1 rounded-md border ${getSentimentColor(article.sentiment_score)}`}>
+                          {getSentimentIcon(article.sentiment_score)}
+                          Sentiment: {article.sentiment_score.toFixed(2)}
+                        </span>
 
-                          {/* Symbols */}
-                          {article.symbols.map(symbol => (
-                            <Chip
-                              key={symbol}
-                              label={symbol}
-                              size="small"
-                              variant="outlined"
-                            />
-                          ))}
+                        {/* Symbols */}
+                        {article.symbols.map(symbol => (
+                          <span key={symbol} className="text-xs font-mono font-medium px-2 py-1 rounded-md border border-gray-700 bg-gray-800/50 text-gray-300">
+                            {symbol}
+                          </span>
+                        ))}
 
-                          {/* Tags */}
-                          {article.tags.slice(0, 3).map(tag => (
-                            <Chip
-                              key={tag}
-                              label={tag}
-                              size="small"
-                              variant="outlined"
-                              sx={{ opacity: 0.7 }}
-                            />
-                          ))}
-                        </Box>
-                      </Grid>
-                    </Grid>
-                  </CardContent>
-                </Card>
+                        {/* Tags */}
+                        {article.tags.slice(0, 3).map(tag => (
+                          <span key={tag} className="text-xs px-2 py-1 rounded-md border border-gray-700/50 bg-gray-900/50 text-gray-500 lowercase">
+                            #{tag}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
               ))}
 
               {articles.length === 0 && !loading && (
-                <Card>
-                  <CardContent>
-                    <Typography variant="body1" color="text.secondary" align="center">
-                      No articles found. Try adjusting your filters.
-                    </Typography>
-                  </CardContent>
-                </Card>
+                <div className="bg-gray-800/50 border border-gray-700 border-dashed rounded-xl p-10 text-center">
+                  <p className="text-gray-400">No articles found. Try adjusting your filters.</p>
+                </div>
               )}
-            </Box>
+            </div>
           )}
-        </Grid>
+        </div>
 
         {/* Sidebar */}
-        <Grid item xs={12} md={4}>
+        <div className="space-y-6">
           {/* Trending Symbols */}
-          <Card sx={{ mb: 2 }}>
-            <CardHeader title="🔥 Trending Symbols" />
-            <Divider />
-            <CardContent>
+          <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg shadow-black/10">
+            <div className="px-5 py-4 border-b border-gray-700 bg-gray-800/80">
+              <h2 className="font-bold flex items-center text-lg">
+                <Flame size={18} className="text-orange-500 mr-2" /> Trending Symbols
+              </h2>
+            </div>
+            <div className="p-2">
               {trendingSymbols.map((item, index) => (
-                <Box key={item.symbol} mb={2}>
-                  <Box display="flex" justifyContent="space-between" alignItems="center">
-                    <Box display="flex" alignItems="center">
-                      <Typography variant="h6" sx={{ mr: 1 }}>
-                        #{index + 1}
-                      </Typography>
-                      <Chip label={item.symbol} />
-                    </Box>
-                    <Box textAlign="right">
-                      <Typography variant="body2" color="text.secondary">
-                        {item.mention_count} mentions
-                      </Typography>
-                      <Typography
-                        variant="body2"
-                        sx={{ color: getSentimentColor(item.avg_sentiment) }}
-                      >
-                        {item.avg_sentiment > 0 ? '+' : ''}{item.avg_sentiment.toFixed(2)}
-                      </Typography>
-                    </Box>
-                  </Box>
-                  {index < trendingSymbols.length - 1 && <Divider sx={{ mt: 2 }} />}
-                </Box>
+                <div key={item.symbol} className="flex justify-between items-center p-3 hover:bg-gray-700/50 rounded-lg transition-colors">
+                  <div className="flex items-center">
+                    <span className="w-6 text-center text-sm font-bold text-gray-500 mr-2">
+                      {index + 1}
+                    </span>
+                    <span className="font-mono font-bold bg-gray-900 border border-gray-700 px-2 py-0.5 rounded text-sm text-gray-200">
+                      {item.symbol}
+                    </span>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs text-gray-400 mb-0.5">
+                      {item.mention_count} mentions
+                    </div>
+                    <div className={`text-xs font-medium ${item.avg_sentiment > 0 ? 'text-green-400' : item.avg_sentiment < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                      {item.avg_sentiment > 0 ? '+' : ''}{item.avg_sentiment.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
               ))}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {/* Sources */}
-          <Card>
-            <CardHeader title="📡 News Sources" />
-            <Divider />
-            <CardContent>
-              <Typography variant="body2" color="text.secondary" paragraph>
+          <div className="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden shadow-lg shadow-black/10">
+            <div className="px-5 py-4 border-b border-gray-700 bg-gray-800/80">
+              <h2 className="font-bold text-lg">📡 News Sources</h2>
+            </div>
+            <div className="p-5">
+              <p className="text-sm text-gray-400 mb-4">
                 Aggregating news from 12 major crypto publications:
-              </Typography>
-              <Box display="flex" flexWrap="wrap" gap={1}>
+              </p>
+              <div className="flex flex-wrap gap-2">
                 {sources.filter(s => s !== 'all').map(source => (
-                  <Chip
+                  <button
                     key={source}
-                    label={source}
-                    size="small"
                     onClick={() => setSelectedSource(source)}
-                    color={selectedSource === source ? 'primary' : 'default'}
-                  />
+                    className={`text-xs px-2.5 py-1.5 rounded-md border transition-colors ${
+                      selectedSource === source
+                        ? 'bg-blue-600 border-blue-500 text-white'
+                        : 'bg-gray-900 border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-500'
+                    }`}
+                  >
+                    {source}
+                  </button>
                 ))}
-              </Box>
-            </CardContent>
-          </Card>
-        </Grid>
-      </Grid>
-    </Box>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 

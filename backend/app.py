@@ -6,7 +6,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from prometheus_fastapi_instrumentator import Instrumentator
 
 from backend.core.config import CORS_ORIGINS
 from backend.core.database import close_all
@@ -20,6 +19,8 @@ from backend.api import (
     symbols,
     indicators,
     websocket,
+    market,
+    news,
 )
 
 
@@ -39,8 +40,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Prometheus metrics instrumentation
-Instrumentator().instrument(app).expose(app)
+# Prometheus metrics instrumentation (optional — requires prometheus-fastapi-instrumentator)
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+    Instrumentator().instrument(app).expose(app)
+except ImportError:
+    pass
 
 for router_module in (
     health,
@@ -52,5 +57,7 @@ for router_module in (
     symbols,
     indicators,
     websocket,
+    market,
+    news,
 ):
     app.include_router(router_module.router)

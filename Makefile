@@ -8,7 +8,7 @@
 .PHONY: core
 core: ## Start ONLY core services (17GB RAM) - Default for daily dev
 	@echo "🚀 Starting CORE services (17GB RAM)..."
-	docker compose -f docker-compose.core.yml up -d
+	docker compose up -d
 	@echo "✅ Core services started!"
 	@echo "   Frontend: http://localhost"
 	@echo "   FastAPI:  http://localhost:8080"
@@ -17,7 +17,7 @@ core: ## Start ONLY core services (17GB RAM) - Default for daily dev
 .PHONY: monitoring
 monitoring: core ## Start core + monitoring stack (18GB RAM) - For performance monitoring
 	@echo "📊 Starting MONITORING stack (18GB RAM total)..."
-	docker compose -f docker-compose.monitoring.yml up -d
+	docker compose --profile monitoring up -d
 	@echo "✅ Monitoring started!"
 	@echo "   Grafana:    http://localhost:3001 (admin/admin)"
 	@echo "   Prometheus: http://localhost:9090"
@@ -25,7 +25,7 @@ monitoring: core ## Start core + monitoring stack (18GB RAM) - For performance m
 .PHONY: logs
 logs: monitoring ## Start core + monitoring + logs (18.8GB RAM) - For debugging
 	@echo "📝 Starting LOGGING stack (18.8GB RAM total)..."
-	docker compose -f docker-compose.elk.yml up -d
+	docker compose --profile monitoring --profile logging up -d
 	@echo "✅ Logging started!"
 	@echo "   Loki API: http://localhost:3100"
 	@echo "   Logs in Grafana: http://localhost:3001 → Centralized Logs dashboard"
@@ -36,19 +36,19 @@ full: logs ## Start ALL services (alias for 'logs')
 .PHONY: stop-logs
 stop-logs: ## Stop logging stack
 	@echo "🛑 Stopping LOGGING stack..."
-	docker compose -f docker-compose.elk.yml down
+	docker compose --profile logging stop loki promtail
 	@echo "✅ Logging stopped"
 
 .PHONY: stop-monitoring
 stop-monitoring: ## Stop monitoring stack
 	@echo "🛑 Stopping MONITORING stack..."
-	docker compose -f docker-compose.monitoring.yml down
+	docker compose --profile monitoring stop prometheus grafana kafka-exporter node-exporter
 	@echo "✅ Monitoring stopped"
 
 .PHONY: stop-core
 stop-core: ## Stop core services
 	@echo "🛑 Stopping CORE services..."
-	docker compose -f docker-compose.core.yml down
+	docker compose down
 	@echo "✅ Core stopped"
 
 .PHONY: stop-all
@@ -57,7 +57,7 @@ stop-all: stop-logs stop-monitoring stop-core ## Stop ALL services
 .PHONY: restart-core
 restart-core: ## Restart core services
 	@echo "🔄 Restarting CORE services..."
-	docker compose -f docker-compose.core.yml restart
+	docker compose restart
 	@echo "✅ Core restarted"
 
 # ─── Development (Legacy - uses old docker-compose.yml) ──────────────────────
