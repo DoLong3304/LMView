@@ -122,10 +122,11 @@ async def _fetch_1m_plus_candles(
     r, symbol: str, interval: str, target_sec: int, limit: int,
     end_time: int | None, now_ms: int, influx_cutoff_ms: int,
 ) -> list[dict]:
-    """Fetch 1m+ candles from InfluxDB with Trino fallback."""
+    """Fetch 1m+ candles from KeyDB → InfluxDB → Trino fallback."""
     candles: list[dict] = []
 
     if end_time is not None:
+        # Historical scroll-left: skip KeyDB (only 7 days), go straight to InfluxDB/Trino
         backfilled = await asyncio.to_thread(
             collect_base_1m_candles,
             symbol, target_sec, limit, end_time, now_ms, influx_cutoff_ms,
@@ -133,13 +134,21 @@ async def _fetch_1m_plus_candles(
         )
         candles = merge_unique(candles, backfilled)
     else:
+        # Live mode: Read from KeyDB first (speed layer, 7 days retention)
         raw_needed = min((limit * max(target_sec // 60, 1)) + 2, MAX_RAW_CANDLES)
-        live_limit = min(max(raw_needed, limit), LIVE_MAX_BASE_ROWS)
-        live_range_h = min(max((live_limit * 60) // 3600 + 2, 1), INFLUX_1M_RETENTION_DAYS * 24)
-        live_rows = await asyncio.to_thread(
-            query_influx_candles, symbol, "1m", live_limit, live_range_h, None,
-        )
-        candles = merge_unique(candles, live_rows)
+
+        # Step 1: Try KeyDB candle:1m (fastest, 7 days)
+        keydb_candles = await _fetch_keydb_1m(r, symbol, raw_needed, now_ms)
+        candles = merge_unique(candles, keydb_candles)
+
+        # Step 2: If not enough, fallback to InfluxDB (90 days)
+        if len(candles) < limit:
+            live_limit = min(max(raw_needed, limit), LIVE_MAX_BASE_ROWS)
+            live_range_h = min(max((live_limit * 60) // 3600 + 2, 1), INFLUX_1M_RETENTION_DAYS * 24)
+            live_rows = await asyncio.to_thread(
+                query_influx_candles, symbol, "1m", live_limit, live_range_h, None,
+            )
+            candles = merge_unique(candles, live_rows)
 
     # Fallback to legacy hourly for 1h+ when 1m data is sparse
     if end_time is not None and interval in ("1h", "4h", "1d", "1w"):
@@ -151,6 +160,37 @@ async def _fetch_1m_plus_candles(
             )
             candles = merge_unique(candles, hourly_rows)
 
+    return candles
+
+
+async def _fetch_keydb_1m(r, symbol: str, limit: int, now_ms: int) -> list[dict]:
+    """Fetch 1-minute candles from KeyDB (speed layer, 7 days retention)."""
+    # KeyDB stores last 7 days of 1m candles
+    lookback_ms = min(limit * 60 * 1000, 7 * 24 * 3600 * 1000)  # Max 7 days
+    score_min = now_ms - lookback_ms
+    score_max = "+inf"
+
+    raw = await r.zrangebyscore(f"candle:1m:{symbol}", score_min, score_max)
+    if not raw:
+        # Fallback: get last N candles regardless of time
+        raw = await r.zrevrange(f"candle:1m:{symbol}", 0, limit - 1)
+
+    best_by_time: dict[int, dict] = {}
+    for item in raw if raw else []:
+        c = json.loads(item)
+        t = int(c["t"])
+        if t not in best_by_time or c["v"] > best_by_time[t]["v"]:
+            best_by_time[t] = c
+
+    candles = []
+    for t, c in best_by_time.items():
+        candles.append({
+            "openTime": t,
+            "open": c["o"], "high": c["h"],
+            "low": c["l"], "close": c["c"],
+            "volume": c["v"],
+        })
+    candles.sort(key=lambda x: x["openTime"])
     return candles
 
 

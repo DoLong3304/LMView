@@ -5,6 +5,7 @@
   "fields": [
     {"name": "event_time",     "type": "long"},
     {"name": "symbol",         "type": "string"},
+    {"name": "exchange",       "type": "string", "default": "binance"},
     {"name": "agg_trade_id",   "type": "long"},
     {"name": "price",          "type": "double"},
     {"name": "quantity",       "type": "double"},

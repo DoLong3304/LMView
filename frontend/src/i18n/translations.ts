@@ -35,18 +35,50 @@ const translations = {
 
     // Drawing tools
     basic: "Basic",
+    trendTools: "Trend Tools",
+    shapes: "Shapes",
+    fibonacci: "Fibonacci",
+    annotation: "Annotation",
+    measure: "Measure",
     patterns: "Patterns",
+    utility: "Utility",
     delete: "Delete",
     cursor: "Cursor",
+    crosshair: "Crosshair",
     ruler: "Ruler",
     trendline: "Trendline",
+    ray: "Ray",
+    extendedLine: "Extended Line",
     horizontalLine: "Horizontal Line",
+    verticalLine: "Vertical Line",
     rectangle: "Rectangle",
-    fibonacci: "Fibonacci Retracement",
+    arrow: "Arrow",
+    fibRetracement: "Fibonacci Retracement",
     textNotes: "Text / Notes",
     elliottWave: "Elliott Wave",
     harmonicABCD: "Harmonic ABCD",
+    magnet: "Magnet Mode",
+    lockAll: "Lock All",
+    hideAll: "Hide All",
     clearAll: "Clear All",
+    eraser: "Eraser",
+    deleteDrawing: "Delete Drawing",
+    clearAllDrawings: "Clear All Drawings",
+    confirmClearDrawings: "Are you sure you want to delete all drawings?",
+    drawingDeleted: "Drawing deleted",
+    noDrawingSelected: "No drawing selected",
+    deleteSelected: "Delete Selected",
+    chartSaved: "Chart saved",
+    undo: "Undo",
+    redo: "Redo",
+    copy: "Copy",
+    cut: "Cut",
+    paste: "Paste",
+    selectAll: "Select All",
+    save: "Save",
+    style: "Style",
+    lock: "Lock",
+    hide: "Hide",
 
     // Tool settings
     lineWidth: "Line Width",
@@ -130,7 +162,6 @@ const translations = {
     of: "of",
     pointProgress: "Point {n} / {total} — ESC to cancel",
     toCancel: "to cancel",
-    enterNote: "Enter note...",
 
     // Error handling & status
     loading: "Loading…",
@@ -156,6 +187,26 @@ const translations = {
     historical: "Historical",
     history: "History",
     live: "Live",
+
+    // Zoom controls
+    zoomIn: "Zoom In",
+    zoomOut: "Zoom Out",
+    resetZoom: "Reset Zoom",
+
+    // Drawing context toolbar
+    addText: "Add Text",
+    addAlert: "Add Alert",
+    changeColor: "Change Color",
+    enterNote: "Enter note...",
+    cancel: "Cancel",
+
+    // Replay Mode
+    replayMode: "Replay Mode",
+    play: "Play",
+    pause: "Pause",
+    stepForward: "Step Forward",
+    exitReplay: "Exit Replay",
+    selectReplayStart: "Click on a candle to start replay from that point",
 
     // System health
     systemDiagnostics: "System diagnostics",
@@ -212,18 +263,50 @@ const translations = {
 
     // Drawing tools
     basic: "Cơ bản",
+    trendTools: "Công cụ xu hướng",
+    shapes: "Hình dạng",
+    fibonacci: "Fibonacci",
+    annotation: "Chú thích",
+    measure: "Đo lường",
     patterns: "Mô hình",
+    utility: "Tiện ích",
     delete: "Xóa",
     cursor: "Con trỏ",
+    crosshair: "Chữ thập",
     ruler: "Thước đo",
     trendline: "Đường xu hướng",
+    ray: "Tia",
+    extendedLine: "Đường kéo dài",
     horizontalLine: "Đường ngang",
+    verticalLine: "Đường dọc",
     rectangle: "Hình chữ nhật",
-    fibonacci: "Fibonacci",
+    arrow: "Mũi tên",
+    fibRetracement: "Fibonacci Retracement",
     textNotes: "Ghi chú",
     elliottWave: "Sóng Elliott",
     harmonicABCD: "Harmonic ABCD",
+    magnet: "Chế độ nam châm",
+    lockAll: "Khóa tất cả",
+    hideAll: "Ẩn tất cả",
     clearAll: "Xóa tất cả",
+    eraser: "Cục tẩy",
+    deleteDrawing: "Xóa hình vẽ",
+    clearAllDrawings: "Xóa tất cả hình vẽ",
+    confirmClearDrawings: "Bạn có chắc muốn xóa tất cả hình vẽ?",
+    drawingDeleted: "Đã xóa hình vẽ",
+    noDrawingSelected: "Chưa chọn hình vẽ",
+    deleteSelected: "Xóa đã chọn",
+    chartSaved: "Đã lưu biểu đồ",
+    undo: "Hoàn tác",
+    redo: "Làm lại",
+    copy: "Sao chép",
+    cut: "Cắt",
+    paste: "Dán",
+    selectAll: "Chọn tất cả",
+    save: "Lưu",
+    style: "Kiểu",
+    lock: "Khóa",
+    hide: "Ẩn",
 
     // Tool settings
     lineWidth: "Độ dày nét",
@@ -307,7 +390,6 @@ const translations = {
     of: "/",
     pointProgress: "Điểm {n} / {total} — ESC để hủy",
     toCancel: "để hủy",
-    enterNote: "Nhập ghi chú...",
 
     // Error handling & status
     loading: "Đang tải…",
@@ -333,6 +415,26 @@ const translations = {
     historical: "Lịch sử",
     history: "Lịch sử",
     live: "Trực tiếp",
+
+    // Zoom controls
+    zoomIn: "Phóng to",
+    zoomOut: "Thu nhỏ",
+    resetZoom: "Đặt lại zoom",
+
+    // Drawing context toolbar
+    addText: "Thêm chữ",
+    addAlert: "Thêm cảnh báo",
+    changeColor: "Đổi màu",
+    enterNote: "Nhập ghi chú...",
+    cancel: "Hủy",
+
+    // Replay Mode
+    replayMode: "Chế độ phát lại",
+    play: "Phát",
+    pause: "Tạm dừng",
+    stepForward: "Tiến 1 nến",
+    exitReplay: "Thoát phát lại",
+    selectReplayStart: "Nhấp vào nến để bắt đầu phát lại từ điểm đó",
 
     // System health
     systemDiagnostics: "Chẩn đoán hệ thống",

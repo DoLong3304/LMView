@@ -5,6 +5,7 @@
   "fields": [
     {"name": "event_time",           "type": "long"},
     {"name": "symbol",               "type": "string"},
+    {"name": "exchange",             "type": "string", "default": "binance"},
     {"name": "close",                "type": "double"},
     {"name": "bid",                  "type": "double"},
     {"name": "ask",                  "type": "double"},

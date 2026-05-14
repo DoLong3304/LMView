@@ -1,136 +1,68 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useI18n } from '../i18n';
-import type { Drawing } from '../types';
+import type { Drawing, DataPoint } from '../types';
 import type { ToolSettings } from './ToolSettingsPopup';
+import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 
-const SNAP_RADIUS = 14;
-const MAG_RADIUS  = 18;
+const MULTI_CLICK_NEEDED: Record<string, boolean> = {
+  elliottWave: true,
+  harmonicABCD: true
+};
 
-const MULTI_CLICK_NEEDED: Record<string, boolean> = { elliottWave: true, harmonicABCD: true };
-
-interface Point { x: number; y: number; }
-interface CandlePixel { x: number; openY: number; highY: number; lowY: number; closeY: number; }
-
-function dashToDashArray(style?: string): string | undefined {
-  if (style === 'dashed') return '8 4';
-  if (style === 'dotted') return '3 3';
-  return undefined;
-}
-
-function magneticSnap(pos: Point, candlePixels?: CandlePixel[]): Point {
-  if (!candlePixels || candlePixels.length === 0) return pos;
-  let best: Point | null = null, bestDist = MAG_RADIUS;
-  for (const cp of candlePixels) {
-    for (const y of [cp.openY, cp.highY, cp.lowY, cp.closeY]) {
-      const dx = cp.x - pos.x, dy = y - pos.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < bestDist) { bestDist = dist; best = { x: cp.x, y }; }
-    }
-  }
-  return best || pos;
-}
-
-const ELLIOTT_IMPULSE_LABELS = ['0','1','2','3','4','5'];
-const ELLIOTT_CORRECT_LABELS = ['0','A','B','C'];
-
-function renderElliottWave(d: any, isPreview: boolean) {
-  const { points, settings = {} } = d;
-  if (!points || points.length < 2) return null;
-  const color = settings.color || '#f97316';
-  const lw = settings.lineWidth || 2;
-  const showLabel = settings.showLabel !== false;
-  const waveType = settings.waveType || 'impulse';
-  const labels = waveType === 'corrective' ? ELLIOTT_CORRECT_LABELS : ELLIOTT_IMPULSE_LABELS;
-  return (
-    <g key={d.id} opacity={isPreview ? 0.65 : 1}>
-      {points.slice(0, -1).map((pt: Point, i: number) => (
-        <line key={`seg-${i}`} x1={pt.x} y1={pt.y} x2={points[i+1].x} y2={points[i+1].y}
-          stroke={color} strokeWidth={lw} strokeLinejoin="round" />
-      ))}
-      {points.map((pt: Point, i: number) => (
-        <g key={`node-${i}`}>
-          <circle cx={pt.x} cy={pt.y} r="4" fill={color} />
-          {showLabel && (
-            <text x={pt.x} y={pt.y - 8} textAnchor="middle" fontSize="11" fill={color} fontWeight="bold">
-              {labels[i] || i}
-            </text>
-          )}
-        </g>
-      ))}
-    </g>
-  );
-}
-
-function renderHarmonicABCD(d: any, isPreview: boolean) {
-  const { points, settings = {} } = d;
-  if (!points || points.length < 2) return null;
-  const color = settings.color || '#a855f7';
-  const lw = settings.lineWidth || 2;
-  const showLabel = settings.showLabel !== false;
-  const fiboLevels = settings.fiboLevels || [0.618, 1.272];
-  const labels = ['A','B','C','D'];
-  const pairs = [[0,1],[1,2],[2,3],[0,3]];
-  const AB = points.length >= 2 ? Math.sqrt((points[1].x-points[0].x)**2+(points[1].y-points[0].y)**2) : 0;
-  const ratioBC = points.length >= 3 && AB > 0
-    ? (Math.sqrt((points[2].x-points[1].x)**2+(points[2].y-points[1].y)**2)/AB).toFixed(3) : null;
-  const ratioCD = points.length >= 4 && AB > 0
-    ? (Math.sqrt((points[3].x-points[2].x)**2+(points[3].y-points[2].y)**2)/AB).toFixed(3) : null;
-  return (
-    <g key={d.id} opacity={isPreview ? 0.65 : 1}>
-      {pairs.map(([from, to]) => {
-        if (!points[from] || !points[to]) return null;
-        const isDiag = from === 0 && to === 3;
-        return (
-          <line key={`${from}-${to}`}
-            x1={points[from].x} y1={points[from].y} x2={points[to].x} y2={points[to].y}
-            stroke={color} strokeWidth={isDiag ? lw * 0.6 : lw}
-            strokeDasharray={isDiag ? '6 3' : undefined} opacity={isDiag ? 0.5 : 1} />
-        );
-      })}
-      {points.length >= 3 && showLabel && ratioBC && (
-        <text x={(points[1].x+points[2].x)/2+6} y={(points[1].y+points[2].y)/2} fontSize="10" fill={color} opacity="0.85">{ratioBC}</text>
-      )}
-      {points.length >= 4 && showLabel && ratioCD && (
-        <text x={(points[2].x+points[3].x)/2+6} y={(points[2].y+points[3].y)/2} fontSize="10" fill={color} opacity="0.85">{ratioCD}</text>
-      )}
-      {points.length >= 4 && showLabel && (
-        <g>
-          <rect x={points[3].x+6} y={points[3].y-10} width={46} height={14} rx="3" fill="rgba(0,0,0,0.65)" />
-          <text x={points[3].x+8} y={points[3].y+1} fontSize="10" fill={color}>
-            {fiboLevels.map((l: number) => (l*100).toFixed(0)+'%').join(' / ')}
-          </text>
-        </g>
-      )}
-      {points.map((pt: Point, i: number) => (
-        <g key={`n-${i}`}>
-          <circle cx={pt.x} cy={pt.y} r="4.5" fill={color} />
-          {showLabel && (
-            <text x={pt.x} y={pt.y-9} textAnchor="middle" fontSize="12" fontWeight="bold" fill={color}>
-              {labels[i] || i}
-            </text>
-          )}
-        </g>
-      ))}
-    </g>
-  );
-}
+const DRAWING_HIT_TOLERANCE = 8; // pixels
 
 interface ChartOverlayProps {
   activeTool: string;
   drawings: Drawing[];
   onAddDrawing: (drawing: Drawing) => void;
+  onUpdateDrawing?: (id: string | number, updates: Partial<Drawing>) => void;
+  onDeleteDrawing: (id: string | number) => void;
   toolSettings?: Record<string, ToolSettings>;
-  candlePixels?: CandlePixel[];
+  chartApi: IChartApi | null;
+  candleSeries: ISeriesApi<'Candlestick'> | null;
+  magnetEnabled?: boolean;
+  selectedDrawingIds?: (string | number)[];
+  onSetSelectedDrawingIds?: (ids: (string | number)[]) => void;
+  // Replay mode props
+  isReplaySelectionMode?: boolean;
+  onReplayStartSelect?: (timestamp: number) => void;
 }
 
-const ChartOverlay: React.FC<ChartOverlayProps> = ({ activeTool, drawings, onAddDrawing, toolSettings, candlePixels }) => {
+interface PixelPoint { x: number; y: number; }
+
+const ChartOverlay: React.FC<ChartOverlayProps> = ({
+  activeTool,
+  drawings,
+  onAddDrawing,
+  onUpdateDrawing,
+  onDeleteDrawing, // Used in keyboard shortcuts via parent
+  toolSettings,
+  chartApi,
+  candleSeries,
+  magnetEnabled = false,
+  selectedDrawingIds = [],
+  onSetSelectedDrawingIds,
+  isReplaySelectionMode = false,
+  onReplayStartSelect,
+}) => {
+  void onUpdateDrawing;
+  void onDeleteDrawing; // Used via keyboard shortcuts in parent
   const { t } = useI18n();
+  void t; // May be used in future for tooltips
   const svgRef = useRef<SVGSVGElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [startPoint, setStartPoint] = useState<Point | null>(null);
-  const [currentPoint, setCurrentPoint] = useState<Point | null>(null);
-  const [multiPoints, setMultiPoints] = useState<Point[]>([]);
-  const [textInput, setTextInput] = useState<Point | null>(null);
+  const [startDataPoint, setStartDataPoint] = useState<DataPoint | null>(null);
+  const [currentDataPoint, setCurrentDataPoint] = useState<DataPoint | null>(null);
+  const [multiDataPoints, setMultiDataPoints] = useState<DataPoint[]>([]);
+  const [textInput, setTextInput] = useState<PixelPoint | null>(null);
+  const [hoveredDrawingId, setHoveredDrawingId] = useState<string | number | null>(null);
+  const [, setRedrawCounter] = useState(0);
+
+  // Anchor dragging state
+  const [draggingAnchor, setDraggingAnchor] = useState<{
+    drawingId: string | number;
+    pointIndex: number;
+  } | null>(null);
 
   const isMultiClick = MULTI_CLICK_NEEDED[activeTool] || false;
 
@@ -147,30 +79,151 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({ activeTool, drawings, onAdd
     return 0;
   }, [activeTool, activeSettings]);
 
-  const getSnapPoints = useCallback((): Point[] => {
-    const pts: Point[] = [];
-    drawings.forEach((d) => {
-      if (d.start) pts.push(d.start);
-      if (d.end) pts.push(d.end);
-      if (d.points) d.points.forEach((p) => pts.push(p));
-    });
-    return pts;
-  }, [drawings]);
+  // ══════════════════════════════════════════════════════════════
+  // COORDINATE CONVERSION (Data-space ↔ Pixel-space)
+  // CRITICAL: Never fallback to old pixel values. Return null if conversion fails.
+  // ══════════════════════════════════════════════════════════════
 
-  const snapToNearby = useCallback((pos: Point): Point => {
-    const mag = magneticSnap(pos, candlePixels);
-    if (mag !== pos) return mag;
-    const pts = getSnapPoints();
-    let closest: Point | null = null;
-    let minDist = SNAP_RADIUS;
-    pts.forEach((p) => {
-      const dist = Math.sqrt((p.x - pos.x) ** 2 + (p.y - pos.y) ** 2);
-      if (dist < minDist) { minDist = dist; closest = p; }
-    });
-    return closest || pos;
-  }, [getSnapPoints, candlePixels]);
+  const dataToPixel = useCallback((dataPoint: DataPoint): PixelPoint | null => {
+    if (!chartApi || !candleSeries) return null;
 
-  const getSVGPoint = useCallback((e: React.MouseEvent): Point => {
+    const x = chartApi.timeScale().timeToCoordinate(dataPoint.time as any);
+    const y = candleSeries.priceToCoordinate(dataPoint.price);
+
+    // CRITICAL: If either coordinate is null, return null (drawing is off-screen)
+    // DO NOT fallback to previous pixel values
+    if (x === null || y === null) return null;
+
+    return { x, y };
+  }, [chartApi, candleSeries]);
+
+  const pixelToData = useCallback((pixel: PixelPoint): DataPoint | null => {
+    if (!chartApi || !candleSeries) return null;
+
+    const time = chartApi.timeScale().coordinateToTime(pixel.x);
+    const price = candleSeries.coordinateToPrice(pixel.y);
+
+    if (time === null || price === null) return null;
+
+    return { time: time as number, price };
+  }, [chartApi, candleSeries]);
+
+  // ══════════════════════════════════════════════════════════════
+  // HIT TESTING FOR ERASER
+  // ══════════════════════════════════════════════════════════════
+
+  const distanceToLine = useCallback((point: PixelPoint, p1: PixelPoint, p2: PixelPoint): number => {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const lengthSquared = dx * dx + dy * dy;
+
+    if (lengthSquared === 0) {
+      // p1 and p2 are the same point
+      return Math.sqrt((point.x - p1.x) ** 2 + (point.y - p1.y) ** 2);
+    }
+
+    // Calculate projection parameter
+    let t = ((point.x - p1.x) * dx + (point.y - p1.y) * dy) / lengthSquared;
+    t = Math.max(0, Math.min(1, t));
+
+    // Find closest point on line segment
+    const closestX = p1.x + t * dx;
+    const closestY = p1.y + t * dy;
+
+    return Math.sqrt((point.x - closestX) ** 2 + (point.y - closestY) ** 2);
+  }, []);
+
+  const hitTestDrawing = useCallback((drawing: Drawing, mousePixel: PixelPoint): boolean => {
+    if (!drawing.dataPoints || drawing.dataPoints.length === 0) return false;
+
+    const pixels = drawing.dataPoints.map(dp => dataToPixel(dp));
+
+    switch (drawing.tool) {
+      case 'horizontal': {
+        // Horizontal line: check Y distance
+        if (!pixels[0]) return false;
+        return Math.abs(mousePixel.y - pixels[0].y) <= DRAWING_HIT_TOLERANCE;
+      }
+
+      case 'vertical': {
+        // Vertical line: check X distance
+        if (!pixels[0]) return false;
+        return Math.abs(mousePixel.x - pixels[0].x) <= DRAWING_HIT_TOLERANCE;
+      }
+
+      case 'rectangle': {
+        // Rectangle: check if near border or inside
+        if (pixels.length < 2 || !pixels[0] || !pixels[1]) return false;
+        const [p1, p2] = pixels;
+        const left = Math.min(p1.x, p2.x);
+        const right = Math.max(p1.x, p2.x);
+        const top = Math.min(p1.y, p2.y);
+        const bottom = Math.max(p1.y, p2.y);
+
+        // Check if inside
+        const inside = mousePixel.x >= left && mousePixel.x <= right &&
+                      mousePixel.y >= top && mousePixel.y <= bottom;
+
+        if (inside) return true;
+
+        // Check borders
+        const nearLeft = Math.abs(mousePixel.x - left) <= DRAWING_HIT_TOLERANCE &&
+                        mousePixel.y >= top - DRAWING_HIT_TOLERANCE &&
+                        mousePixel.y <= bottom + DRAWING_HIT_TOLERANCE;
+        const nearRight = Math.abs(mousePixel.x - right) <= DRAWING_HIT_TOLERANCE &&
+                         mousePixel.y >= top - DRAWING_HIT_TOLERANCE &&
+                         mousePixel.y <= bottom + DRAWING_HIT_TOLERANCE;
+        const nearTop = Math.abs(mousePixel.y - top) <= DRAWING_HIT_TOLERANCE &&
+                       mousePixel.x >= left - DRAWING_HIT_TOLERANCE &&
+                       mousePixel.x <= right + DRAWING_HIT_TOLERANCE;
+        const nearBottom = Math.abs(mousePixel.y - bottom) <= DRAWING_HIT_TOLERANCE &&
+                          mousePixel.x >= left - DRAWING_HIT_TOLERANCE &&
+                          mousePixel.x <= right + DRAWING_HIT_TOLERANCE;
+
+        return nearLeft || nearRight || nearTop || nearBottom;
+      }
+
+      case 'text': {
+        // Text: check bounding box
+        if (!pixels[0]) return false;
+        const text = drawing.text || '';
+        const width = text.length * 7 + 8;
+        const height = 20;
+        return mousePixel.x >= pixels[0].x - 2 &&
+               mousePixel.x <= pixels[0].x + width &&
+               mousePixel.y >= pixels[0].y - 14 &&
+               mousePixel.y <= pixels[0].y + height - 14;
+      }
+
+      default: {
+        // Trendline, ray, arrow, etc: check distance to line
+        const validPixels = pixels.filter(p => p !== null) as PixelPoint[];
+        if (validPixels.length < 2) return false;
+
+        for (let i = 0; i < validPixels.length - 1; i++) {
+          const dist = distanceToLine(mousePixel, validPixels[i], validPixels[i + 1]);
+          if (dist <= DRAWING_HIT_TOLERANCE) return true;
+        }
+        return false;
+      }
+    }
+  }, [dataToPixel, distanceToLine]);
+
+  // ══════════════════════════════════════════════════════════════
+  // MAGNET SNAP
+  // ══════════════════════════════════════════════════════════════
+
+  const magneticSnap = useCallback((dataPoint: DataPoint): DataPoint => {
+    if (!magnetEnabled) return dataPoint;
+    // TODO: Implement snap to OHLC
+    return dataPoint;
+  }, [magnetEnabled]);
+
+  // ══════════════════════════════════════════════════════════════
+  // MOUSE EVENT HANDLERS
+  // ══════════════════════════════════════════════════════════════
+
+  const getSVGPoint = useCallback((e: React.MouseEvent): PixelPoint => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, y: 0 };
     const rect = svg.getBoundingClientRect();
@@ -178,182 +231,374 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({ activeTool, drawings, onAdd
   }, []);
 
   const handleMultiClick = useCallback((e: React.MouseEvent) => {
-    const pos = snapToNearby(getSVGPoint(e));
+    const pixel = getSVGPoint(e);
+    const dataPoint = pixelToData(pixel);
+    if (!dataPoint) return;
+
+    const snapped = magneticSnap(dataPoint);
     const needed = requiredPoints();
-    const next = [...multiPoints, pos];
+    const next = [...multiDataPoints, snapped];
+
     if (next.length >= needed) {
-      onAddDrawing({ id: Date.now(), tool: activeTool, points: next, settings: activeSettings(), start: next[0], end: next[next.length - 1] });
-      setMultiPoints([]);
+      onAddDrawing({
+        id: Date.now(),
+        tool: activeTool,
+        dataPoints: next,
+        settings: activeSettings(),
+      });
+      setMultiDataPoints([]);
     } else {
-      setMultiPoints(next);
+      setMultiDataPoints(next);
     }
-  }, [multiPoints, requiredPoints, activeTool, getSVGPoint, snapToNearby, onAddDrawing, activeSettings]);
+  }, [multiDataPoints, requiredPoints, activeTool, getSVGPoint, pixelToData, magneticSnap, onAddDrawing, activeSettings]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (activeTool === 'cursor') return;
-    if (activeTool === 'text') { setTextInput(getSVGPoint(e)); return; }
-    if (isMultiClick) { handleMultiClick(e); return; }
-    const snapped = snapToNearby(getSVGPoint(e));
-    setStartPoint(snapped);
-    setCurrentPoint(snapped);
+    const pixel = getSVGPoint(e);
+
+    // Replay selection mode: click on candle to start replay from that point
+    if (isReplaySelectionMode && onReplayStartSelect) {
+      const dataPoint = pixelToData(pixel);
+      if (dataPoint) {
+        onReplayStartSelect(dataPoint.time);
+      }
+      return;
+    }
+
+    // Eraser mode: delete drawing on click
+    if (activeTool === 'eraser') {
+      for (const d of drawings) {
+        if (hitTestDrawing(d, pixel)) {
+          onDeleteDrawing(d.id);
+          return;
+        }
+      }
+      return;
+    }
+
+    if (activeTool === 'cursor') {
+      // Check if clicking on a drawing for selection
+      let clickedDrawingId: string | number | null = null;
+
+      for (const d of drawings) {
+        if (hitTestDrawing(d, pixel)) {
+          clickedDrawingId = d.id;
+          break;
+        }
+      }
+
+      if (clickedDrawingId && onSetSelectedDrawingIds) {
+        onSetSelectedDrawingIds([clickedDrawingId]);
+      } else if (onSetSelectedDrawingIds) {
+        onSetSelectedDrawingIds([]);
+      }
+      return;
+    }
+
+    if (activeTool === 'text') {
+      setTextInput(getSVGPoint(e));
+      return;
+    }
+
+    if (isMultiClick) {
+      handleMultiClick(e);
+      return;
+    }
+
+    const dataPoint = pixelToData(pixel);
+    if (!dataPoint) return;
+
+    const snapped = magneticSnap(dataPoint);
+    setStartDataPoint(snapped);
+    setCurrentDataPoint(snapped);
     setIsDrawing(true);
-  }, [activeTool, getSVGPoint, isMultiClick, handleMultiClick, snapToNearby]);
+  }, [activeTool, getSVGPoint, pixelToData, magneticSnap, isMultiClick, handleMultiClick, drawings, hitTestDrawing, onDeleteDrawing, onSetSelectedDrawingIds, isReplaySelectionMode, onReplayStartSelect]);
+
+  // ══════════════════════════════════════════════════════════════
+  // ANCHOR DRAGGING HANDLERS
+  // ══════════════════════════════════════════════════════════════
+
+  const handleAnchorMouseDown = useCallback((e: React.MouseEvent, drawingId: string | number, pointIndex: number) => {
+    e.stopPropagation();
+    setDraggingAnchor({ drawingId, pointIndex });
+  }, []);
+
+  const handleAnchorDrag = useCallback((e: React.MouseEvent) => {
+    if (!draggingAnchor || !onUpdateDrawing) return;
+
+    const pixel = getSVGPoint(e);
+    const dataPoint = pixelToData(pixel);
+    if (!dataPoint) return;
+
+    const drawing = drawings.find(d => d.id === draggingAnchor.drawingId);
+    if (!drawing || !drawing.dataPoints) return;
+
+    // Update the specific data point
+    const newDataPoints = [...drawing.dataPoints];
+    newDataPoints[draggingAnchor.pointIndex] = magneticSnap(dataPoint);
+
+    onUpdateDrawing(drawing.id, { dataPoints: newDataPoints });
+  }, [draggingAnchor, drawings, getSVGPoint, pixelToData, magneticSnap, onUpdateDrawing]);
+
+  const handleAnchorMouseUp = useCallback(() => {
+    setDraggingAnchor(null);
+  }, []);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
-    const pos = snapToNearby(getSVGPoint(e));
-    if (isMultiClick && multiPoints.length > 0) { setCurrentPoint(pos); return; }
+    const pixel = getSVGPoint(e);
+
+    // Handle anchor dragging
+    if (draggingAnchor) {
+      handleAnchorDrag(e);
+      return;
+    }
+
+    // Eraser mode: highlight drawing on hover
+    if (activeTool === 'eraser') {
+      let foundId: string | number | null = null;
+      for (const d of drawings) {
+        if (hitTestDrawing(d, pixel)) {
+          foundId = d.id;
+          break;
+        }
+      }
+      setHoveredDrawingId(foundId);
+      return;
+    }
+
+    const dataPoint = pixelToData(pixel);
+    if (!dataPoint) return;
+
+    const snapped = magneticSnap(dataPoint);
+
+    if (isMultiClick && multiDataPoints.length > 0) {
+      setCurrentDataPoint(snapped);
+      return;
+    }
+
     if (!isDrawing) return;
-    setCurrentPoint(pos);
-  }, [isDrawing, isMultiClick, multiPoints.length, getSVGPoint, snapToNearby]);
+    setCurrentDataPoint(snapped);
+  }, [isDrawing, isMultiClick, multiDataPoints.length, getSVGPoint, pixelToData, magneticSnap, activeTool, drawings, hitTestDrawing, draggingAnchor, handleAnchorDrag]);
 
   const handleMouseUp = useCallback(() => {
-    if (!isDrawing || !startPoint || !currentPoint) return;
-    onAddDrawing({ id: Date.now(), tool: activeTool, start: startPoint, end: currentPoint, settings: activeSettings() });
+    // Handle anchor drag end
+    if (draggingAnchor) {
+      handleAnchorMouseUp();
+      return;
+    }
+
+    if (!isDrawing || !startDataPoint || !currentDataPoint) return;
+
+    onAddDrawing({
+      id: Date.now(),
+      tool: activeTool,
+      dataPoints: [startDataPoint, currentDataPoint],
+      settings: activeSettings(),
+    });
+
     setIsDrawing(false);
-    setStartPoint(null);
-    setCurrentPoint(null);
-  }, [isDrawing, startPoint, currentPoint, activeTool, onAddDrawing, activeSettings]);
+    setStartDataPoint(null);
+    setCurrentDataPoint(null);
+  }, [isDrawing, startDataPoint, currentDataPoint, activeTool, onAddDrawing, activeSettings, draggingAnchor, handleAnchorMouseUp]);
 
   const handleTextSubmit = useCallback((text: string) => {
-    if (!textInput || !text) { setTextInput(null); return; }
-    onAddDrawing({ id: Date.now(), tool: 'text', start: textInput, end: textInput, text, settings: activeSettings() });
+    if (!textInput || !text) {
+      setTextInput(null);
+      return;
+    }
+
+    const dataPoint = pixelToData(textInput);
+    if (!dataPoint) {
+      setTextInput(null);
+      return;
+    }
+
+    onAddDrawing({
+      id: Date.now(),
+      tool: 'text',
+      dataPoints: [dataPoint],
+      text,
+      settings: activeSettings(),
+    });
     setTextInput(null);
-  }, [textInput, onAddDrawing, activeSettings]);
+  }, [textInput, pixelToData, onAddDrawing, activeSettings]);
 
-  const rulerDistance = (a: Point, b: Point) => Math.sqrt((b.x-a.x)**2 + (b.y-a.y)**2).toFixed(1);
-  const rulerAngle = (a: Point, b: Point) => ((Math.atan2(-(b.y-a.y), b.x-a.x) * 180) / Math.PI).toFixed(1);
+  // ══════════════════════════════════════════════════════════════
+  // REDRAW ON CHART CHANGES (zoom, pan, resize)
+  // ══════════════════════════════════════════════════════════════
 
-  const renderDrawing = (d: Drawing, isPreview = false) => {
-    const opacity = isPreview ? 0.6 : 1;
+  useEffect(() => {
+    if (!chartApi) return;
+
+    const handleVisibleRangeChange = () => {
+      setRedrawCounter(prev => prev + 1);
+    };
+
+    const timeScale = chartApi.timeScale();
+    timeScale.subscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+
+    return () => {
+      timeScale.unsubscribeVisibleLogicalRangeChange(handleVisibleRangeChange);
+    };
+  }, [chartApi]);
+
+  useEffect(() => {
+    if (!svgRef.current) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      setRedrawCounter(prev => prev + 1);
+    });
+
+    resizeObserver.observe(svgRef.current);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, []);
+
+  // ══════════════════════════════════════════════════════════════
+  // RENDERING FUNCTIONS
+  // ══════════════════════════════════════════════════════════════
+
+  const renderDrawing = useCallback((d: Drawing, isPreview = false) => {
+    if (!d.dataPoints || d.dataPoints.length === 0) return null;
+
+    // Convert data points to pixels
+    // CRITICAL: If any point is off-screen (null), handle appropriately per tool type
+    const pixels = d.dataPoints.map(dp => dataToPixel(dp));
+
+    const opacity = isPreview ? 0.6 : (d.hidden ? 0.3 : 1);
     const key = isPreview ? 'preview' : d.id;
     const s = d.settings || {};
     const lw = s.lineWidth || 2;
-    const da = dashToDashArray(s.dashArray);
+    const color = s.color || '#3b82f6';
+    const isSelected = selectedDrawingIds.includes(d.id);
+    const isHovered = hoveredDrawingId === d.id;
+
+    // Highlight if hovered in eraser mode
+    const strokeWidth = isSelected ? lw + 1 : (isHovered ? lw + 2 : lw);
+    const strokeColor = isSelected ? '#60a5fa' : (isHovered ? '#ef4444' : color);
 
     switch (d.tool) {
-      case 'elliottWave':
-        return renderElliottWave({ ...d, id: key }, isPreview);
-      case 'harmonicABCD':
-        return renderHarmonicABCD({ ...d, id: key }, isPreview);
-      case 'ruler': {
-        if (!d.start || !d.end) return null;
-        const color = s.color || '#facc15';
+      case 'horizontal': {
+        // Horizontal line: only needs price (y), can render even if time is off-screen
+        if (pixels.length < 1 || !pixels[0]) return null;
+        const y = pixels[0].y;
+        const price = d.dataPoints[0].price;
+
         return (
           <g key={key} opacity={opacity}>
-            <line x1={d.start.x} y1={d.start.y} x2={d.end.x} y2={d.end.y} stroke={color} strokeWidth={lw} strokeDasharray={da || '6 3'} />
-            <circle cx={d.start.x} cy={d.start.y} r="4" fill={color} />
-            <circle cx={d.end.x} cy={d.end.y} r="4" fill={color} />
+            <line
+              x1={0} y1={y} x2="100%" y2={y}
+              stroke={strokeColor}
+              strokeWidth={strokeWidth}
+              strokeDasharray="8 4"
+            />
             {s.showLabel !== false && (
               <>
-                <rect x={(d.start.x+d.end.x)/2-44} y={(d.start.y+d.end.y)/2-24} width="88" height="20" rx="4" fill="rgba(0,0,0,0.75)" />
-                <text x={(d.start.x+d.end.x)/2} y={(d.start.y+d.end.y)/2-9} textAnchor="middle" fontSize="11" fill={color}>
-                  {rulerDistance(d.start, d.end)}px · {rulerAngle(d.start, d.end)}°
+                <rect x={10} y={y - 18} width="60" height="16" rx="3" fill={`${color}30`} />
+                <text x={40} y={y - 6} textAnchor="middle" fontSize="10" fill={color}>
+                  {price.toFixed(2)}
                 </text>
               </>
             )}
           </g>
         );
       }
-      case 'trendline': {
-        if (!d.start || !d.end) return null;
-        const color = s.color || '#3b82f6';
+
+      case 'vertical': {
+        // Vertical line: only needs time (x), skip if off-screen
+        if (pixels.length < 1 || !pixels[0]) return null;
+        const x = pixels[0].x;
+        const time = d.dataPoints[0].time;
+        const dateStr = new Date(time * 1000).toLocaleDateString();
+
         return (
           <g key={key} opacity={opacity}>
-            <line x1={d.start.x} y1={d.start.y} x2={d.end.x} y2={d.end.y} stroke={color} strokeWidth={lw} strokeDasharray={da} />
-            <circle cx={d.start.x} cy={d.start.y} r="4" fill={color} />
-            <circle cx={d.end.x} cy={d.end.y} r="4" fill={color} />
-          </g>
-        );
-      }
-      case 'horizontal': {
-        if (!d.start) return null;
-        const color = s.color || '#22c55e';
-        return (
-          <g key={key} opacity={opacity}>
-            <line x1={0} y1={d.start.y} x2="100%" y2={d.start.y} stroke={color} strokeWidth={lw} strokeDasharray={da || '8 4'} />
+            <line
+              x1={x} y1={0} x2={x} y2="100%"
+              stroke={strokeColor}
+              strokeWidth={strokeWidth}
+              strokeDasharray="8 4"
+            />
             {s.showLabel !== false && (
               <>
-                <rect x={d.start.x-20} y={d.start.y-18} width="40" height="16" rx="3" fill={`${color}30`} />
-                <text x={d.start.x} y={d.start.y-6} textAnchor="middle" fontSize="10" fill={color}>{Math.round(d.start.y)}</text>
+                <rect x={x - 40} y={10} width="80" height="16" rx="3" fill={`${color}30`} />
+                <text x={x} y={22} textAnchor="middle" fontSize="10" fill={color}>
+                  {dateStr}
+                </text>
               </>
             )}
           </g>
         );
       }
-      case 'rectangle': {
-        if (!d.start || !d.end) return null;
-        const color = s.color || '#8b5cf6';
-        const hexToRgb = (h: string) => { const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(h); return m ? [parseInt(m[1],16),parseInt(m[2],16),parseInt(m[3],16)] : [139,92,246]; };
-        const [r,g,b] = hexToRgb(color);
-        return (
-          <g key={key} opacity={opacity}>
-            <rect
-              x={Math.min(d.start.x, d.end.x)} y={Math.min(d.start.y, d.end.y)}
-              width={Math.abs(d.end.x - d.start.x)} height={Math.abs(d.end.y - d.start.y)}
-              fill={`rgba(${r},${g},${b},${s.fillOpacity ?? 0.1})`} stroke={color} strokeWidth={lw} strokeDasharray={da}
-            />
-          </g>
-        );
-      }
-      case 'fibRetracement': {
-        if (!d.start || !d.end) return null;
-        const levels = (s.levels && s.levels.length > 0) ? s.levels : [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
-        const levelColors = ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b5cf6','#ef4444'];
-        const top = Math.min(d.start.y, d.end.y);
-        const h = Math.abs(d.end.y - d.start.y);
-        const left = Math.min(d.start.x, d.end.x);
-        const w = Math.abs(d.end.x - d.start.x);
-        return (
-          <g key={key} opacity={opacity}>
-            {levels.map((level: number, i: number) => {
-              const y = top + h * level;
-              const lc = levelColors[i % levelColors.length];
-              return (
-                <g key={level}>
-                  <line x1={left} y1={y} x2={left+w} y2={y} stroke={lc} strokeWidth={lw} strokeDasharray="4 2" />
-                  {s.showLabel !== false && (
-                    <text x={left+w+4} y={y+4} fontSize="10" fill={lc}>{(level*100).toFixed(1)}%</text>
-                  )}
-                </g>
-              );
-            })}
-          </g>
-        );
-      }
-      case 'text':
-        if (!d.start) return null;
-        return (
-          <g key={key} opacity={opacity}>
-            <rect x={d.start.x-2} y={d.start.y-14} width={(d.text ? d.text.length*7+8 : 40)} height="20" rx="3" fill="rgba(0,0,0,0.6)" />
-            <text x={d.start.x+2} y={d.start.y} fontSize="12" fill="#e5e7eb">{d.text || ''}</text>
-          </g>
-        );
-      default:
-        return null;
-    }
-  };
 
-  const renderMultiPreview = () => {
-    if (!isMultiClick || multiPoints.length === 0) return null;
-    const pts = currentPoint ? [...multiPoints, currentPoint] : multiPoints;
-    if (pts.length < 2) return null;
-    const s = activeSettings();
-    return (
-      <g opacity="0.55">
-        {pts.slice(0,-1).map((pt, i) => (
-          <line key={i} x1={pt.x} y1={pt.y} x2={pts[i+1].x} y2={pts[i+1].y}
-            stroke={s.color || '#f97316'} strokeWidth={s.lineWidth || 2} />
-        ))}
-        {pts.map((pt, i) => <circle key={i} cx={pt.x} cy={pt.y} r="4" fill={s.color || '#f97316'} />)}
-      </g>
-    );
-  };
+      default: {
+        // For other tools, skip if any point is off-screen
+        const validPixels = pixels.filter(p => p !== null) as PixelPoint[];
+        if (validPixels.length !== pixels.length) return null; // Some points off-screen, don't render
+
+        if (validPixels.length < 2) return null;
+
+        // Render based on tool type (simplified for now)
+        const [p1, p2] = validPixels;
+
+        return (
+          <g key={key} opacity={opacity}>
+            <line
+              x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+              stroke={strokeColor}
+              strokeWidth={strokeWidth}
+            />
+            {/* Render anchors when selected */}
+            {isSelected && !isPreview && (
+              <>
+                <circle
+                  cx={p1.x}
+                  cy={p1.y}
+                  r="6"
+                  fill={strokeColor}
+                  stroke="white"
+                  strokeWidth="2"
+                  style={{ cursor: 'move' }}
+                  onMouseDown={(e) => handleAnchorMouseDown(e, d.id, 0)}
+                />
+                <circle
+                  cx={p2.x}
+                  cy={p2.y}
+                  r="6"
+                  fill={strokeColor}
+                  stroke="white"
+                  strokeWidth="2"
+                  style={{ cursor: 'move' }}
+                  onMouseDown={(e) => handleAnchorMouseDown(e, d.id, 1)}
+                />
+              </>
+            )}
+          </g>
+        );
+      }
+    }
+  }, [dataToPixel, selectedDrawingIds, hoveredDrawingId]);
+
+  const renderPreview = useCallback(() => {
+    if (!isDrawing || !startDataPoint || !currentDataPoint) return null;
+
+    const previewDrawing: Drawing = {
+      id: 'preview',
+      tool: activeTool,
+      dataPoints: [startDataPoint, currentDataPoint],
+      settings: activeSettings(),
+    };
+
+    return renderDrawing(previewDrawing, true);
+  }, [isDrawing, startDataPoint, currentDataPoint, activeTool, activeSettings, renderDrawing]);
 
   const isInteractive = activeTool !== 'cursor';
-  const cursor = !isInteractive ? 'default' : isMultiClick ? 'cell' : 'crosshair';
+  const isEraser = activeTool === 'eraser';
+  const cursor = isEraser ? 'not-allowed' : (!isInteractive ? 'default' : isMultiClick ? 'cell' : 'crosshair');
 
   return (
-    <div className="absolute inset-0 z-10" style={{ pointerEvents: isInteractive ? 'auto' : 'none' }}>
+    <div className="absolute inset-0 z-10" style={{ pointerEvents: isInteractive || isEraser ? 'auto' : 'none' }}>
       <svg
         ref={svgRef}
         className="w-full h-full"
@@ -362,58 +607,31 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({ activeTool, drawings, onAdd
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
         onMouseLeave={() => {
-          if (isDrawing) { setIsDrawing(false); setStartPoint(null); setCurrentPoint(null); }
+          if (isDrawing) {
+            setIsDrawing(false);
+            setStartDataPoint(null);
+            setCurrentDataPoint(null);
+          }
+          setHoveredDrawingId(null);
         }}
       >
-        {isInteractive && candlePixels && currentPoint && candlePixels.map((cp, ci) =>
-          [cp.openY, cp.highY, cp.lowY, cp.closeY].map((y, yi) => {
-            const dist = Math.sqrt((cp.x - currentPoint.x)**2 + (y - currentPoint.y)**2);
-            if (dist > MAG_RADIUS * 2) return null;
-            return <circle key={`mag-${ci}-${yi}`} cx={cp.x} cy={y} r="5" fill="none" stroke="rgba(251,191,36,0.7)" strokeWidth="1.5" />;
-          })
-        )}
-        {isInteractive && (isDrawing || (isMultiClick && multiPoints.length > 0)) && getSnapPoints().map((p, i) => (
-          <circle key={`snap-${i}`} cx={p.x} cy={p.y} r={SNAP_RADIUS}
-            fill="none" stroke="rgba(59,130,246,0.3)" strokeWidth="1" strokeDasharray="3 2" />
-        ))}
         {drawings.map((d) => renderDrawing(d))}
-        {isDrawing && startPoint && currentPoint && renderDrawing(
-          { id: 'preview', tool: activeTool, start: startPoint, end: currentPoint, settings: activeSettings() } as Drawing, true
-        )}
-        {renderMultiPreview()}
+        {renderPreview()}
       </svg>
 
-      {isMultiClick && multiPoints.length > 0 && (
-        <EscapeListener onEscape={() => setMultiPoints([])} />
-      )}
-
       {textInput && (
-        <TextInputPopup position={textInput} onSubmit={handleTextSubmit} onCancel={() => setTextInput(null)} />
-      )}
-
-      {isMultiClick && multiPoints.length > 0 && (
-        <div className="absolute bottom-2 left-1/2 -translate-x-1/2 bg-gray-900 border border-gray-600 text-xs text-gray-300 px-3 py-1 rounded-full pointer-events-none z-20 whitespace-nowrap">
-          {activeTool === 'elliottWave'
-            ? `${t("point")} ${multiPoints.length + 1} / ${requiredPoints()} — ESC ${t("toCancel")}`
-            : `${t("point")} ${['A','B','C','D'][multiPoints.length] || multiPoints.length + 1} — ESC ${t("toCancel")}`}
-        </div>
+        <TextInputPopup
+          position={textInput}
+          onSubmit={handleTextSubmit}
+          onCancel={() => setTextInput(null)}
+        />
       )}
     </div>
   );
 };
 
-// ── Sub-components ────────────────────────────────────────────────
-const EscapeListener: React.FC<{ onEscape: () => void }> = ({ onEscape }) => {
-  useEffect(() => {
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') onEscape(); };
-    document.addEventListener('keydown', h);
-    return () => document.removeEventListener('keydown', h);
-  }, [onEscape]);
-  return null;
-};
-
 interface TextInputPopupProps {
-  position: Point;
+  position: PixelPoint;
   onSubmit: (text: string) => void;
   onCancel: () => void;
 }
@@ -422,7 +640,11 @@ const TextInputPopup: React.FC<TextInputPopupProps> = ({ position, onSubmit, onC
   const { t } = useI18n();
   const [value, setValue] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
-  useEffect(() => { inputRef.current?.focus(); }, []);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
   return (
     <div className="absolute z-50 flex items-center gap-1" style={{ left: position.x, top: position.y }}>
       <input
@@ -430,11 +652,19 @@ const TextInputPopup: React.FC<TextInputPopupProps> = ({ position, onSubmit, onC
         type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') onSubmit(value); if (e.key === 'Escape') onCancel(); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') onSubmit(value);
+          if (e.key === 'Escape') onCancel();
+        }}
         className="bg-gray-700 text-white text-sm rounded px-2 py-1 w-40 border border-gray-500 focus:outline-none focus:border-blue-500"
         placeholder={t("enterNote")}
       />
-      <button onClick={() => onSubmit(value)} className="bg-blue-600 text-white text-xs px-2 py-1 rounded hover:bg-blue-700">OK</button>
+      <button
+        onClick={() => onSubmit(value)}
+        className="bg-blue-600 text-white text-xs px-2 py-1 rounded hover:bg-blue-700"
+      >
+        OK
+      </button>
     </div>
   );
 };

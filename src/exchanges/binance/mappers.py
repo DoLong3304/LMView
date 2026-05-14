@@ -14,6 +14,7 @@ def map_ticker(raw: dict) -> dict:
     return {
         "event_time":           int(raw["E"]),
         "symbol":               str(raw["s"]),
+        "exchange":             "binance",
         "close":                float(raw.get("c", 0)),
         "bid":                  float(raw.get("b", 0)),
         "ask":                  float(raw.get("a", 0)),
@@ -33,6 +34,7 @@ def map_agg_trade(raw: dict) -> dict:
     return {
         "event_time":     int(raw["E"]),
         "symbol":         str(raw["s"]),
+        "exchange":       "binance",
         "agg_trade_id":   int(raw["a"]),
         "price":          float(raw["p"]),
         "quantity":       float(raw["q"]),
@@ -47,6 +49,7 @@ def map_kline(raw: dict) -> dict:
     return {
         "event_time":   int(raw["E"]),
         "symbol":       str(raw["s"]),
+        "exchange":     "binance",
         "kline_start":  int(k["t"]),
         "kline_close":  int(k["T"]),
         "interval":     str(k["i"]),
@@ -69,6 +72,7 @@ def map_depth(raw: dict) -> dict:
     return {
         "event_time":     int(raw.get("E", int(time.time() * 1000))),
         "symbol":         str(raw.get("s", "")).upper(),
+        "exchange":       "binance",
         "last_update_id": int(raw.get("lastUpdateId", raw.get("u", 0))),
         "bids":           json.dumps([[float(p), float(q)] for p, q in (raw.get("bids") or raw.get("b") or [])]),
         "asks":           json.dumps([[float(p), float(q)] for p, q in (raw.get("asks") or raw.get("a") or [])]),

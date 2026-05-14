@@ -5,6 +5,7 @@
   "fields": [
     {"name": "event_time",   "type": "long"},
     {"name": "symbol",       "type": "string"},
+    {"name": "exchange",     "type": "string", "default": "binance"},
     {"name": "kline_start",  "type": "long"},
     {"name": "kline_close",  "type": "long"},
     {"name": "interval",     "type": "string"},

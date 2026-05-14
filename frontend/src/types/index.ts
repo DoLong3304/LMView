@@ -111,21 +111,36 @@ export interface IndicatorSettings {
   [key: string]: unknown;
 }
 
-/** Point on the chart canvas for drawing tools */
+/** Point on the chart canvas for drawing tools (pixel space - for rendering only) */
 export interface DrawingPoint {
   x: number;
   y: number;
 }
 
-/** Drawing object */
+/** Data-space point (time in seconds, price in actual value) - SOURCE OF TRUTH */
+export interface DataPoint {
+  time: number;  // Unix timestamp in seconds (lightweight-charts convention)
+  price: number; // Actual price value
+}
+
+/** Drawing object - uses data-space coordinates as source of truth */
 export interface Drawing {
   id: string | number;
   tool: string;
+
+  // Data-space coordinates (SOURCE OF TRUTH)
+  dataPoints?: DataPoint[];
+
+  // Legacy pixel-space (deprecated, only for backward compatibility)
   start?: DrawingPoint;
   end?: DrawingPoint;
   points?: DrawingPoint[];
+
+  // Drawing properties
   settings?: Record<string, any>;
   text?: string;
+  locked?: boolean;
+  hidden?: boolean;
 }
 
 /** Crosshair tooltip data */
@@ -158,3 +173,24 @@ export type Timeframe = "1s" | "1m" | "5m" | "15m" | "1H" | "4H" | "1D" | "1W";
 
 /** Watchlist filter mode */
 export type WatchlistFilter = "all" | "starred";
+
+/** Command types for undo/redo system */
+export type CommandType = 'add' | 'delete' | 'update' | 'move' | 'batch';
+
+/** Command for undo/redo history */
+export interface Command {
+  type: CommandType;
+  timestamp: number;
+  drawingId?: string | number;
+  drawingIds?: (string | number)[]; // For batch operations
+  before?: Drawing | Drawing[]; // State before change
+  after?: Drawing | Drawing[];  // State after change
+  description?: string; // Human-readable description
+}
+
+/** History state for undo/redo */
+export interface HistoryState {
+  commands: Command[];
+  currentIndex: number;
+}
+

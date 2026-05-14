@@ -2,12 +2,19 @@ import React, { useState, useCallback, useEffect, useRef } from "react";
 import CandlestickChart from "./components/CandlestickChart";
 import DrawingToolbar from "./components/DrawingToolbar";
 import ChartOverlay from "./components/ChartOverlay";
+import DrawingContextToolbar from "./components/DrawingContextToolbar";
+import { ReplayControls } from "./components/ReplayControls";
+import { ReplayButton } from "./components/ReplayButton";
 import Header from "./components/Header";
 import Watchlist from "./components/Watchlist";
 import OverviewChart from "./components/OverviewChart";
 import { DEFAULT_TOOL_SETTINGS, type ToolSettings } from "./components/ToolSettingsPopup";
 import { fetchTickers, fetchSymbols } from "./services/marketDataService";
 import { loadFromStorage, saveToStorage } from "./utils/storageHelpers";
+import { loadDrawings, saveDrawings, deleteDrawings } from "./services/chartStorageService";
+import { useChartKeyboardShortcuts } from "./hooks/useChartKeyboardShortcuts";
+import { useDrawingToolbarPosition } from "./hooks/useDrawingToolbarPosition";
+import { useReplayMode } from "./hooks/useReplayMode";
 import { useI18n } from "./i18n";
 import type { Candle, Drawing, SymbolInfo, Ticker, WatchlistFilter } from "./types";
 
@@ -34,8 +41,13 @@ function buildWatchlist(symbolNames: string[]): WatchlistItemData[] {
 
 const TradingDashboard: React.FC = () => {
   const { t } = useI18n();
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const [activeTool, setActiveTool] = useState("cursor");
   const [drawings, setDrawings] = useState<Drawing[]>([]);
+  const [selectedDrawingIds, setSelectedDrawingIds] = useState<(string | number)[]>([]);
+  const [magnetEnabled, setMagnetEnabled] = useState(false);
+  const [currentTimeframe, setCurrentTimeframe] = useState("1m");
+  const [isDrawing, setIsDrawing] = useState(false);
   const [selectedSymbol, setSelectedSymbol] = useState<string>(() => {
     const stored = loadFromStorage("app_selectedSymbol", "BTCUSDT");
     if (stored && !stored.endsWith("USDT")) return "BTCUSDT";
@@ -120,17 +132,186 @@ const TradingDashboard: React.FC = () => {
   useEffect(() => { saveToStorage("app_starred", starredSymbols); }, [starredSymbols]);
   useEffect(() => { saveToStorage("app_selectedSymbol", selectedSymbol); }, [selectedSymbol]);
 
-  const handleAddDrawing = useCallback(
-    (d: Drawing) => setDrawings((prev) => [...prev, d]),
-    [],
+  // Load drawings when symbol or timeframe changes
+  useEffect(() => {
+    const loadDrawingsForChart = async () => {
+      try {
+        const loaded = await loadDrawings({
+          symbol: selectedSymbol,
+          timeframe: currentTimeframe,
+          storageVersion: 1,
+        });
+        setDrawings(loaded);
+      } catch (error) {
+        console.error('[App] Failed to load drawings:', error);
+        setDrawings([]);
+      }
+    };
+
+    loadDrawingsForChart();
+  }, [selectedSymbol, currentTimeframe]);
+
+  // Save drawings when they change (debounced)
+  useEffect(() => {
+    const timeoutId = setTimeout(async () => {
+      try {
+        await saveDrawings(
+          {
+            symbol: selectedSymbol,
+            timeframe: currentTimeframe,
+            storageVersion: 1,
+          },
+          drawings
+        );
+      } catch (error) {
+        console.error('[App] Failed to save drawings:', error);
+      }
+    }, 500); // Debounce 500ms
+
+    return () => clearTimeout(timeoutId);
+  }, [drawings, selectedSymbol, currentTimeframe]);
+
+  // Keyboard shortcuts with command history - initialize early
+  const handleCancelDrawing = useCallback(() => {
+    setIsDrawing(false);
+  }, []);
+
+  const handleDeleteDrawingsInternal = useCallback(
+    (ids: (string | number)[]) => {
+      setDrawings((prev) => prev.filter((d) => !ids.includes(d.id)));
+      setSelectedDrawingIds([]);
+    },
+    []
   );
-  const handleClearAll = useCallback(() => {
+
+  const handleSaveDrawings = useCallback(async () => {
+    try {
+      await saveDrawings(
+        {
+          symbol: selectedSymbol,
+          timeframe: currentTimeframe,
+          storageVersion: 1,
+        },
+        drawings
+      );
+      console.log('[App] Drawings saved successfully');
+    } catch (error) {
+      console.error('[App] Failed to save drawings:', error);
+    }
+  }, [selectedSymbol, currentTimeframe, drawings]);
+
+  const { addCommand } = useChartKeyboardShortcuts({
+    drawings,
+    selectedDrawingIds,
+    onSetDrawings: setDrawings,
+    onSetSelectedDrawingIds: setSelectedDrawingIds,
+    onDeleteDrawings: handleDeleteDrawingsInternal,
+    onSaveDrawings: handleSaveDrawings,
+    isDrawing,
+    onCancelDrawing: handleCancelDrawing,
+    chartContainerRef,
+  });
+
+  const handleAddDrawing = useCallback(
+    (d: Drawing) => {
+      setDrawings((prev) => [...prev, d]);
+
+      // Record add command
+      addCommand({
+        type: 'add',
+        timestamp: Date.now(),
+        drawingId: d.id,
+        after: d,
+        description: `Add ${d.tool}`,
+      });
+    },
+    [addCommand],
+  );
+
+  const handleUpdateDrawing = useCallback(
+    (id: string | number, updates: Partial<Drawing>) => {
+      setDrawings((prev) => {
+        const oldDrawing = prev.find(d => d.id === id);
+        const newDrawings = prev.map((d) => (d.id === id ? { ...d, ...updates } : d));
+
+        // Record update command
+        if (oldDrawing) {
+          const newDrawing = newDrawings.find(d => d.id === id);
+          addCommand({
+            type: 'update',
+            timestamp: Date.now(),
+            drawingId: id,
+            before: oldDrawing,
+            after: newDrawing,
+            description: `Update ${oldDrawing.tool}`,
+          });
+        }
+
+        return newDrawings;
+      });
+    },
+    [addCommand]
+  );
+
+  const handleDeleteDrawing = useCallback(
+    (id: string | number) => {
+      setDrawings((prev) => {
+        const deletedDrawing = prev.find(d => d.id === id);
+
+        // Record delete command
+        if (deletedDrawing) {
+          addCommand({
+            type: 'delete',
+            timestamp: Date.now(),
+            drawingId: id,
+            before: deletedDrawing,
+            description: `Delete ${deletedDrawing.tool}`,
+          });
+        }
+
+        return prev.filter((d) => d.id !== id);
+      });
+      setSelectedDrawingIds((prev) => prev.filter((sid) => sid !== id));
+    },
+    [addCommand]
+  );
+
+  const handleDeleteDrawings = handleDeleteDrawingsInternal;
+
+  const handleClearAll = useCallback(async () => {
     setDrawings([]);
     setActiveTool("cursor");
+    try {
+      await deleteDrawings({
+        symbol: selectedSymbol,
+        timeframe: currentTimeframe,
+        storageVersion: 1,
+      });
+    } catch (error) {
+      console.error('[App] Failed to delete drawings:', error);
+    }
+  }, [selectedSymbol, currentTimeframe]);
+
+  const handleLockAll = useCallback(() => {
+    setDrawings((prev) =>
+      prev.map((d) => ({ ...d, locked: !d.locked }))
+    );
   }, []);
+
+  const handleHideAll = useCallback(() => {
+    setDrawings((prev) =>
+      prev.map((d) => ({ ...d, hidden: !d.hidden }))
+    );
+  }, []);
+
   const handleSymbolSelect = useCallback((symbol: string) => {
     setSelectedSymbol(symbol);
-    setDrawings([]);
+    // Drawings will be loaded by useEffect
+  }, []);
+
+  const handleTimeframeChange = useCallback((timeframe: string) => {
+    setCurrentTimeframe(timeframe);
+    // Drawings will be loaded by useEffect
   }, []);
   const handleToolSettingsChange = useCallback((toolId: string, newSettings: ToolSettings) => {
     setToolSettings((prev) => ({ ...prev, [toolId]: newSettings }));
@@ -147,6 +328,102 @@ const TradingDashboard: React.FC = () => {
   // State lifted from CandlestickChart for Overview + DrawingToolbar gating
   const [chartActiveTab, setChartActiveTab] = useState("chart");
   const [chartCandles, setChartCandles] = useState<Candle[]>([]);
+
+  // Chart API refs for floating toolbar positioning
+  const [chartApi, setChartApi] = useState<any>(null);
+  const [candleSeries, setCandleSeries] = useState<any>(null);
+
+  // Replay mode state and hook
+  const {
+    isReplayActive,
+    isPlaying,
+    playbackSpeed,
+    currentIndex,
+    totalCandles,
+    startReplay,
+    exitReplay,
+    togglePlayPause,
+    stepForward,
+    changeSpeed,
+  } = useReplayMode({
+    onCandleUpdate: useCallback((candle: Candle) => {
+      // Update chart with replay candle
+      if (candleSeries) {
+        candleSeries.update(candle);
+      }
+    }, [candleSeries]),
+  });
+
+  // Replay selection mode state
+  const [isReplaySelectionMode, setIsReplaySelectionMode] = useState(false);
+
+  // Handle replay button click - enter selection mode
+  const handleReplayButtonClick = useCallback(() => {
+    if (isReplayActive) {
+      // Already in replay mode, exit it
+      exitReplay();
+    } else {
+      // Enter selection mode
+      setIsReplaySelectionMode(true);
+      setActiveTool('cursor'); // Switch to cursor for selection
+    }
+  }, [isReplayActive, exitReplay]);
+
+  // Handle candle click in selection mode
+  const handleReplayStartSelect = useCallback((timestamp: number) => {
+    if (isReplaySelectionMode && chartCandles.length > 0) {
+      // Find the index of the clicked candle
+      const clickedIndex = chartCandles.findIndex(c => c.time === timestamp);
+      if (clickedIndex >= 0) {
+        // Get candles from clicked point to current
+        const replayBuffer = chartCandles.slice(clickedIndex);
+
+        // Clear chart and set initial candle
+        if (candleSeries) {
+          candleSeries.setData([replayBuffer[0]]);
+        }
+
+        // Start replay from this point
+        startReplay(replayBuffer, 0);
+        setIsReplaySelectionMode(false);
+      }
+    }
+  }, [isReplaySelectionMode, chartCandles, startReplay, candleSeries]);
+
+  // Exit selection mode when replay starts or user cancels
+  useEffect(() => {
+    if (isReplayActive) {
+      setIsReplaySelectionMode(false);
+    }
+  }, [isReplayActive]);
+
+  // Restore chart data when exiting replay mode
+  useEffect(() => {
+    if (!isReplayActive && candleSeries && chartCandles.length > 0) {
+      // Restore full chart data when exiting replay
+      candleSeries.setData(chartCandles);
+    }
+  }, [isReplayActive, candleSeries, chartCandles]);
+
+  // Get selected drawing for context toolbar
+  const selectedDrawing = selectedDrawingIds.length === 1
+    ? drawings.find(d => d.id === selectedDrawingIds[0]) || null
+    : null;
+
+  // Calculate toolbar position
+  const toolbarPosition = useDrawingToolbarPosition({
+    drawing: selectedDrawing,
+    chartApi,
+    candleSeries,
+    offset: { x: 10, y: -60 },
+  });
+
+  // Handle alert creation (placeholder for now)
+  const handleAddAlert = useCallback(() => {
+    // TODO: Implement alert dialog in next session
+    console.log('[App] Add alert for drawing:', selectedDrawing?.id);
+    alert('Alert feature will be implemented in Step 5');
+  }, [selectedDrawing]);
 
   // Resizable right sidebar
   const SIDEBAR_MIN = 280;
@@ -210,10 +487,22 @@ const TradingDashboard: React.FC = () => {
         {/* Drawing Toolbar — only visible on Chart tab */}
         {isChartTab && (
           <div className="mr-2 flex-shrink-0">
+            {/* Replay Mode Button */}
+            <ReplayButton
+              onClick={handleReplayButtonClick}
+              disabled={isReplaySelectionMode}
+            />
+
             <DrawingToolbar
               activeTool={activeTool}
               onToolChange={setActiveTool}
               onClearAll={handleClearAll}
+              onDeleteSelected={() => handleDeleteDrawings(selectedDrawingIds)}
+              selectedDrawingIds={selectedDrawingIds}
+              onLockAll={handleLockAll}
+              onHideAll={handleHideAll}
+              magnetEnabled={magnetEnabled}
+              onMagnetToggle={() => setMagnetEnabled((prev) => !prev)}
               toolSettings={toolSettings}
               onToolSettingsChange={handleToolSettingsChange}
             />
@@ -221,7 +510,7 @@ const TradingDashboard: React.FC = () => {
         )}
 
         {/* Chart area */}
-        <div className="flex-grow flex flex-col" style={{ minWidth: 0 }}>
+        <div className="flex-grow flex flex-col" style={{ minWidth: 0 }} ref={chartContainerRef}>
           <div
             className="bg-gray-900 rounded-lg shadow-lg flex-grow"
             style={{ minHeight: 0 }}
@@ -234,13 +523,59 @@ const TradingDashboard: React.FC = () => {
               onSymbolChange={handleSymbolSelect}
               onActiveTabChange={setChartActiveTab}
               onCandlesChange={setChartCandles}
+              onTimeframeChange={handleTimeframeChange}
+              isReplayActive={isReplayActive}
             >
-              <ChartOverlay
-                activeTool={isChartTab ? activeTool : "cursor"}
-                drawings={drawings}
-                onAddDrawing={handleAddDrawing}
-                toolSettings={toolSettings}
-              />
+              {(chartApiRef, candleSeriesRef) => {
+                // Store refs for toolbar positioning
+                if (chartApiRef !== chartApi) setChartApi(chartApiRef);
+                if (candleSeriesRef !== candleSeries) setCandleSeries(candleSeriesRef);
+
+                return (
+                  <>
+                    <ChartOverlay
+                      activeTool={isChartTab ? activeTool : "cursor"}
+                      drawings={drawings}
+                      onAddDrawing={handleAddDrawing}
+                      onUpdateDrawing={handleUpdateDrawing}
+                      onDeleteDrawing={handleDeleteDrawing}
+                      toolSettings={toolSettings}
+                      chartApi={chartApiRef}
+                      candleSeries={candleSeriesRef}
+                      magnetEnabled={magnetEnabled}
+                      selectedDrawingIds={selectedDrawingIds}
+                      onSetSelectedDrawingIds={setSelectedDrawingIds}
+                      isReplaySelectionMode={isReplaySelectionMode}
+                      onReplayStartSelect={handleReplayStartSelect}
+                    />
+                    {/* Floating Context Toolbar */}
+                    {selectedDrawing && isChartTab && (
+                      <DrawingContextToolbar
+                        drawing={selectedDrawing}
+                        position={toolbarPosition}
+                        onUpdateDrawing={(updates) => handleUpdateDrawing(selectedDrawing.id, updates)}
+                        onDelete={() => handleDeleteDrawing(selectedDrawing.id)}
+                        onAddAlert={handleAddAlert}
+                        onClose={() => setSelectedDrawingIds([])}
+                      />
+                    )}
+
+                    {/* Replay Controls */}
+                    {isReplayActive && (
+                      <ReplayControls
+                        isPlaying={isPlaying}
+                        playbackSpeed={playbackSpeed}
+                        currentIndex={currentIndex}
+                        totalCandles={totalCandles}
+                        onPlayPause={togglePlayPause}
+                        onStepForward={stepForward}
+                        onSpeedChange={changeSpeed}
+                        onExit={exitReplay}
+                      />
+                    )}
+                  </>
+                );
+              }}
             </CandlestickChart>
           </div>
         </div>

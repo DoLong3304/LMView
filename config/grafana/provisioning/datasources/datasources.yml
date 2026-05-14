@@ -1,0 +1,43 @@
+apiVersion: 1
+
+datasources:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PROMETHEUS (Metrics)
+  # ─────────────────────────────────────────────────────────────────────────────
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: 15s
+      queryTimeout: 60s
+      httpMethod: POST
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # INFLUXDB (Candle Data)
+  # ─────────────────────────────────────────────────────────────────────────────
+  - name: InfluxDB
+    type: influxdb
+    access: proxy
+    url: http://influxdb:8086
+    editable: true
+    jsonData:
+      version: Flux
+      organization: vi
+      defaultBucket: crypto
+      tlsSkipVerify: true
+    secureJsonData:
+      token: ${INFLUX_TOKEN}
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # LOKI (Logs) - Will be added in Phase 3
+  # ─────────────────────────────────────────────────────────────────────────────
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    editable: true
+    jsonData:
+      maxLines: 1000

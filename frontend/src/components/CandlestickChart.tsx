@@ -7,8 +7,9 @@ import {
   HistogramSeries,
   LineSeries,
 } from "lightweight-charts";
-import { Settings, Download } from "lucide-react";
+import { Settings, Download, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
 import { useI18n } from "../i18n";
+import { useChartZoom } from "../hooks/useChartZoom";
 import {
   fetchCandles,
   fetchHistoricalCandles,
@@ -38,12 +39,15 @@ interface CandlestickChartProps {
   defaultSymbol?: string;
   symbol?: string;
   symbols?: string[];
-  children?: React.ReactNode;
+  children?: React.ReactNode | ((chartApi: any, candleSeries: any) => React.ReactNode);
   starredSymbols?: string[];
   onToggleStar?: (symbol: string) => void;
   onSymbolChange?: (symbol: string) => void;
   onActiveTabChange?: (tab: string) => void;
   onCandlesChange?: (candles: Candle[]) => void;
+  onTimeframeChange?: (timeframe: string) => void;
+  // Replay mode props
+  isReplayActive?: boolean;
 }
 
 interface TooltipData {
@@ -65,6 +69,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   onSymbolChange,
   onActiveTabChange,
   onCandlesChange,
+  onTimeframeChange,
+  isReplayActive = false,
 }) => {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -82,6 +88,13 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   const [symbol, setSymbol] = useState(symbolProp || defaultSymbol);
   const [timeframe, setTimeframe] = useState("1m");
+
+  // Notify parent when timeframe changes
+  useEffect(() => {
+    if (onTimeframeChange) {
+      onTimeframeChange(timeframe);
+    }
+  }, [timeframe, onTimeframeChange]);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
   const [showIndPanel, setShowIndPanel] = useState(false);
   const [indSettings, setIndSettings] = useState<Record<string, IndicatorSettings>>(() =>
@@ -102,6 +115,14 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const historicalRequestIdRef = useRef(0);
+
+  // Initialize zoom control hook
+  const { zoomIn, zoomOut, resetZoom, canZoomIn, canZoomOut } = useChartZoom({
+    chartApi: chartRef.current,
+    initialBarSpacing: 8,
+    minBarSpacing: 3,
+    maxBarSpacing: 50,
+  });
 
   const getTimeframeSeconds = useCallback((tf: string) => {
     return SERVICE_TIMEFRAMES[(tf || "").toLowerCase()]?.seconds || 3600;
@@ -634,6 +655,15 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     setNoData(false);
     loadData();
 
+    // ⚠️ CRITICAL: Block WebSocket subscription when replay mode is active
+    // to prevent live data from interfering with replay playback
+    if (isReplayActive) {
+      // In replay mode, do NOT subscribe to WebSocket or polling
+      return () => {
+        cancelled = true;
+      };
+    }
+
     // Subscribe to real-time candle updates via WebSocket.
     //
     // 1s  : Every WS message with a new timestamp draws a brand-new candle.
@@ -790,7 +820,24 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     retryCount,
     applyDataToChart,
     preloadInitialCandles,
+    isReplayActive, // ⚠️ Re-run when replay mode changes to block/unblock WebSocket
   ]);
+
+  // ⚠️ CRITICAL: Cleanup WebSocket immediately when entering replay mode
+  useEffect(() => {
+    if (isReplayActive) {
+      // Unsubscribe WebSocket
+      if (unsubscribeRef.current) {
+        unsubscribeRef.current();
+        unsubscribeRef.current = null;
+      }
+      // Stop poll interval
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    }
+  }, [isReplayActive]);
 
   // Load historical data when date range is set
   // (Removed - now handled by handleHistoricalRange callback)
@@ -989,6 +1036,40 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
             onApply={handleHistoricalRange}
             onClear={handleBackToLive}
           />
+          {/* Zoom controls */}
+          <div className="flex items-center gap-1 border border-gray-600 rounded overflow-hidden">
+            <button
+              onClick={zoomIn}
+              disabled={!canZoomIn}
+              className={`px-2 py-1 text-xs font-medium transition-colors ${
+                canZoomIn
+                  ? "text-gray-400 hover:text-white hover:bg-gray-700"
+                  : "text-gray-600 cursor-not-allowed"
+              }`}
+              title={t("zoomIn")}
+            >
+              <ZoomIn size={12} />
+            </button>
+            <button
+              onClick={zoomOut}
+              disabled={!canZoomOut}
+              className={`px-2 py-1 text-xs font-medium border-l border-gray-600 transition-colors ${
+                canZoomOut
+                  ? "text-gray-400 hover:text-white hover:bg-gray-700"
+                  : "text-gray-600 cursor-not-allowed"
+              }`}
+              title={t("zoomOut")}
+            >
+              <ZoomOut size={12} />
+            </button>
+            <button
+              onClick={resetZoom}
+              className="px-2 py-1 text-xs font-medium border-l border-gray-600 text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+              title={t("resetZoom")}
+            >
+              <Maximize2 size={12} />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1069,7 +1150,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
               </p>
             </div>
           )}
-          {children}
+          {typeof children === 'function'
+            ? children(chartRef.current, candleRef.current)
+            : children}
         </div>
       </div>
 

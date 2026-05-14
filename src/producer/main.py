@@ -46,6 +46,7 @@ from common.kafka_client import flush_and_close, init_producer, send_to_kafka
 from common.logging import setup_logging
 from exchanges.base import ExchangeClient
 from exchanges.binance.client import BinanceClient
+from exchanges.okx.client import OKXClient
 
 log = logging.getLogger(__name__)
 
@@ -282,7 +283,7 @@ def run() -> None:
     setup_logging("producer")
 
     log.info("=" * 60)
-    log.info("Quad-Stream Producer starting...")
+    log.info("Multi-Exchange Producer starting...")
     log.info("  → Stream A: !ticker@arr                    → topic: %s", KAFKA_TOPIC_TICKER)
     log.info("  → Stream B: @aggTrade                      → topic: %s", KAFKA_TOPIC_TRADES)
     log.info("  → Stream C: @kline_%s                    → topic: %s", KLINE_INTERVAL_WS, KAFKA_TOPIC_KLINES)
@@ -303,9 +304,15 @@ def run() -> None:
     avro_serializer.register(KAFKA_TOPIC_DEPTH,  os.path.join(schema_dir, "depth.avsc"))
     log.info("All Avro schemas registered.")
 
-    # ── Start streams (currently Binance only) ───────────────────────────────
+    # ── Start streams for Binance ────────────────────────────────────────────
+    log.info("Starting Binance streams...")
     binance = BinanceClient()
     run_streams(binance)
+
+    # ── Start streams for OKX (Active-Active HA) ─────────────────────────────
+    log.info("Starting OKX streams (Active-Active HA)...")
+    okx = OKXClient()
+    run_streams(okx)
 
     # ── Block main thread until shutdown ─────────────────────────────────────
     try:

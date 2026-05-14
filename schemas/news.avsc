@@ -1,0 +1,14 @@
+{
+  "type": "record",
+  "name": "NewsSentiment",
+  "namespace": "com.cryptoprice",
+  "fields": [
+    {"name": "event_time",      "type": "long"},
+    {"name": "source",          "type": "string"},
+    {"name": "title",           "type": "string"},
+    {"name": "sentiment_score", "type": "double"},
+    {"name": "symbols",         "type": {"type": "array", "items": "string"}},
+    {"name": "url",             "type": ["null", "string"], "default": null},
+    {"name": "published_at",    "type": ["null", "long"], "default": null}
+  ]
+}

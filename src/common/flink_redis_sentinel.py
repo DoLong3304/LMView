@@ -2,11 +2,13 @@
 Redis Sentinel client for Flink (synchronous)
 
 Flink uses synchronous Python, so we need a sync version of Sentinel client.
+Supports both Sentinel mode and direct connection fallback.
 """
 
 import os
 import logging
 from redis.sentinel import Sentinel
+import redis
 
 log = logging.getLogger(__name__)
 
@@ -17,36 +19,42 @@ class FlinkRedisSentinel:
 
     Provides master connection for writes.
     Flink writers only write, so we only need master connection.
+    Falls back to direct Redis connection if Sentinel is not configured.
     """
 
     def __init__(self):
-        # Get sentinel nodes from environment
-        sentinels_str = os.getenv(
-            'REDIS_SENTINELS',
-            'redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379'
-        )
-        self.sentinel_nodes = [
-            tuple(node.split(':')) for node in sentinels_str.split(',')
-        ]
-        # Convert port to int
-        self.sentinel_nodes = [
-            (host, int(port)) for host, port in self.sentinel_nodes
-        ]
+        # Check if Sentinel is configured
+        sentinels_str = os.getenv('REDIS_SENTINELS', '')
 
-        self.master_name = os.getenv('REDIS_MASTER_NAME', 'mymaster')
+        if sentinels_str:
+            self._mode = 'sentinel'
+            self.sentinel_nodes = [
+                tuple(node.split(':')) for node in sentinels_str.split(',')
+            ]
+            # Convert port to int
+            self.sentinel_nodes = [
+                (host, int(port)) for host, port in self.sentinel_nodes
+            ]
 
-        # Create sentinel
-        self.sentinel = Sentinel(
-            self.sentinel_nodes,
-            socket_timeout=0.5,
-            socket_connect_timeout=0.5,
-            sentinel_kwargs={
-                'socket_timeout': 0.5,
-                'socket_connect_timeout': 0.5
-            }
-        )
+            self.master_name = os.getenv('REDIS_MASTER_NAME', 'mymaster')
 
-        log.info(f"Flink Redis Sentinel initialized: sentinels={self.sentinel_nodes}, master={self.master_name}")
+            # Create sentinel
+            self.sentinel = Sentinel(
+                self.sentinel_nodes,
+                socket_timeout=0.5,
+                socket_connect_timeout=0.5,
+                sentinel_kwargs={
+                    'socket_timeout': 0.5,
+                    'socket_connect_timeout': 0.5
+                }
+            )
+            log.info(f"Flink Redis Sentinel initialized: sentinels={self.sentinel_nodes}, master={self.master_name}")
+        else:
+            self._mode = 'direct'
+            self._redis_host = os.getenv('REDIS_HOST', 'redis-master')
+            self._redis_port = int(os.getenv('REDIS_PORT', '6379'))
+            self._redis_db = int(os.getenv('REDIS_DB', '0'))
+            log.info(f"Flink Redis direct mode: host={self._redis_host}, port={self._redis_port}, db={self._redis_db}")
 
     def get_master(self):
         """
@@ -55,13 +63,25 @@ class FlinkRedisSentinel:
         Returns:
             redis.Redis: Master connection
         """
-        return self.sentinel.master_for(
-            self.master_name,
-            socket_timeout=0.5,
-            socket_connect_timeout=0.5,
-            decode_responses=True,
-            socket_keepalive=True
-        )
+        if self._mode == 'sentinel':
+            return self.sentinel.master_for(
+                self.master_name,
+                socket_timeout=0.5,
+                socket_connect_timeout=0.5,
+                decode_responses=True,
+                socket_keepalive=True
+            )
+        else:
+            return redis.Redis(
+                host=self._redis_host,
+                port=self._redis_port,
+                db=self._redis_db,
+                socket_timeout=0.5,
+                socket_connect_timeout=0.5,
+                decode_responses=True,
+                socket_keepalive=True,
+                health_check_interval=30
+            )
 
 
 # Global instance (created once per Flink task)
