@@ -5,6 +5,7 @@ groups:
   # FLINK ALERTS
   # ═══════════════════════════════════════════════════════════════════════════
   - name: flink_alerts
+    folder: "Alerts"
     interval: 1m
     rules:
       - uid: flink_job_restarting
@@ -53,6 +54,7 @@ groups:
   # KAFKA ALERTS
   # ═══════════════════════════════════════════════════════════════════════════
   - name: kafka_alerts
+    folder: "Alerts"
     interval: 1m
     rules:
       - uid: kafka_consumer_lag_high
@@ -101,6 +103,7 @@ groups:
   # API ALERTS
   # ═══════════════════════════════════════════════════════════════════════════
   - name: api_alerts
+    folder: "Alerts"
     interval: 1m
     rules:
       - uid: api_high_latency
@@ -149,6 +152,7 @@ groups:
   # SYSTEM ALERTS
   # ═══════════════════════════════════════════════════════════════════════════
   - name: system_alerts
+    folder: "Alerts"
     interval: 1m
     rules:
       - uid: high_memory_usage

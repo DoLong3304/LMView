@@ -8,7 +8,7 @@
 .PHONY: core
 core: ## Start ONLY core services (17GB RAM) - Default for daily dev
 	@echo "🚀 Starting CORE services (17GB RAM)..."
-	docker compose up -d
+	docker compose --profile dev up -d
 	@echo "✅ Core services started!"
 	@echo "   Frontend: http://localhost"
 	@echo "   FastAPI:  http://localhost:8080"
@@ -17,7 +17,7 @@ core: ## Start ONLY core services (17GB RAM) - Default for daily dev
 .PHONY: monitoring
 monitoring: core ## Start core + monitoring stack (18GB RAM) - For performance monitoring
 	@echo "📊 Starting MONITORING stack (18GB RAM total)..."
-	docker compose --profile monitoring up -d
+	docker compose --profile dev --profile monitoring up -d
 	@echo "✅ Monitoring started!"
 	@echo "   Grafana:    http://localhost:3001 (admin/admin)"
 	@echo "   Prometheus: http://localhost:9090"
@@ -25,7 +25,7 @@ monitoring: core ## Start core + monitoring stack (18GB RAM) - For performance m
 .PHONY: logs
 logs: monitoring ## Start core + monitoring + logs (18.8GB RAM) - For debugging
 	@echo "📝 Starting LOGGING stack (18.8GB RAM total)..."
-	docker compose --profile monitoring --profile logging up -d
+	docker compose --profile dev --profile monitoring --profile logging up -d
 	@echo "✅ Logging started!"
 	@echo "   Loki API: http://localhost:3100"
 	@echo "   Logs in Grafana: http://localhost:3001 → Centralized Logs dashboard"
@@ -48,7 +48,7 @@ stop-monitoring: ## Stop monitoring stack
 .PHONY: stop-core
 stop-core: ## Stop core services
 	@echo "🛑 Stopping CORE services..."
-	docker compose down
+	docker compose --profile dev down
 	@echo "✅ Core stopped"
 
 .PHONY: stop-all
@@ -63,34 +63,34 @@ restart-core: ## Restart core services
 # ─── Development (Legacy - uses old docker-compose.yml) ──────────────────────
 
 .PHONY: dev
-dev: ## [LEGACY] Start all services in development mode (hot-reload, no SSL)
-	docker compose up -d
+dev: ## Start all services in development mode (hot-reload, no SSL)
+	docker compose --profile dev up -d
 
 .PHONY: dev-build
-dev-build: ## [LEGACY] Rebuild and start in development mode
-	docker compose up -d --build
+dev-build: ## Rebuild and start in development mode
+	docker compose --profile dev up -d --build
 
 .PHONY: dev-logs
 dev-logs: ## Tail logs for all services
 	docker compose logs -f
 
 .PHONY: dev-down
-dev-down: ## [LEGACY] Stop all development services
-	docker compose down
+dev-down: ## Stop all development services
+	docker compose --profile dev down
 
 # ─── Production ──────────────────────────────────────────────────────────────
 
 .PHONY: prod
 prod: ## Start all services in production mode (SSL, multi-worker)
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+	docker compose --profile prod up -d
 
 .PHONY: prod-build
 prod-build: ## Rebuild and start in production mode
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+	docker compose --profile prod up -d --build
 
 .PHONY: prod-down
 prod-down: ## Stop all production services
-	docker compose -f docker-compose.yml -f docker-compose.prod.yml down
+	docker compose --profile prod down
 
 # ─── Jobs ────────────────────────────────────────────────────────────────────
 

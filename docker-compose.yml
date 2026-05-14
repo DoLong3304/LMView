@@ -781,14 +781,11 @@ services:
   # API LAYER (FastAPI)
   # ══════════════════════════════════════════════════════════════════════════════
 
-  fastapi:
+  x-fastapi:
+    profiles: ["dont-start"]
     build:
       context: .
       dockerfile: docker/fastapi/Dockerfile
-    container_name: fastapi
-    hostname: fastapi
-    ports:
-      - "8080:8000"
     restart: unless-stopped
     environment:
       REDIS_SENTINELS: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
@@ -800,11 +797,12 @@ services:
       INFLUX_ORG: ${INFLUX_ORG}
       INFLUX_BUCKET: ${INFLUX_BUCKET}
       INFLUX_1M_RETENTION_DAYS: 90
-      CORS_ORIGINS: "*"
       TRINO_HOST: trino
       TRINO_PORT: 8080
     networks:
-      - crypto-net
+      crypto-net:
+        aliases:
+          - fastapi
     depends_on:
       redis-master:
         condition: service_healthy
@@ -814,10 +812,6 @@ services:
         condition: service_healthy
       trino:
         condition: service_healthy
-    deploy:
-      resources:
-        limits:
-          memory: 512M
     healthcheck:
       test:
         [
@@ -831,33 +825,55 @@ services:
       retries: 3
       start_period: 10s
 
+  fastapi-dev:
+    extends: x-fastapi
+    profiles: ["dev"]
+    container_name: fastapi-dev
+    hostname: fastapi-dev
+    command: uvicorn backend.app:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app/backend
+    ports:
+      - "8080:8000"
+    environment:
+      CORS_ORIGINS: "http://localhost:3000,http://localhost:3001,http://localhost"
+
+  fastapi-prod:
+    extends: x-fastapi
+    profiles: ["prod"]
+    container_name: fastapi-prod
+    hostname: fastapi-prod
+    command: uvicorn backend.app:app --host 0.0.0.0 --port 8000 --workers 4
+    ports:
+      - "8080:8000"
+    environment:
+      CORS_ORIGINS: "https://${CERTBOT_DOMAIN:-localhost}"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
   # ══════════════════════════════════════════════════════════════════════════════
   # FRONTEND (Nginx + React SPA)
   # ══════════════════════════════════════════════════════════════════════════════
 
-  nginx:
+  x-nginx:
+    profiles: ["dont-start"]
     build:
       context: .
       dockerfile: docker/nginx/Dockerfile
     image: cryptoprice/nginx:latest
-    container_name: nginx
-    hostname: nginx
     ports:
       - "80:80"
       - "443:443"
-    environment:
-      - CERTBOT_DOMAIN=${CERTBOT_DOMAIN:-localhost}
-      - NGINX_AUTO_RELOAD_ENABLE=${NGINX_AUTO_RELOAD_ENABLE:-1}
-      - NGINX_RELOAD_INTERVAL_SECONDS=${NGINX_RELOAD_INTERVAL_SECONDS:-21600}
     volumes:
       - letsencrypt:/etc/letsencrypt
       - certbot-webroot:/var/www/certbot
     restart: unless-stopped
     networks:
-      - crypto-net
-    depends_on:
-      fastapi:
-        condition: service_healthy
+      crypto-net:
+        aliases:
+          - nginx
     deploy:
       resources:
         limits:
@@ -866,14 +882,34 @@ services:
       test:
         [
           "CMD-SHELL",
-          "wget -q --spider --no-check-certificate https://127.0.0.1/ || exit 1",
+          "wget -q --spider --no-check-certificate http://127.0.0.1/ || exit 1",
         ]
       interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
 
+  nginx-dev:
+    extends: x-nginx
+    profiles: ["dev"]
+    container_name: nginx-dev
+    hostname: nginx-dev
+    environment:
+      - CERTBOT_DOMAIN=localhost
+      - NGINX_AUTO_RELOAD_ENABLE=0
+
+  nginx-prod:
+    extends: x-nginx
+    profiles: ["prod"]
+    container_name: nginx-prod
+    hostname: nginx-prod
+    environment:
+      - CERTBOT_DOMAIN=${CERTBOT_DOMAIN:-localhost}
+      - NGINX_AUTO_RELOAD_ENABLE=${NGINX_AUTO_RELOAD_ENABLE:-1}
+      - NGINX_RELOAD_INTERVAL_SECONDS=${NGINX_RELOAD_INTERVAL_SECONDS:-21600}
+
   certbot-auto:
+    profiles: ["prod"]
     image: certbot/certbot:latest
     container_name: certbot-auto
     restart: unless-stopped
@@ -887,10 +923,11 @@ services:
       - ./scripts:/scripts:ro
     entrypoint: ["sh", "/scripts/certbot_auto.sh"]
     depends_on:
-      nginx:
+      nginx-prod:
         condition: service_started
 
   duckdns-auto:
+    profiles: ["prod"]
     image: curlimages/curl:8.7.1
     container_name: duckdns-auto
     restart: unless-stopped
@@ -1008,7 +1045,7 @@ services:
     command:
       - --path.rootfs=/host
     volumes:
-      - /:/host:ro,rslave
+      - /:/host:ro
     ports:
       - "9100:9100"
     networks:
