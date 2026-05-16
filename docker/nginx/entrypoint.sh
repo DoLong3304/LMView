@@ -19,6 +19,14 @@ if [ ! -f "$CERT_DIR/fullchain.pem" ]; then
     echo "==> Temporary self-signed cert created. Run certbot to obtain a real certificate."
 fi
 
+# Generate htpasswd for monitoring endpoints (Prometheus, Loki)
+# Uses MONITORING_USER / MONITORING_PASSWORD env vars (defaults: admin/admin)
+HTPASSWD_FILE="/etc/nginx/.htpasswd"
+MONITORING_USER="${MONITORING_USER:-admin}"
+MONITORING_PASSWORD="${MONITORING_PASSWORD:-admin}"
+htpasswd -cb "$HTPASSWD_FILE" "$MONITORING_USER" "$MONITORING_PASSWORD" 2>/dev/null
+echo "==> htpasswd generated for monitoring endpoints (user: $MONITORING_USER)"
+
 if [ "${NGINX_AUTO_RELOAD_ENABLE:-1}" = "1" ]; then
     /usr/local/bin/nginx_auto_reload.sh &
 fi

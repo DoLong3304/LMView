@@ -3,38 +3,49 @@
 # ─────────────────────────────────────────────────────────────────────────────
 .DEFAULT_GOAL := help
 
-# ─── Profile-Based Startup (Recommended) ─────────────────────────────────────
+# ─── Development ─────────────────────────────────────────────────────────────
 
-.PHONY: core
-core: ## Start ONLY core services (17GB RAM) - Default for daily dev
-	@echo "🚀 Starting CORE services (17GB RAM)..."
+.PHONY: dev
+dev: ## Start core services in dev mode (hot-reload, localhost CORS)
+	@echo "🚀 Starting DEV services..."
 	docker compose --profile dev up -d
-	@echo "✅ Core services started!"
+	@echo "✅ Dev services started!"
 	@echo "   Frontend: http://localhost"
 	@echo "   FastAPI:  http://localhost:8080"
 	@echo "   Flink UI: http://localhost:8081"
 
+.PHONY: dev-build
+dev-build: ## Rebuild and start in development mode
+	docker compose --profile dev up -d --build
+
+.PHONY: dev-logs
+dev-logs: ## Tail logs for all running services
+	docker compose logs -f
+
+.PHONY: dev-down
+dev-down: ## Stop all development services
+	docker compose --profile dev down
+
+# ─── Monitoring & Logging (opt-in stacks) ────────────────────────────────────
+
 .PHONY: monitoring
-monitoring: core ## Start core + monitoring stack (18GB RAM) - For performance monitoring
-	@echo "📊 Starting MONITORING stack (18GB RAM total)..."
+monitoring: ## Start monitoring stack (Prometheus, Grafana, exporters)
+	@echo "📊 Starting MONITORING stack..."
 	docker compose --profile dev --profile monitoring up -d
 	@echo "✅ Monitoring started!"
 	@echo "   Grafana:    http://localhost:3001 (admin/admin)"
 	@echo "   Prometheus: http://localhost:9090"
 
-.PHONY: logs
-logs: monitoring ## Start core + monitoring + logs (18.8GB RAM) - For debugging
-	@echo "📝 Starting LOGGING stack (18.8GB RAM total)..."
+.PHONY: logging
+logging: ## Start logging stack (Loki, Promtail)
+	@echo "📝 Starting LOGGING stack..."
 	docker compose --profile dev --profile monitoring --profile logging up -d
 	@echo "✅ Logging started!"
 	@echo "   Loki API: http://localhost:3100"
 	@echo "   Logs in Grafana: http://localhost:3001 → Centralized Logs dashboard"
 
-.PHONY: full
-full: logs ## Start ALL services (alias for 'logs')
-
-.PHONY: stop-logs
-stop-logs: ## Stop logging stack
+.PHONY: stop-logging
+stop-logging: ## Stop logging stack
 	@echo "🛑 Stopping LOGGING stack..."
 	docker compose --profile logging stop loki promtail
 	@echo "✅ Logging stopped"
@@ -45,52 +56,29 @@ stop-monitoring: ## Stop monitoring stack
 	docker compose --profile monitoring stop prometheus grafana kafka-exporter node-exporter
 	@echo "✅ Monitoring stopped"
 
-.PHONY: stop-core
-stop-core: ## Stop core services
-	@echo "🛑 Stopping CORE services..."
-	docker compose --profile dev down
-	@echo "✅ Core stopped"
-
-.PHONY: stop-all
-stop-all: stop-logs stop-monitoring stop-core ## Stop ALL services
-
-.PHONY: restart-core
-restart-core: ## Restart core services
-	@echo "🔄 Restarting CORE services..."
-	docker compose restart
-	@echo "✅ Core restarted"
-
-# ─── Development (Legacy - uses old docker-compose.yml) ──────────────────────
-
-.PHONY: dev
-dev: ## Start all services in development mode (hot-reload, no SSL)
-	docker compose --profile dev up -d
-
-.PHONY: dev-build
-dev-build: ## Rebuild and start in development mode
-	docker compose --profile dev up -d --build
-
-.PHONY: dev-logs
-dev-logs: ## Tail logs for all services
-	docker compose logs -f
-
-.PHONY: dev-down
-dev-down: ## Stop all development services
-	docker compose --profile dev down
-
 # ─── Production ──────────────────────────────────────────────────────────────
 
 .PHONY: prod
-prod: ## Start all services in production mode (SSL, multi-worker)
-	docker compose --profile prod up -d
+prod: ## Start all services in production mode (SSL, multi-worker, domain CORS)
+	@echo "🚀 Starting PROD services..."
+	docker compose --profile prod --profile monitoring --profile logging up -d
+	@echo "✅ Production started!"
 
 .PHONY: prod-build
 prod-build: ## Rebuild and start in production mode
-	docker compose --profile prod up -d --build
+	docker compose --profile prod --profile monitoring --profile logging up -d --build
 
 .PHONY: prod-down
 prod-down: ## Stop all production services
-	docker compose --profile prod down
+	docker compose --profile prod --profile monitoring --profile logging down
+
+# ─── Stop All ────────────────────────────────────────────────────────────────
+
+.PHONY: stop-all
+stop-all: ## Stop ALL services across all profiles
+	@echo "🛑 Stopping ALL services..."
+	docker compose --profile dev --profile prod --profile monitoring --profile logging down
+	@echo "✅ All stopped"
 
 # ─── Jobs ────────────────────────────────────────────────────────────────────
 
@@ -117,9 +105,7 @@ test-cov: ## Run tests with coverage report
 .PHONY: status
 status: ## Show status and RAM usage of all containers
 	@echo "📊 Container Status:"
-	@docker compose -f docker-compose.core.yml ps 2>/dev/null || true
-	@docker compose -f docker-compose.monitoring.yml ps 2>/dev/null || true
-	@docker compose -f docker-compose.elk.yml ps 2>/dev/null || true
+	@docker compose ps 2>/dev/null || true
 	@echo ""
 	@echo "💾 RAM Usage (Top 20):"
 	@docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" | head -20
@@ -130,10 +116,7 @@ clean: ## Remove all containers, volumes, and networks (DANGEROUS)
 	@read -p "Are you sure? [y/N] " -n 1 -r; \
 	echo; \
 	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		docker compose -f docker-compose.elk.yml down -v 2>/dev/null || true; \
-		docker compose -f docker-compose.monitoring.yml down -v 2>/dev/null || true; \
-		docker compose -f docker-compose.core.yml down -v 2>/dev/null || true; \
-		docker compose down -v --remove-orphans 2>/dev/null || true; \
+		docker compose --profile dev --profile prod --profile monitoring --profile logging down -v --remove-orphans; \
 		echo "✅ All services and volumes removed"; \
 	else \
 		echo "❌ Cancelled"; \
@@ -141,21 +124,29 @@ clean: ## Remove all containers, volumes, and networks (DANGEROUS)
 
 .PHONY: help
 help: ## Show this help
-	@echo "Lambda Architecture - Docker Compose Profiles"
+	@echo "LMView — Docker Compose Targets"
 	@echo ""
-	@echo "📦 Profile-Based Startup (Recommended):"
-	@echo "  make core              Start ONLY core services (17GB RAM) - Daily dev"
-	@echo "  make monitoring        Start core + monitoring (18GB RAM) - Performance"
-	@echo "  make logs              Start core + monitoring + logs (18.8GB RAM) - Debug"
-	@echo "  make full              Start ALL services (alias for 'logs')"
+	@echo "🔧 Development:"
+	@echo "  make dev               Start core services in dev mode"
+	@echo "  make dev-build         Rebuild and start dev"
+	@echo "  make dev-logs          Tail logs"
+	@echo "  make dev-down          Stop dev services"
 	@echo ""
-	@echo "🛑 Stop Services:"
-	@echo "  make stop-logs         Stop logging stack"
+	@echo "📊 Monitoring & Logging (opt-in):"
+	@echo "  make monitoring        Start dev + monitoring stack"
+	@echo "  make logging           Start dev + monitoring + logging stack"
 	@echo "  make stop-monitoring   Stop monitoring stack"
-	@echo "  make stop-core         Stop core services"
-	@echo "  make stop-all          Stop ALL services"
+	@echo "  make stop-logging      Stop logging stack"
 	@echo ""
-	@echo "🔧 Other Commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v "Profile-Based\|Stop Services" | sort | \
+	@echo "🚀 Production:"
+	@echo "  make prod              Start all services in prod mode"
+	@echo "  make prod-build        Rebuild and start prod"
+	@echo "  make prod-down         Stop prod services"
+	@echo ""
+	@echo "🛑 Stop:"
+	@echo "  make stop-all          Stop ALL services across all profiles"
+	@echo ""
+	@echo "🔧 Other:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+		grep -v "dev\b\|dev-build\|dev-logs\|dev-down\|monitoring\b\|logging\b\|stop-monitoring\|stop-logging\|prod\b\|prod-build\|prod-down\|stop-all" | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
-
