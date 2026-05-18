@@ -157,7 +157,7 @@ make test-cov      # With coverage report
 
 ## 💭 Feedback and Contributing
 
-Open an [issue](https://github.com/StupidDuck64/Lambda-Architecture-for-TradingView-Style-Platform/issues) for bug reports or feature requests.
+Open an [issue](https://github.com/DoLong3304/LMView/issues) for bug reports or feature requests.
 
 See [AGENTS.md](docs/AGENTS.md) for coding guidelines if contributing with AI assistance.
 
