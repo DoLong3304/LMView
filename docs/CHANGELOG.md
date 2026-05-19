@@ -7,6 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.12.1] — 2026-05-19 — Integration Tests & API Routing
+
+### Changed
+- **Integration Test Suite** — Modernized test infrastructure to support Redis Sentinel HA by replacing legacy `get_redis` mocks with `get_redis_master`/`get_redis_replica`. Added global fixtures to mock FastAPI background tasks during testing.
+- **API Routing** — Reordered FastAPI router inclusions in `backend/app.py` to prioritize new `market_overview` routes over legacy `market` overlapping routes.
+
+### Added
+- **API Tests** — Added mandatory integration tests for `market_overview` (`/api/market/overview`, `/api/market/heatmap`, `/api/market/rankings`) and `news` (`/api/news/latest`, `/api/news/trending`, `/api/news/search`) endpoints.
+
+---
+
 ## [0.12.0] — 2026-05-19 — Market Overview & News Features (merged from `feature/viet-work`)
 
 ### Added
@@ -18,10 +29,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Redis Monitoring** — Added `redis-exporter` to the monitoring stack.
 
 ### Changed
+- **Integration Test Suite** — Modernized test infrastructure to support Redis Sentinel HA by replacing legacy `get_redis` mocks with `get_redis_master`/`get_redis_replica`. Added global fixtures to mock FastAPI background tasks during testing.
+- **API Routing** — Reordered FastAPI router inclusions in `backend/app.py` to prioritize new `market_overview` routes over legacy `market` overlapping routes.
 - **Dagster** — Version upgraded to `1.8.10`.
 - **Nginx** — Version upgraded to `1.31.0`.
 - **Certbot** — Version upgraded to `v5.6.0`.
 - **Trino** — Added JMX javaagent opts for Prometheus scraping.
+
+### Added
+- **API Tests** — Added mandatory integration tests for `market_overview` (`/api/market/overview`, `/api/market/heatmap`, `/api/market/rankings`) and `news` (`/api/news/latest`, `/api/news/trending`, `/api/news/search`) endpoints.
 
 ---
 

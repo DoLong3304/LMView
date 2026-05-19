@@ -4,6 +4,7 @@ Shared test fixtures and configuration.
 
 import os
 import pytest
+from unittest.mock import patch
 
 # Set environment variables before any backend imports
 os.environ.setdefault("INFLUX_TOKEN", "test-token")
@@ -46,3 +47,13 @@ def sample_1m_candles():
             "volume": 10.0 + i,
         })
     return candles
+
+
+@pytest.fixture(autouse=True)
+def mock_background_tasks():
+    """Mock background fetchers to prevent them from starting during tests."""
+    with patch("backend.app.news_fetcher.start"), \
+         patch("backend.app.news_fetcher.stop"), \
+         patch("backend.app.market_fetcher.start"), \
+         patch("backend.app.market_fetcher.stop"):
+        yield

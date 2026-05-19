@@ -166,5 +166,5 @@ See [AGENTS.md](docs/AGENTS.md) for coding guidelines if contributing with AI as
 ---
 
 **Status:** ✅ Active Development
-**Version:** 0.12.0
+**Version:** 0.12.1
 **License:** [MIT](LICENSE)

@@ -38,7 +38,7 @@ class TestTickerEndpoint:
     async def test_get_ticker_found(self):
         """Returns ticker data when symbol exists in KeyDB."""
         mock_r = _make_mock_redis(ticker_data={
-            "ticker:latest:BTCUSDT": {
+            "ticker:latest:binance:BTCUSDT": {
                 "price": "50000.0", "change24h": "2.5",
                 "bid": "49999.0", "ask": "50001.0",
                 "volume": "1000000.0", "event_time": "1700000000000",
@@ -70,7 +70,7 @@ class TestTickerEndpoint:
     async def test_get_ticker_case_insensitive(self):
         """Symbol is normalized to uppercase."""
         mock_r = _make_mock_redis(ticker_data={
-            "ticker:latest:ETHUSDT": {
+            "ticker:latest:binance:ETHUSDT": {
                 "price": "3000.0", "change24h": "1.0",
                 "bid": "0", "ask": "0", "volume": "0",
                 "event_time": "0",
@@ -88,16 +88,16 @@ class TestTickerEndpoint:
         """Returns all tickers sorted alphabetically."""
         mock_r = _make_mock_redis(
             ticker_data={
-                "ticker:latest:BTCUSDT": {
+                "ticker:latest:binance:BTCUSDT": {
                     "price": "50000.0", "change24h": "0",
                     "bid": "0", "ask": "0", "volume": "0", "event_time": "0",
                 },
-                "ticker:latest:ETHUSDT": {
+                "ticker:latest:binance:ETHUSDT": {
                     "price": "3000.0", "change24h": "0",
                     "bid": "0", "ask": "0", "volume": "0", "event_time": "0",
                 },
             },
-            keys=["ticker:latest:ETHUSDT", "ticker:latest:BTCUSDT"],
+            keys=["ticker:latest:binance:ETHUSDT", "ticker:latest:binance:BTCUSDT"],
         )
         with patch("backend.api.ticker.get_redis", return_value=mock_r):
             transport = ASGITransport(app=app)

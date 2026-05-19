@@ -78,7 +78,8 @@ class TestKlinesEndpoint:
     async def test_klines_invalid_symbol(self):
         """Returns 400 for invalid symbol containing special chars."""
         mock_r = _make_mock_redis()
-        with patch("backend.api.klines.get_redis", return_value=mock_r):
+        with patch("backend.api.klines.get_redis", return_value=mock_r), \
+             patch("backend.api.klines.get_redis_master", return_value=mock_r):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/klines?symbol=BTC/USDT")
@@ -88,7 +89,8 @@ class TestKlinesEndpoint:
     async def test_klines_invalid_interval(self):
         """Returns 400 for unsupported interval."""
         mock_r = _make_mock_redis()
-        with patch("backend.api.klines.get_redis", return_value=mock_r):
+        with patch("backend.api.klines.get_redis", return_value=mock_r), \
+             patch("backend.api.klines.get_redis_master", return_value=mock_r):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/klines?symbol=BTCUSDT&interval=2m")
@@ -98,7 +100,8 @@ class TestKlinesEndpoint:
     async def test_klines_limit_validation(self):
         """Returns 422 for limit outside bounds."""
         mock_r = _make_mock_redis()
-        with patch("backend.api.klines.get_redis", return_value=mock_r):
+        with patch("backend.api.klines.get_redis", return_value=mock_r), \
+             patch("backend.api.klines.get_redis_master", return_value=mock_r):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/klines?symbol=BTCUSDT&limit=0")
@@ -108,7 +111,8 @@ class TestKlinesEndpoint:
     async def test_klines_limit_too_high(self):
         """Returns 422 for limit exceeding 1500."""
         mock_r = _make_mock_redis()
-        with patch("backend.api.klines.get_redis", return_value=mock_r):
+        with patch("backend.api.klines.get_redis", return_value=mock_r), \
+             patch("backend.api.klines.get_redis_master", return_value=mock_r):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/klines?symbol=BTCUSDT&limit=1501")
@@ -121,9 +125,10 @@ class TestKlinesEndpoint:
             {"openTime": 1000, "open": 100, "high": 110, "low": 90, "close": 105, "volume": 50}
         ])
         mock_r = _make_mock_redis(cached_data={
-            "klines_cache:BTCUSDT:1m:200": cached,
+            "klines_cache:binance:BTCUSDT:1m:200": cached,
         })
-        with patch("backend.api.klines.get_redis", return_value=mock_r):
+        with patch("backend.api.klines.get_redis", return_value=mock_r), \
+             patch("backend.api.klines.get_redis_master", return_value=mock_r):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/klines?symbol=BTCUSDT")
@@ -137,9 +142,10 @@ class TestKlinesEndpoint:
         """1s candles are served exclusively from KeyDB sorted set."""
         candle = json.dumps({"t": 1700000000000, "o": 50000, "h": 50100, "l": 49900, "c": 50050, "v": 1.5})
         mock_r = _make_mock_redis(
-            candle_data={"candle:1s:BTCUSDT": [candle]},
+            candle_data={"candle:1s:binance:BTCUSDT": [candle]},
         )
-        with patch("backend.api.klines.get_redis", return_value=mock_r):
+        with patch("backend.api.klines.get_redis", return_value=mock_r), \
+             patch("backend.api.klines.get_redis_master", return_value=mock_r):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/klines?symbol=BTCUSDT&interval=1s&limit=1")

@@ -46,6 +46,7 @@ class TestHealthEndpoint:
         """Health endpoint returns 'ok' when all services are reachable."""
         with (
             patch("backend.api.health.get_redis", return_value=mock_redis),
+            patch("backend.api.health.get_redis_health", return_value={"status": "ok", "role": "master"}),
             patch("backend.api.health.get_influx", return_value=mock_influx),
             patch("backend.api.health.get_trino_connection", return_value=mock_trino),
         ):
@@ -55,7 +56,7 @@ class TestHealthEndpoint:
             assert resp.status_code == 200
             data = resp.json()
             assert data["status"] == "ok"
-            assert data["checks"]["keydb"] == "ok"
+            assert data["checks"]["redis"]["status"] == "ok"
             assert data["checks"]["influxdb"] == "ok"
             assert data["checks"]["trino"] == "ok"
             assert "total_latency_ms" in data
@@ -69,6 +70,7 @@ class TestHealthEndpoint:
         bad_redis.ping = AsyncMock(side_effect=ConnectionError("Redis down"))
         with (
             patch("backend.api.health.get_redis", return_value=bad_redis),
+            patch("backend.api.health.get_redis_health", return_value={"status": "error", "error": "Redis down"}),
             patch("backend.api.health.get_influx", return_value=mock_influx),
             patch("backend.api.health.get_trino_connection", return_value=mock_trino),
         ):
@@ -77,7 +79,7 @@ class TestHealthEndpoint:
                 resp = await ac.get("/api/health")
             data = resp.json()
             assert data["status"] == "degraded"
-            assert "Redis down" in data["checks"]["keydb"]
+            assert "Redis down" in data["checks"]["redis"]["error"]
 
     @pytest.mark.asyncio
     async def test_health_degraded_influx_down(self, mock_redis, mock_trino):
@@ -86,6 +88,7 @@ class TestHealthEndpoint:
         bad_influx.ping.side_effect = ConnectionError("InfluxDB timeout")
         with (
             patch("backend.api.health.get_redis", return_value=mock_redis),
+            patch("backend.api.health.get_redis_health", return_value={"status": "ok", "role": "master"}),
             patch("backend.api.health.get_influx", return_value=bad_influx),
             patch("backend.api.health.get_trino_connection", return_value=mock_trino),
         ):
@@ -103,6 +106,7 @@ class TestHealthEndpoint:
         bad_trino.cursor.side_effect = ConnectionError("Trino unreachable")
         with (
             patch("backend.api.health.get_redis", return_value=mock_redis),
+            patch("backend.api.health.get_redis_health", return_value={"status": "ok", "role": "master"}),
             patch("backend.api.health.get_influx", return_value=mock_influx),
             patch("backend.api.health.get_trino_connection", return_value=bad_trino),
         ):
@@ -117,6 +121,7 @@ class TestHealthEndpoint:
         """Health response includes per-service latency metrics."""
         with (
             patch("backend.api.health.get_redis", return_value=mock_redis),
+            patch("backend.api.health.get_redis_health", return_value={"status": "ok", "role": "master"}),
             patch("backend.api.health.get_influx", return_value=mock_influx),
             patch("backend.api.health.get_trino_connection", return_value=mock_trino),
         ):
@@ -124,7 +129,7 @@ class TestHealthEndpoint:
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/health")
             data = resp.json()
-            assert "keydb_ms" in data["latency_ms"]
+            assert "redis_ms" in data["latency_ms"]
             assert "influxdb_ms" in data["latency_ms"]
             assert "trino_ms" in data["latency_ms"]
             assert all(v >= 0 for v in data["latency_ms"].values())

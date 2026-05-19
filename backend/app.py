@@ -19,9 +19,9 @@ from backend.api import (
     symbols,
     indicators,
     websocket,
+    market_overview,
     market,
     news,
-    market_overview,
 )
 from backend.tasks.news_fetcher import news_fetcher
 from backend.tasks.market_fetcher import market_fetcher
@@ -68,8 +68,8 @@ for router_module in (
     symbols,
     indicators,
     websocket,
+    market_overview,
     market,
     news,
-    market_overview,
 ):
     app.include_router(router_module.router)
