@@ -6,3 +6,8 @@ trino==0.330.0
 pydantic==2.10.4
 httpx==0.28.1
 prometheus-fastapi-instrumentator==6.1.0
+
+# News scraping dependencies
+feedparser==6.0.11
+beautifulsoup4==4.14.3
+vaderSentiment==3.3.2

@@ -2,6 +2,38 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Pure Black Theme — Override Tailwind gray scale */
+:root {
+  --color-gray-700: #222222;
+  --color-gray-750: #1a1a1a;
+  --color-gray-800: #0a0a0a;
+  --color-gray-850: #050505;
+  --color-gray-900: #000000;
+}
+
+/* Override Tailwind utility classes với pure black */
+@layer base {
+  .bg-gray-900 { background-color: #000000 !important; }
+  .bg-gray-850 { background-color: #050505 !important; }
+  .bg-gray-800 { background-color: #0a0a0a !important; }
+  .bg-gray-750 { background-color: #0a0a0a !important; }
+  .bg-gray-700 { background-color: #1a1a1a !important; }
+
+  .text-gray-400 { color: #b0b0b0 !important; }
+  .text-gray-300 { color: #cccccc !important; }
+  .text-gray-200 { color: #e0e0e0 !important; }
+  .text-gray-500 { color: #666666 !important; }
+  .text-gray-600 { color: #444444 !important; }
+
+  .border-gray-700 { border-color: #222222 !important; }
+  .border-gray-600 { border-color: #333333 !important; }
+  .border-gray-500 { border-color: #444444 !important; }
+
+  .hover\:bg-gray-700:hover { background-color: #1a1a1a !important; }
+  .hover\:bg-gray-600:hover { background-color: #222222 !important; }
+  .hover\:bg-gray-800:hover { background-color: #0a0a0a !important; }
+}
+
 /* Custom animations for floating toolbar */
 @keyframes fadeIn {
   from {

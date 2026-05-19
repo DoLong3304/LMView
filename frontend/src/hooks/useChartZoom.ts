@@ -23,9 +23,9 @@ interface ZoomState {
   zoomLevel: number; // 1.0 = default, >1 = zoomed in, <1 = zoomed out
 }
 
-const DEFAULT_BAR_SPACING = 8;
-const MIN_BAR_SPACING = 3;
-const MAX_BAR_SPACING = 50;
+const DEFAULT_BAR_SPACING = 2;  // Max zoom out - minimum candle width
+const MIN_BAR_SPACING = 2;
+const MAX_BAR_SPACING = 30;
 const ZOOM_STEP = 1.2; // 20% per zoom step
 
 export function useChartZoom({
@@ -77,11 +77,9 @@ export function useChartZoom({
     applyBarSpacing(initialBarSpacing);
     zoomStateRef.current.zoomLevel = 1.0;
 
-    // Also fit content to show all data
-    if (chartApi) {
-      chartApi.timeScale().fitContent();
-    }
-  }, [applyBarSpacing, initialBarSpacing, chartApi]);
+    // Don't call fitContent() - it would reset barSpacing
+    // Just reset to initial barSpacing value
+  }, [applyBarSpacing, initialBarSpacing]);
 
   // Get current zoom state
   const getZoomState = useCallback((): ZoomState => {

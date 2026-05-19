@@ -1,14 +1,11 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
 import CandlestickChart from "./components/CandlestickChart";
-import DrawingToolbar from "./components/DrawingToolbar";
+import TopToolbar from "./components/TopToolbar";
+import LeftSidebar from "./components/LeftSidebar";
+import RightPanel from "./components/RightPanel";
 import ChartOverlay from "./components/ChartOverlay";
 import DrawingContextToolbar from "./components/DrawingContextToolbar";
 import { ReplayControls } from "./components/ReplayControls";
-import { ReplayButton } from "./components/ReplayButton";
-import Header from "./components/Header";
-import Watchlist from "./components/Watchlist";
-import OverviewChart from "./components/OverviewChart";
-import { DEFAULT_TOOL_SETTINGS, type ToolSettings } from "./components/ToolSettingsPopup";
 import { fetchTickers, fetchSymbols } from "./services/marketDataService";
 import { loadFromStorage, saveToStorage } from "./utils/storageHelpers";
 import { loadDrawings, saveDrawings, deleteDrawings } from "./services/chartStorageService";
@@ -16,7 +13,7 @@ import { useChartKeyboardShortcuts } from "./hooks/useChartKeyboardShortcuts";
 import { useDrawingToolbarPosition } from "./hooks/useDrawingToolbarPosition";
 import { useReplayMode } from "./hooks/useReplayMode";
 import { useI18n } from "./i18n";
-import type { Candle, Drawing, SymbolInfo, Ticker, WatchlistFilter } from "./types";
+import type { Candle, Drawing, SymbolInfo, Ticker } from "./types";
 
 const FALLBACK_SYMBOLS = [
   "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
@@ -47,27 +44,20 @@ const TradingDashboard: React.FC = () => {
   const [selectedDrawingIds, setSelectedDrawingIds] = useState<(string | number)[]>([]);
   const [magnetEnabled, setMagnetEnabled] = useState(false);
   const [currentTimeframe, setCurrentTimeframe] = useState("1m");
+  const [chartType, setChartType] = useState<"candles" | "line" | "area" | "bars">("candles");
   const [isDrawing, setIsDrawing] = useState(false);
   const [selectedSymbol, setSelectedSymbol] = useState<string>(() => {
     const stored = loadFromStorage("app_selectedSymbol", "BTCUSDT");
     if (stored && !stored.endsWith("USDT")) return "BTCUSDT";
     return stored;
   });
-  const [toolSettings, setToolSettings] = useState<Record<string, ToolSettings>>(() =>
-    loadFromStorage(
-      "app_toolSettings",
-      JSON.parse(JSON.stringify(DEFAULT_TOOL_SETTINGS)),
-    ),
-  );
   const [starredSymbols, setStarredSymbols] = useState<string[]>(() =>
     loadFromStorage("app_starred", []),
   );
-  const [watchlistFilter, setWatchlistFilter] = useState<WatchlistFilter>("all");
   const [symbols, setSymbols] = useState<string[]>(FALLBACK_SYMBOLS);
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItemData[]>(() =>
     buildWatchlist(FALLBACK_SYMBOLS),
   );
-  const [showNavDrawer, setShowNavDrawer] = useState(false);
   const [connError, setConnError] = useState(false);
 
   // Load available symbols from backend on mount
@@ -128,7 +118,6 @@ const TradingDashboard: React.FC = () => {
   }, []);
 
   // Persist settings to localStorage
-  useEffect(() => { saveToStorage("app_toolSettings", toolSettings); }, [toolSettings]);
   useEffect(() => { saveToStorage("app_starred", starredSymbols); }, [starredSymbols]);
   useEffect(() => { saveToStorage("app_selectedSymbol", selectedSymbol); }, [selectedSymbol]);
 
@@ -313,9 +302,6 @@ const TradingDashboard: React.FC = () => {
     setCurrentTimeframe(timeframe);
     // Drawings will be loaded by useEffect
   }, []);
-  const handleToolSettingsChange = useCallback((toolId: string, newSettings: ToolSettings) => {
-    setToolSettings((prev) => ({ ...prev, [toolId]: newSettings }));
-  }, []);
 
   const handleToggleStar = useCallback((symbol: string) => {
     setStarredSymbols((prev) =>
@@ -452,8 +438,17 @@ const TradingDashboard: React.FC = () => {
   const isChartTab = chartActiveTab === "chart";
 
   return (
-    <div className="bg-gray-900 text-white h-screen font-sans flex flex-col overflow-hidden">
-      <Header showNavDrawer={showNavDrawer} onToggleDrawer={setShowNavDrawer} />
+    <div className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
+      {/* Top Toolbar */}
+      <TopToolbar
+        selectedSymbol={selectedSymbol}
+        symbols={symbols}
+        onSymbolChange={handleSymbolSelect}
+        timeframe={currentTimeframe}
+        onTimeframeChange={handleTimeframeChange}
+        chartType={chartType}
+        onChartTypeChange={setChartType}
+      />
 
       {connError && (
         <div className="px-4 py-2 bg-red-900/50 border-b border-red-700/50 flex items-center justify-between">
@@ -480,43 +475,32 @@ const TradingDashboard: React.FC = () => {
         </div>
       )}
 
-      <main
-        className="flex-grow overflow-hidden flex"
-        style={{ padding: "12px 16px" }}
-      >
-        {/* Drawing Toolbar — only visible on Chart tab */}
+      {/* Main content area */}
+      <main className="flex-1 flex overflow-hidden">
+        {/* Left Sidebar */}
         {isChartTab && (
-          <div className="mr-2 flex-shrink-0">
-            {/* Replay Mode Button */}
-            <ReplayButton
-              onClick={handleReplayButtonClick}
-              disabled={isReplaySelectionMode}
-            />
-
-            <DrawingToolbar
-              activeTool={activeTool}
-              onToolChange={setActiveTool}
-              onClearAll={handleClearAll}
-              onDeleteSelected={() => handleDeleteDrawings(selectedDrawingIds)}
-              selectedDrawingIds={selectedDrawingIds}
-              onLockAll={handleLockAll}
-              onHideAll={handleHideAll}
-              magnetEnabled={magnetEnabled}
-              onMagnetToggle={() => setMagnetEnabled((prev) => !prev)}
-              toolSettings={toolSettings}
-              onToolSettingsChange={handleToolSettingsChange}
-            />
-          </div>
+          <LeftSidebar
+            activeTool={activeTool as any}
+            onToolChange={setActiveTool as any}
+            onClearAll={handleClearAll}
+            onDeleteSelected={() => handleDeleteDrawings(selectedDrawingIds)}
+            selectedDrawingIds={selectedDrawingIds.map(String)}
+            onLockAll={handleLockAll}
+            onHideAll={handleHideAll}
+            magnetEnabled={magnetEnabled}
+            onMagnetToggle={() => setMagnetEnabled((prev) => !prev)}
+            onReplayClick={handleReplayButtonClick}
+            isReplayActive={isReplayActive}
+            isReplaySelectionMode={isReplaySelectionMode}
+          />
         )}
 
         {/* Chart area */}
-        <div className="flex-grow flex flex-col" style={{ minWidth: 0 }} ref={chartContainerRef}>
-          <div
-            className="bg-gray-900 rounded-lg shadow-lg flex-grow"
-            style={{ minHeight: 0 }}
-          >
+        <div className="flex-1 flex flex-col overflow-hidden" ref={chartContainerRef}>
+          <div className="flex-1 bg-gray-900">
             <CandlestickChart
               symbol={selectedSymbol}
+              timeframe={currentTimeframe}
               symbols={symbols}
               starredSymbols={starredSymbols}
               onToggleStar={handleToggleStar}
@@ -527,7 +511,6 @@ const TradingDashboard: React.FC = () => {
               isReplayActive={isReplayActive}
             >
               {(chartApiRef, candleSeriesRef) => {
-                // Store refs for toolbar positioning
                 if (chartApiRef !== chartApi) setChartApi(chartApiRef);
                 if (candleSeriesRef !== candleSeries) setCandleSeries(candleSeriesRef);
 
@@ -539,7 +522,6 @@ const TradingDashboard: React.FC = () => {
                       onAddDrawing={handleAddDrawing}
                       onUpdateDrawing={handleUpdateDrawing}
                       onDeleteDrawing={handleDeleteDrawing}
-                      toolSettings={toolSettings}
                       chartApi={chartApiRef}
                       candleSeries={candleSeriesRef}
                       magnetEnabled={magnetEnabled}
@@ -548,7 +530,6 @@ const TradingDashboard: React.FC = () => {
                       isReplaySelectionMode={isReplaySelectionMode}
                       onReplayStartSelect={handleReplayStartSelect}
                     />
-                    {/* Floating Context Toolbar */}
                     {selectedDrawing && isChartTab && (
                       <DrawingContextToolbar
                         drawing={selectedDrawing}
@@ -559,8 +540,6 @@ const TradingDashboard: React.FC = () => {
                         onClose={() => setSelectedDrawingIds([])}
                       />
                     )}
-
-                    {/* Replay Controls */}
                     {isReplayActive && (
                       <ReplayControls
                         isPlaying={isPlaying}
@@ -589,29 +568,16 @@ const TradingDashboard: React.FC = () => {
           <div className="w-[3px] h-10 rounded-full bg-gray-700 group-hover:bg-blue-500 transition-colors" />
         </div>
 
-        {/* Right sidebar: Watchlist + Overview */}
-        <aside
-          className="flex-shrink-0 flex flex-col gap-2 overflow-hidden"
-          style={{ width: sidebarWidth }}
-        >
-          <div className="min-h-0" style={{ flex: 6.5 }}>
-            <Watchlist
-              items={watchlistItems}
-              selectedSymbol={selectedSymbol}
-              starredSymbols={starredSymbols}
-              filter={watchlistFilter}
-              onFilterChange={setWatchlistFilter}
-              onSymbolSelect={handleSymbolSelect}
-              onToggleStar={handleToggleStar}
-            />
-          </div>
-          <div
-            className="min-h-0 bg-gray-800 rounded-lg overflow-y-auto"
-            style={{ flex: 3.5 }}
-          >
-            <OverviewChart symbol={selectedSymbol} candles={chartCandles} />
-          </div>
-        </aside>
+        {/* Right Panel */}
+        <RightPanel
+          items={watchlistItems}
+          selectedSymbol={selectedSymbol}
+          starredSymbols={starredSymbols}
+          onSymbolSelect={handleSymbolSelect}
+          onToggleStar={handleToggleStar}
+          width={sidebarWidth}
+          candles={chartCandles}
+        />
       </main>
     </div>
   );

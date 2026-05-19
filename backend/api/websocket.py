@@ -17,51 +17,94 @@ from backend.core.database import get_redis
 router = APIRouter(prefix="/api", tags=["websocket"])
 log = logging.getLogger(__name__)
 
+# All timeframes to stream simultaneously
+ALL_INTERVALS = ["1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"]
 
-@router.websocket("/stream")
-async def stream(websocket: WebSocket, symbol: str = "", interval: str = "1m"):
+
+@router.websocket("/stream/all")
+async def stream_all(websocket: WebSocket, symbol: str = "", exchange: str = "binance"):
     """
-    Real-time candle streaming over WebSocket.
+    Real-time candle streaming for ALL timeframes simultaneously via a single WebSocket.
 
     The frontend connects with:
-        ``ws://host/api/stream?symbol=BTCUSDT&interval=1m``
+        ``ws://host/api/stream/all?symbol=BTCUSDT&exchange=binance``
+
+    Returns JSON with shape:
+        {
+          "1s": { candle },
+          "1m": { candle },
+          "5m": { candle },
+          ...
+        }
     """
     await websocket.accept()
     r = await get_redis()
     symbol = symbol.upper()
-    interval = interval.strip().lower()
-    if interval not in INTERVAL_SECONDS:
-        await websocket.close(code=1008)
-        return
-    target_sec = INTERVAL_SECONDS[interval]
-    target_ms = target_sec * 1000
-    last_sent: dict | None = None
+    exchange = exchange.strip().lower() or "binance"
+
+    # Build target_ms lookup
+    target_ms_map = {iv: INTERVAL_SECONDS[iv] * 1000 for iv in ALL_INTERVALS}
+    last_sent: dict[str, dict | None] = {iv: None for iv in ALL_INTERVALS}
 
     try:
         while True:
-            candle = await _build_candle(r, symbol, interval, target_ms)
-            if candle and candle != last_sent:
-                await websocket.send_json(candle)
-                last_sent = candle
-            await asyncio.sleep(0.5)
+            result: dict[str, dict | None] = {}
+            any_changed = False
+
+            # Fetch ticker ONCE for all intervals (avoid N+1 queries)
+            ticker = await r.hgetall(f"ticker:latest:{exchange}:{symbol}")
+            live_price = float(ticker["price"]) if ticker.get("price") else None
+            live_ts = int(ticker["event_time"]) if ticker.get("event_time") else None
+
+            # Only build timeframes that have actually changed (delta updates)
+            for iv in ALL_INTERVALS:
+                # Fetch candle without redundant hgetall calls
+                candle = await _build_candle(r, symbol, iv, target_ms_map[iv], exchange, live_price, live_ts)
+                if candle and candle != last_sent[iv]:
+                    result[iv] = candle
+                    last_sent[iv] = candle
+                    any_changed = True
+                else:
+                    result[iv] = last_sent[iv]
+
+            # Only send if something changed
+            if any_changed:
+                await websocket.send_json(result)
+
+            # CRITICAL: Reduced from 0.3s to 0.05s for real-time responsiveness
+            # This is the primary latency source — tighter loop = faster updates
+            await asyncio.sleep(0.05)
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        log.warning("WebSocket error for %s: %s", symbol, e)
+        log.warning("Stream all error for %s: %s", symbol, e)
 
 
-async def _build_candle(r, symbol: str, interval: str, target_ms: int) -> dict | None:
+async def _build_candle(
+    r,
+    symbol: str,
+    interval: str,
+    target_ms: int,
+    exchange: str = "binance",
+    live_price: float | None = None,
+    live_ts: int | None = None,
+) -> dict | None:
     """Build the latest candle by merging Flink aggregate data with the
-    real-time ticker price."""
+    real-time ticker price.
 
-    # Read the real-time ticker price (near-zero lag)
-    ticker = await r.hgetall(f"ticker:latest:{symbol}")
-    live_price = float(ticker["price"]) if ticker.get("price") else None
-    live_ts = int(ticker["event_time"]) if ticker.get("event_time") else None
+    OPTIMIZATION: Caller MUST provide live_price and live_ts (pre-fetched)
+    to avoid redundant Redis hgetall calls. If not provided, fetch once.
+    """
+
+    # If not pre-fetched, fetch once (but caller should provide these)
+    if live_price is None or live_ts is None:
+        ticker = await r.hgetall(f"ticker:latest:{exchange}:{symbol}")
+        live_price = live_price or (float(ticker["price"]) if ticker.get("price") else None)
+        live_ts = live_ts or (int(ticker["event_time"]) if ticker.get("event_time") else None)
 
     # 1s interval: serve directly from KeyDB
     if interval == "1s":
-        raw = await r.zrevrange(f"candle:1s:{symbol}", 0, 0)
+        raw = await r.zrevrange(f"candle:1s:{exchange}:{symbol}", 0, 0)
         if raw:
             c = json.loads(raw[0])
             return {
@@ -73,7 +116,8 @@ async def _build_candle(r, symbol: str, interval: str, target_ms: int) -> dict |
         return None
 
     # 1m+: aggregate from the appropriate source sorted set
-    source_key = f"candle:1s:{symbol}" if interval == "1m" else f"candle:1m:{symbol}"
+    # KeyDB stores candles with exchange prefix: candle:1s:binance:BTCUSDT
+    source_key = f"candle:1s:{exchange}:{symbol}" if interval == "1m" else f"candle:1m:{exchange}:{symbol}"
     latest = await r.zrevrange(source_key, 0, 0, withscores=True)
 
     flink_candle = None
@@ -123,7 +167,7 @@ async def _build_candle(r, symbol: str, interval: str, target_ms: int) -> dict |
         return flink_candle
 
     # Last resort fallback
-    data = await r.hgetall(f"candle:latest:{symbol}")
+    data = await r.hgetall(f"candle:latest:{exchange}:{symbol}")
     if data:
         kline_start = int(data["kline_start"])
         return {

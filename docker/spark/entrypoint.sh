@@ -2,6 +2,14 @@
 set -e
 
 SPARK_HOME="${SPARK_HOME:-/opt/spark}"
+SPARK_CONF_DIR="${SPARK_CONF_DIR:-/opt/spark/conf}"
+
+# Copy metrics.properties to $SPARK_CONF_DIR if it is mounted read-only
+if [ -f "/opt/spark/conf/metrics.properties" ] && [ ! -f "${SPARK_CONF_DIR}/metrics.properties" ]; then
+  mkdir -p "$SPARK_CONF_DIR"
+  cp /opt/spark/conf/metrics.properties "${SPARK_CONF_DIR}/"
+  echo "Copied metrics.properties to ${SPARK_CONF_DIR}"
+fi
 
 case "${SPARK_MODE:-master}" in
   master)
@@ -24,7 +32,7 @@ case "${SPARK_MODE:-master}" in
     [ -n "${SPARK_WORKER_MEMORY}" ]   && WORKER_ARGS="$WORKER_ARGS --memory ${SPARK_WORKER_MEMORY}"
     [ -n "${SPARK_WORKER_CORES}" ]    && WORKER_ARGS="$WORKER_ARGS --cores ${SPARK_WORKER_CORES}"
     [ -n "${SPARK_WORKER_WEBUI_PORT}" ] && WORKER_ARGS="$WORKER_ARGS --webui-port ${SPARK_WORKER_WEBUI_PORT}"
-    echo "Starting Spark Worker ÃƒÂ¢Ã¢â‚¬Â Ã¢â‚¬â„¢ $MASTER_URL"
+    echo "Starting Spark Worker to $MASTER_URL"
     exec "$SPARK_HOME/bin/spark-class" org.apache.spark.deploy.worker.Worker \
       $WORKER_ARGS "$MASTER_URL"
     ;;

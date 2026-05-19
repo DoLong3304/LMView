@@ -47,7 +47,11 @@ async def get_orderbook(symbol: str):
     r = await get_redis()
     data = await r.hgetall(f"orderbook:{symbol_u}")
     if not data:
-        ticker = await r.hgetall(f"ticker:latest:{symbol_u}")
+        # Try with binance exchange prefix (new format)
+        ticker = await r.hgetall(f"ticker:latest:binance:{symbol_u}")
+        if not ticker:
+            # Fallback to old format (no exchange prefix)
+            ticker = await r.hgetall(f"ticker:latest:{symbol_u}")
         if ticker:
             bid = float(ticker.get("bid", 0) or 0)
             ask = float(ticker.get("ask", 0) or 0)

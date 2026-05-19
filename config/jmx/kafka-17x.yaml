@@ -1,0 +1,205 @@
+apiVersion: 1
+
+# JMX Prometheus Agent configuration for Apache Kafka 3.9 (Java 17)
+# Hooked via KAFKA_OPTS: -javaagent:/jmx/jmx_prometheus_javaagent.jar=9999:/jmx/kafka-17x.yaml
+# Scrape target: http://kafka-{1,2,3}:9999/metrics
+
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+# ─── JVM Metrics ────────────────────────────────────────────────────────────
+
+jvm_memory_bytes_used:
+  - pattern: 'java.lang:type=MemoryHeapMemoryUsage'
+    name: jvm_memory_bytes_used
+    type: GAUGE
+    help: "JVM heap memory used in bytes"
+  - pattern: 'java.lang:type=MemoryHeapMaxMemory'
+    name: jvm_memory_bytes_max
+    type: GAUGE
+    help: "JVM heap memory max in bytes"
+
+jvm_memory_bytes_init:
+  - pattern: 'java.lang:type=MemoryHeapInitialMemory'
+    name: jvm_memory_bytes_init
+    type: GAUGE
+
+jvm_gc_collection_seconds:
+  - pattern: 'java.lang:name=([a-zA-Z_-]+),type=GarbageCollector result:'
+    name: jvm_gc_collection_seconds
+    type: COUNTER
+    labels:
+      gc: "$1"
+  - pattern: 'java.lang:name=(.+),type=GarbageCollector'
+    name: jvm_gc_collection_seconds
+    type: COUNTER
+    labels:
+      gc: "$1"
+
+jvm_threads_live_threads:
+  - pattern: 'java.lang:type=Threading PeakThreadCount'
+    name: jvm_threads_peak_threads
+    type: GAUGE
+  - pattern: 'java.lang:type=Threading ThreadCount'
+    name: jvm_threads_live_threads
+    type: GAUGE
+  - pattern: 'java.lang:type=Threading DaemonThreadCount'
+    name: jvm_threads_daemon_threads
+    type: GAUGE
+  - pattern: 'java.lang:type=Threading'
+    name: jvm_threads_deadlocked_threads
+    attr:
+      - DeadlockedThreads
+    type: GAUGE
+
+# ─── Kafka Broker Metrics ───────────────────────────────────────────────────
+
+# Request handling
+kafka_network_request_handler_pool:
+  - pattern: 'kafka.network.RequestHandlerPool name=([a-zA-Z]+), clientId=(.+)'
+    name: kafka_network_request_handler_pool
+    type: COUNTER
+    labels:
+      type: "$1"
+      client_id: "$2"
+
+# Broker topic metrics (messages in/out)
+kafka_server_brokertopicmetrics:
+  - pattern: 'kafka.server:name=([^,]+),topic=([^,]+),type=BrokerTopicMetrics'
+    name: kafka_server_brokertopicmetrics_$1
+    type: GAUGE
+    labels:
+      topic: "$2"
+    help: "Kafka broker topic metric $1"
+
+# Produce / Fetch request metrics
+kafka_server_requestmetrics:
+  - pattern: 'kafka.server:name=([^,]+),type=RequestMetrics'
+    name: kafka_server_request_$1
+    type: GAUGE
+    help: "Kafka request metric $1"
+
+# Request latency (histogram via Summary/Quantile)
+kafka_network_request_latency:
+  - pattern: 'kafka.network:name=([^,]+),type=RequestMetrics,request=([^,]+)'
+    name: kafka_network_request_latency_seconds
+    type: GAUGE
+    labels:
+      name: "$1"
+      request: "$2"
+    attr:
+      - MeanRate
+      - OneMinuteRate
+      - FiveMinuteRate
+
+# ─── Kafka Cluster Metrics ──────────────────────────────────────────────────
+
+kafka_cluster_partition:
+  - pattern: 'kafka.cluster:name=UnderReplicatedPartitions,type=Partition'
+    name: kafka_cluster_partition_under_replicated
+    type: GAUGE
+  - pattern: 'kafka.cluster:name=OfflinePartitions,type=Partition'
+    name: kafka_cluster_partition_offline
+    type: GAUGE
+  - pattern: 'kafka.cluster:name=PreferredReadReplicas,type=Partition'
+    name: kafka_cluster_partition_preferred_read_replicas
+    type: GAUGE
+
+# Controller metrics
+kafka_controller_controller:
+  - pattern: 'kafka.controller:name=([^,]+),type=KafkaController'
+    name: kafka_controller_$1
+    type: GAUGE
+
+# ─── Kafka Log Metrics ──────────────────────────────────────────────────────
+
+kafka_log_log:
+  - pattern: 'kafka.log:name=([^,]+),type=Log'
+    name: kafka_log_$1
+    type: GAUGE
+    help: "Kafka log metric $1"
+
+# ─── Default Pattern (catch-all for well-known patterns) ─────────────────────
+
+rules:
+  # JVM memory
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage> (\w+)'
+    name: jvm_memory_bytes_$1
+    type: GAUGE
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage> (\w+)'
+    name: jvm_memory_bytes_$1
+    type: GAUGE
+
+  # JVM GC
+  - pattern: 'java.lang<type=GarbageCollector, name=([^>]+)><>CollectionCount'
+    name: jvm_gc_collection_count
+    labels:
+      gc: "$1"
+    type: COUNTER
+  - pattern: 'java.lang<type=GarbageCollector, name=([^>]+)><>CollectionTime'
+    name: jvm_gc_collection_seconds_total
+    labels:
+      gc: "$1"
+    type: COUNTER
+
+  # JVM threads
+  - pattern: 'java.lang<type=Threading><>ThreadCount'
+    name: jvm_threads_live_threads
+    type: GAUGE
+  - pattern: 'java.lang<type=Threading><>PeakThreadCount'
+    name: jvm_threads_peak_threads
+    type: GAUGE
+  - pattern: 'java.lang<type=Threading><>DaemonThreadCount'
+    name: jvm_threads_daemon_threads
+    type: GAUGE
+
+  # Kafka broker topic throughput
+  - pattern: 'kafka.server<type=BrokerTopicMetrics, name=([^>]+)><>(BytesInPerSec|BytesOutPerSec|MessagesInPerSec)'
+    name: kafka_server_brokertopicmetrics_$3
+    type: GAUGE
+  - pattern: 'kafka.server<type=BrokerTopicMetrics, name=([^>]+)><>(FailedProduceRequestsPerSec|FailedFetchRequestsPerSec)'
+    name: kafka_server_brokertopicmetrics_$3
+    type: GAUGE
+    help: "Kafka broker topic failed requests per second"
+
+  # Kafka request metrics
+  - pattern: 'kafka.network<type=RequestMetrics, name=([^>]+), request=([^>]+)><>([^>]+)'
+    name: kafka_network_request_$3
+    labels:
+      name: "$1"
+      request: "$2"
+    type: GAUGE
+
+  # Request handler idle percent
+  - pattern: 'kafka.network<type=RequestHandlerPool, name=(.+)><>RequestHandlerAvgIdlePercent'
+    name: kafka_server_requesthandler_avg_idle_percent
+    labels:
+      name: "$1"
+    type: GAUGE
+
+  # Kafka cluster partition state
+  - pattern: 'kafka.cluster<type=Partition, name=(.+)><>(UnderReplicatedPartitions|OfflinePartitions)'
+    name: kafka_cluster_partition_$2
+    type: GAUGE
+    help: "Kafka cluster partition state metric"
+
+  # Controller
+  - pattern: 'kafka.controller<type=KafkaController, name=(.+)><>([^>]+)'
+    name: kafka_controller_$2
+    labels:
+      name: "$1"
+    type: GAUGE
+
+  # Log end offset (for lag calculation)
+  - pattern: 'kafka.log<type=Log, name=(.+)><>LogEndOffset'
+    name: kafka_log_log_end_offset
+    labels:
+      partition: "$1"
+    type: GAUGE
+
+  # Log size
+  - pattern: 'kafka.log<type=Log, name=(.+)><>Size'
+    name: kafka_log_size_bytes
+    labels:
+      partition: "$1"
+    type: GAUGE

@@ -174,6 +174,9 @@ export type Timeframe = "1s" | "1m" | "5m" | "15m" | "1H" | "4H" | "1D" | "1W";
 /** Watchlist filter mode */
 export type WatchlistFilter = "all" | "starred";
 
+/** Drawing tool types */
+export type DrawingTool = "cursor" | "trendline" | "horizontal" | "circle" | "rectangle" | "triangle" | "text" | "ruler";
+
 /** Command types for undo/redo system */
 export type CommandType = 'add' | 'delete' | 'update' | 'move' | 'batch';
 

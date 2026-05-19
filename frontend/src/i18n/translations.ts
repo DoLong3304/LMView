@@ -23,6 +23,7 @@ const translations = {
     chart: "Chart",
     orderBook: "Order Book",
     recentTrades: "Recent Trades",
+    marketNews: "Market & News",
 
     // Indicators
     indicators: "Indicators",
@@ -58,6 +59,7 @@ const translations = {
     elliottWave: "Elliott Wave",
     harmonicABCD: "Harmonic ABCD",
     magnet: "Magnet Mode",
+    magnetMode: "Magnet Mode",
     lockAll: "Lock All",
     hideAll: "Hide All",
     clearAll: "Clear All",
@@ -68,6 +70,7 @@ const translations = {
     drawingDeleted: "Drawing deleted",
     noDrawingSelected: "No drawing selected",
     deleteSelected: "Delete Selected",
+    replay: "Replay",
     chartSaved: "Chart saved",
     undo: "Undo",
     redo: "Redo",
@@ -251,6 +254,7 @@ const translations = {
     chart: "Biểu đồ",
     orderBook: "Sổ lệnh",
     recentTrades: "Giao dịch gần đây",
+    marketNews: "Thị trường & Tin tức",
 
     // Indicators
     indicators: "Chỉ báo",
@@ -286,6 +290,7 @@ const translations = {
     elliottWave: "Sóng Elliott",
     harmonicABCD: "Harmonic ABCD",
     magnet: "Chế độ nam châm",
+    magnetMode: "Chế độ nam châm",
     lockAll: "Khóa tất cả",
     hideAll: "Ẩn tất cả",
     clearAll: "Xóa tất cả",
@@ -296,6 +301,7 @@ const translations = {
     drawingDeleted: "Đã xóa hình vẽ",
     noDrawingSelected: "Chưa chọn hình vẽ",
     deleteSelected: "Xóa đã chọn",
+    replay: "Phát lại",
     chartSaved: "Đã lưu biểu đồ",
     undo: "Hoàn tác",
     redo: "Làm lại",

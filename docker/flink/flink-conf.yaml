@@ -9,7 +9,7 @@ jobmanager.execution.failover-strategy: region
 taskmanager.bind-host: 0.0.0.0
 taskmanager.host: flink-taskmanager
 taskmanager.memory.process.size: 6144m
-taskmanager.numberOfTaskSlots: 12
+taskmanager.numberOfTaskSlots: 24
 taskmanager.memory.framework.off-heap.size: 768m
 taskmanager.memory.task.off-heap.size: 1536m
 taskmanager.memory.managed.size: 1024m

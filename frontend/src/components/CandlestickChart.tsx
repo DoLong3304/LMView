@@ -13,16 +13,16 @@ import { useChartZoom } from "../hooks/useChartZoom";
 import {
   fetchCandles,
   fetchHistoricalCandles,
-  subscribeCandle,
+  subscribeAllTimeframes,
   TIMEFRAMES as SERVICE_TIMEFRAMES,
 } from "../services/marketDataService";
 import MarketSelector from "./MarketSelector";
 import DateRangePicker from "./DateRangePicker";
 import OrderBook from "./OrderBook";
 import RecentTrades from "./RecentTrades";
+import MarketNews from "./MarketNews";
 import {
   THEME,
-  TIMEFRAMES,
   CHART_TABS,
   TAB_ICONS,
   DEFAULT_INDICATOR_SETTINGS,
@@ -34,10 +34,12 @@ import { calcSMA, calcEMA, calcRSI, calcMFI } from "./chart/indicatorUtils";
 import IndicatorPanel from "./chart/IndicatorPanel";
 import OHLCVBar from "./chart/OHLCVBar";
 import type { Candle, IndicatorSettings, HistoricalRange } from "../types";
+import { tradingTheme } from "../styles/tradingTheme";
 
 interface CandlestickChartProps {
   defaultSymbol?: string;
   symbol?: string;
+  timeframe?: string;
   symbols?: string[];
   children?: React.ReactNode | ((chartApi: any, candleSeries: any) => React.ReactNode);
   starredSymbols?: string[];
@@ -62,6 +64,7 @@ interface TooltipData {
 const CandlestickChart: React.FC<CandlestickChartProps> = ({
   defaultSymbol = "BTCUSDT",
   symbol: symbolProp,
+  timeframe: timeframeProp,
   symbols = [],
   children,
   starredSymbols = [],
@@ -84,17 +87,25 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const mfiSeriesRef = useRef<any>(null);
   const candlesRef = useRef<Candle[]>([]);
   const symbolRef = useRef(defaultSymbol);
-  const timeframeRef = useRef("1m");
+  const timeframeRef = useRef(timeframeProp || "1m");
 
   const [symbol, setSymbol] = useState(symbolProp || defaultSymbol);
-  const [timeframe, setTimeframe] = useState("1m");
+  const [timeframe, setTimeframe] = useState(timeframeProp || "1m");
 
-  // Notify parent when timeframe changes
+  // Sync timeframe from external prop (App.tsx controls it)
+  useEffect(() => {
+    if (timeframeProp && timeframeProp !== timeframe) {
+      setTimeframe(timeframeProp);
+    }
+  }, [timeframeProp]);
+
+  // Notify parent when timeframe changes (from internal setTimeframe)
   useEffect(() => {
     if (onTimeframeChange) {
       onTimeframeChange(timeframe);
     }
   }, [timeframe, onTimeframeChange]);
+
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
   const [showIndPanel, setShowIndPanel] = useState(false);
   const [indSettings, setIndSettings] = useState<Record<string, IndicatorSettings>>(() =>
@@ -119,9 +130,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   // Initialize zoom control hook
   const { zoomIn, zoomOut, resetZoom, canZoomIn, canZoomOut } = useChartZoom({
     chartApi: chartRef.current,
-    initialBarSpacing: 8,
-    minBarSpacing: 3,
-    maxBarSpacing: 50,
+    initialBarSpacing: 4,
+    minBarSpacing: 2,
+    maxBarSpacing: 30,
   });
 
   const getTimeframeSeconds = useCallback((tf: string) => {
@@ -129,19 +140,31 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   }, []);
 
   const getInitialVisibleBars = useCallback(
-    (tf: string) => {
-      const seconds = getTimeframeSeconds(tf);
-      return seconds > 3600 ? 20 : 50;
+    () => {
+      // TradingView-style: show consistent number of bars regardless of timeframe
+      // This keeps candle density uniform across all timeframes
+      // Increased to 150 for thinner candles across all timeframes
+      return 150;
     },
-    [getTimeframeSeconds],
+    [],
   );
 
+  // ─── UNIFIED CHART CONFIG (all timeframes use identical settings) ───
+  const CHART_CONFIG = {
+    VISIBLE_BARS: 150,        // All timeframes show 150 bars
+    MAX_BARS_MEMORY: 10000,   // All timeframes keep 10000 bars in memory
+    SHOW_SECONDS: true,       // All timeframes show seconds (consistent display)
+  };
+
   const setInitialVisibleRange = useCallback(
-    (data: Candle[], tf: string) => {
+    (data: Candle[]) => {
       if (!chartRef.current || !Array.isArray(data) || data.length === 0) return;
-      const bars = getInitialVisibleBars(tf);
+      const bars = getInitialVisibleBars();
       const to = data.length - 1 + 0.5;
       const from = Math.max(0, data.length - bars) - 0.5;
+
+      // Set visible range WITHOUT changing barSpacing
+      // This preserves zoom level when switching timeframes
       chartRef.current.timeScale().setVisibleLogicalRange({ from, to });
     },
     [getInitialVisibleBars],
@@ -151,7 +174,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     async ({ data, requestSymbol, requestInterval, isHistoricalMode = false }: { data: Candle[]; requestSymbol: string; requestInterval: string; isHistoricalMode?: boolean }) => {
       if (!Array.isArray(data) || data.length === 0) return data;
 
-      const requiredBars = getInitialVisibleBars(requestInterval);
+      const requiredBars = getInitialVisibleBars();
       if (data.length >= requiredBars) return data;
 
       const earliestTime = data[0].time;
@@ -217,6 +240,20 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbolProp]);
 
+  // Sync timeframe from external prop (App.tsx controls it)
+  useEffect(() => {
+    if (timeframeProp && timeframeProp !== timeframe) {
+      setTimeframe(timeframeProp);
+    }
+  }, [timeframeProp]);
+
+  // Notify parent when timeframe changes (from internal setTimeframe)
+  useEffect(() => {
+    if (onTimeframeChange) {
+      onTimeframeChange(timeframe);
+    }
+  }, [timeframe, onTimeframeChange]);
+
   // Init chart once
   useEffect(() => {
     if (!containerRef.current) return;
@@ -237,8 +274,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: THEME.crosshair, labelBackgroundColor: "#374151" },
-        horzLine: { color: THEME.crosshair, labelBackgroundColor: "#374151" },
+        vertLine: { color: THEME.crosshair, labelBackgroundColor: tradingTheme.bgElevated },
+        horzLine: { color: THEME.crosshair, labelBackgroundColor: tradingTheme.bgElevated },
       },
       rightPriceScale: {
         borderColor: THEME.borderColor,
@@ -249,8 +286,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         borderColor: THEME.borderColor,
         timeVisible: true,
         secondsVisible: false,
-        barSpacing: 8,
-        minBarSpacing: 3,
+        barSpacing: 4,
+        minBarSpacing: 2,
+        rightOffset: 12,
+        fixLeftEdge: false,
+        fixRightEdge: false,
+        lockVisibleTimeRangeOnResize: true,
         tickMarkFormatter: localTickMarkFormatter,
       },
       handleScroll: { mouseWheel: true, pressedMouseMove: true },
@@ -474,7 +515,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   // Helper: push OHLCV data into chart series + indicators
   const applyDataToChart = useCallback(
-    (data: Candle[], tfForViewport: string = timeframe) => {
+    (data: Candle[]) => {
       if (!candleRef.current) return;
       setCandles(data);
       candlesRef.current = data;
@@ -505,11 +546,11 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         rsiSeriesRef.current.setData(calcRSI(data, indSettings.rsi.period ?? 14));
       if (mfiSeriesRef.current)
         mfiSeriesRef.current.setData(calcMFI(data, indSettings.mfi.period ?? 14));
-      setInitialVisibleRange(data, tfForViewport);
+      setInitialVisibleRange(data);
       if (data.length > 0)
         setTooltip({ ...data[data.length - 1], timeLabel: "" });
     },
-    [indSettings, onCandlesChange, setInitialVisibleRange, timeframe],
+    [indSettings, onCandlesChange, setInitialVisibleRange],
   );
 
   // Historical mode handlers
@@ -583,7 +624,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           return;
         }
 
-        applyDataToChart(data, requestInterval);
+        applyDataToChart(data);
         setIsLoading(false);
       } catch (err) {
         // Only show error if this request is still current
@@ -611,18 +652,17 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   useEffect(() => {
     if (!candleRef.current || !isLiveMode) return;
     let cancelled = false;
-    const is1s = timeframe === "1s";
 
-    // Update secondsVisible based on timeframe
+    // Update secondsVisible based on UNIFIED config (all timeframes show seconds)
     if (chartRef.current) {
-      const showSeconds = is1s || timeframe === "1m";
       chartRef.current
         .timeScale()
-        .applyOptions({ secondsVisible: showSeconds });
+        .applyOptions({ secondsVisible: CHART_CONFIG.SHOW_SECONDS });
     }
 
-    const limit = is1s ? 120 : 200;
-    const maxBars = is1s ? 120 : 10000;
+    // Use unified settings for all timeframes (no is1s branching)
+    const limit = CHART_CONFIG.VISIBLE_BARS;
+    const maxBars = CHART_CONFIG.MAX_BARS_MEMORY;
 
     // Full load — fetches candles, rebuilds all series + indicators
     const loadData = async () => {
@@ -641,7 +681,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         });
         if (cancelled) return;
 
-        applyDataToChart(data, requestInterval);
+        applyDataToChart(data);
         setIsLoading(false);
       } catch {
         if (cancelled) return;
@@ -664,145 +704,120 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       };
     }
 
-    // Subscribe to real-time candle updates via WebSocket.
+    // Subscribe to ALL timeframes simultaneously via a single WebSocket.
+    // This ensures all timeframes update at the same time when price changes.
     //
-    // 1s  : Every WS message with a new timestamp draws a brand-new candle.
-    //        Same-second repeats are ignored (candle is already drawn).
-    //
-    // 1m+ : Same openTime → update (agitate) the latest bar in real-time.
-    //        New openTime  → finalize previous bar, start a new one.
-    const unsub = subscribeCandle(
+    // Logic by timeframe:
+    // - 1s  : Each tick = 1 candle (Open=High=Low=Close, no wicks)
+    // - 1m+ : Backend aggregates ticks → update in-progress candle, close & start new on period change
+    const unsub = subscribeAllTimeframes({
       symbol,
-      timeframe.toLowerCase(),
-      (candle) => {
+      onCandle: (tf, candle) => {
+        // Only process the current timeframe
+        if (tf !== timeframe.toLowerCase()) return;
         if (cancelled || !candleRef.current) return;
         const prev = candlesRef.current;
         if (prev.length === 0) return;
 
         const lastTime = prev[prev.length - 1].time;
+        const is1s = tf === "1s";
 
         if (is1s) {
-          // ── 1-second mode: only draw new candles, never update old ones ──
-          if (candle.time <= lastTime) return; // same or stale second → skip
-          candleRef.current.update(candle);
-          if (volumeRef.current) {
-            volumeRef.current.update({
-              time: candle.time,
-              value: candle.volume,
-              color:
-                candle.close >= candle.open
-                  ? THEME.volumeUp
-                  : THEME.volumeDown,
-            });
+          // ── 1-second mode: each tick = new candle (Open=High=Low=Close) ──
+          // Accept candles with time >= lastTime (same second updates, new second adds)
+          if (candle.time < lastTime) return; // Only skip older candles
+
+          if (candle.time === lastTime) {
+            // Same second → update existing candle
+            candleRef.current.update(candle);
+            if (volumeRef.current) {
+              volumeRef.current.update({
+                time: candle.time,
+                value: candle.volume,
+                color: candle.close >= candle.open ? THEME.volumeUp : THEME.volumeDown,
+              });
+            }
+            // Update in-place
+            const next = [...prev.slice(0, -1), candle];
+            candlesRef.current = next;
+            setCandles(next);
+            if (onCandlesChange) onCandlesChange(next);
+          } else {
+            // New second → add new candle
+            candleRef.current.update(candle);
+            if (volumeRef.current) {
+              volumeRef.current.update({
+                time: candle.time,
+                value: candle.volume,
+                color: candle.close >= candle.open ? THEME.volumeUp : THEME.volumeDown,
+              });
+            }
+            const next = [...prev.slice(-(maxBars - 1)), candle];
+            candlesRef.current = next;
+            setCandles(next);
+            if (onCandlesChange) onCandlesChange(next);
           }
-          const next = [...prev.slice(-(maxBars - 1)), candle];
-          candlesRef.current = next;
-          setCandles(next);
-          if (onCandlesChange) onCandlesChange(next);
           setTooltip((tip) =>
             tip ? { ...tip, ...candle, timeLabel: tip.timeLabel } : null,
           );
         } else {
-          // ── Other timeframes: agitate latest bar, append on new period ──
-          if (candle.time < lastTime) return; // stale → skip
-          candleRef.current.update(candle);
-          if (volumeRef.current) {
-            volumeRef.current.update({
-              time: candle.time,
-              value: candle.volume,
-              color:
-                candle.close >= candle.open
-                  ? THEME.volumeUp
-                  : THEME.volumeDown,
-            });
-          }
-          let next;
+          // ── 1m+ mode: update in-progress candle, new candle on period change ──
+          // Backend sends candles with correct openTime (already aggregated)
           if (candle.time === lastTime) {
-            // Same period → replace last element
-            next = [...prev];
+            // Same period → update latest candle
+            candleRef.current.update(candle);
+            if (volumeRef.current) {
+              volumeRef.current.update({
+                time: candle.time,
+                value: candle.volume,
+                color:
+                  candle.close >= candle.open
+                    ? THEME.volumeUp
+                    : THEME.volumeDown,
+              });
+            }
+            const next = [...prev];
             next[next.length - 1] = candle;
-          } else {
-            // New period → append
-            next = [...prev.slice(-(maxBars - 1)), candle];
+            candlesRef.current = next;
+            setCandles(next);
+            if (onCandlesChange) onCandlesChange(next);
+            setTooltip((tip) =>
+              tip ? { ...tip, ...candle, timeLabel: tip.timeLabel } : null,
+            );
+          } else if (candle.time > lastTime) {
+            // New period → append new candle
+            candleRef.current.update(candle);
+            if (volumeRef.current) {
+              volumeRef.current.update({
+                time: candle.time,
+                value: candle.volume,
+                color:
+                  candle.close >= candle.open
+                    ? THEME.volumeUp
+                    : THEME.volumeDown,
+              });
+            }
+            const next = [...prev.slice(-(maxBars - 1)), candle];
+            candlesRef.current = next;
+            setCandles(next);
+            if (onCandlesChange) onCandlesChange(next);
+            setTooltip((tip) =>
+              tip ? { ...tip, ...candle, timeLabel: tip.timeLabel } : null,
+            );
           }
-          candlesRef.current = next;
-          setCandles(next);
-          if (onCandlesChange) onCandlesChange(next);
-          setTooltip((tip) =>
-            tip ? { ...tip, ...candle, timeLabel: tip.timeLabel } : null,
-          );
+          // candle.time < lastTime → stale data, skip
         }
       },
-    );
+    });
 
     // Store unsubscribe function in ref
     unsubscribeRef.current = unsub;
 
-    // Incremental poll: fetch only the last few candles and merge
-    // instead of full-reload which causes chart flickering.
-    const pollIncremental = () => {
-      if (cancelled || !candleRef.current) return;
-      const fetchLimit = is1s ? 5 : 3;
-      fetchCandles(symbol, timeframe.toLowerCase(), fetchLimit)
-        .then((data) => {
-          if (cancelled || !candleRef.current || data.length === 0) return;
-          const prev = candlesRef.current;
-          if (prev.length === 0) {
-            // No data yet, do a full load
-            applyDataToChart(data);
-            return;
-          }
-          let changed = false;
-          for (const c of data) {
-            const existIdx = prev.findIndex((p) => p.time === c.time);
-            if (existIdx >= 0) {
-              // Skip poll updates for the live (latest) candle on >=1m — WS is authoritative
-              if (!is1s && existIdx === prev.length - 1) continue;
-              const old = prev[existIdx];
-              if (old.close !== c.close || old.high !== c.high || old.low !== c.low || old.volume !== c.volume) {
-                prev[existIdx] = c;
-                candleRef.current.update(c);
-                if (volumeRef.current) {
-                  volumeRef.current.update({
-                    time: c.time,
-                    value: c.volume,
-                    color: c.close >= c.open ? THEME.volumeUp : THEME.volumeDown,
-                  });
-                }
-                changed = true;
-              }
-            } else if (c.time > prev[prev.length - 1].time) {
-              if (is1s) {
-                prev.push(c);
-                while (prev.length > maxBars) prev.shift();
-              } else {
-                prev.push(c);
-                while (prev.length > maxBars) prev.shift();
-              }
-              candleRef.current.update(c);
-              if (volumeRef.current) {
-                volumeRef.current.update({
-                  time: c.time,
-                  value: c.volume,
-                  color: c.close >= c.open ? THEME.volumeUp : THEME.volumeDown,
-                });
-              }
-              changed = true;
-            }
-          }
-          if (changed) {
-            candlesRef.current = [...prev];
-            setCandles([...prev]);
-            if (onCandlesChange) onCandlesChange([...prev]);
-          }
-        })
-        .catch(() => {});
-    };
-
-    const pollInterval = is1s ? 1500 : 3000;
-    const pollId = setInterval(pollIncremental, pollInterval);
-
-    // Store poll interval in ref
+    // OPTIMIZATION: Disable aggressive polling. WebSocket is now responsive (0.05s).
+    // Only poll as fallback if WebSocket connection fails (passive recovery).
+    // Previous: 1.5-3s polling added latency. Now: WebSocket primary, poll backup.
+    // Fallback poll will be triggered by connection monitoring in future release.
+    const pollId = null;
     pollIntervalRef.current = pollId;
 
     return () => {
@@ -857,7 +872,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       const { width, height } = containerRef.current.getBoundingClientRect();
       if (width > 0 && height > 0) {
         chartRef.current.resize(width, height);
-        chartRef.current.timeScale().fitContent();
+        // Don't call fitContent() - it resets barSpacing and breaks zoom level
+        // The chart will maintain its current zoom when resizing
       }
     }
   }, [activeTab]);
@@ -942,30 +958,6 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     link.click();
   }, [symbol, timeframe]);
 
-  const TFBtn = useCallback(
-    ({ tf }: { tf: string }) => {
-      const isActive = timeframe === tf;
-      const isDisabled = !isLiveMode && tf === "1s";
-      return (
-        <button
-          onClick={() => !isDisabled && setTimeframe(tf)}
-          disabled={isDisabled}
-          className={`px-2 py-0.5 rounded text-xs font-medium transition-colors ${
-            isActive
-              ? "bg-blue-600 text-white"
-              : isDisabled
-                ? "text-gray-600 cursor-not-allowed"
-                : "text-gray-400 hover:text-white hover:bg-gray-700"
-          }`}
-          title={isDisabled ? "1s not available in historical mode" : undefined}
-        >
-          {tf}
-        </button>
-      );
-    },
-    [timeframe, isLiveMode],
-  );
-
   return (
     <div className="flex flex-col h-full bg-gray-900 rounded-lg overflow-hidden">
       {/* Top bar */}
@@ -997,11 +989,6 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
               )}
             </div>
           )}
-        </div>
-        <div className="flex items-center gap-1">
-          {TIMEFRAMES.map((tf) => (
-            <TFBtn key={tf} tf={tf} />
-          ))}
         </div>
         <div className="flex items-center gap-2">
           {/* Export button */}
@@ -1165,6 +1152,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       {activeTab === "recentTrades" && (
         <div className="flex-1 min-h-0">
           <RecentTrades symbol={symbol} />
+        </div>
+      )}
+
+      {activeTab === "marketNews" && (
+        <div className="flex-1 min-h-0">
+          <MarketNews />
         </div>
       )}
     </div>
