@@ -1,7 +1,17 @@
 #!/bin/bash
 set -e
 
-# ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ Substitute env-var placeholders in Trino catalog properties ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
+# JMX Prometheus Agent for Trino
+JMX_JAR="/etc/trino/jmx/jmx_prometheus_javaagent.jar"
+JMX_CFG="/etc/trino/jmx/trino-442.yaml"
+if [ -f "$JMX_CFG" ] && [ ! -f "$JMX_JAR" ]; then
+  echo "Downloading jmx_prometheus_javaagent..."
+  mkdir -p /etc/trino/jmx
+  wget -q -O "$JMX_JAR" \
+    "https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.20.0/jmx_prometheus_javaagent-0.20.0.jar"
+fi
+
+# Substituting env-var placeholders in Trino catalog properties
 CATALOG="/etc/trino/catalog/iceberg.properties"
 if [ -f "$CATALOG" ]; then
   sed -i \
@@ -12,4 +22,14 @@ if [ -f "$CATALOG" ]; then
     "$CATALOG"
 fi
 
-exec /usr/lib/trino/bin/run-trino "$@"
+# Build Trino JVM opts (prepend JMX agent if config exists)
+TRINO_OPTS=""
+if [ -f "$JMX_JAR" ] && [ -f "$JMX_CFG" ]; then
+  JMX_PORT="${JMX_EXPORTER_PORT:-9404}"
+  TRINO_OPTS="-javaagent:${JMX_JAR}=${JMX_PORT}:${JMX_CFG}"
+  echo "JMX Prometheus agent enabled on port ${JMX_PORT}"
+fi
+
+ALL_OPTS="${TRINO_OPTS} ${JVM_EXTRA_OPTS:-}"
+
+exec /usr/lib/trino/bin/run-trino "$@" $ALL_OPTS

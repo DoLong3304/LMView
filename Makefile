@@ -7,68 +7,68 @@
 
 .PHONY: core
 core: ## Start ONLY core services (17GB RAM) - Default for daily dev
-	@echo "🚀 Starting CORE services (17GB RAM)..."
-	docker compose --profile dev up -d
-	@echo "✅ Core services started!"
+	@echo "Starting CORE services (17GB RAM)..."
+	docker compose up -d
+	@echo "Core services started!"
 	@echo "   Frontend: http://localhost"
 	@echo "   FastAPI:  http://localhost:8080"
 	@echo "   Flink UI: http://localhost:8081"
 
 .PHONY: monitoring
 monitoring: core ## Start core + monitoring stack (18GB RAM) - For performance monitoring
-	@echo "📊 Starting MONITORING stack (18GB RAM total)..."
-	docker compose --profile dev --profile monitoring up -d
-	@echo "✅ Monitoring started!"
+	@echo "Starting MONITORING stack..."
+	docker compose up -d redis-exporter prometheus kafka-exporter node-exporter grafana
+	@echo "Monitoring started!"
 	@echo "   Grafana:    http://localhost:3001 (admin/admin)"
 	@echo "   Prometheus: http://localhost:9090"
 
 .PHONY: logs
 logs: monitoring ## Start core + monitoring + logs (18.8GB RAM) - For debugging
-	@echo "📝 Starting LOGGING stack (18.8GB RAM total)..."
-	docker compose --profile dev --profile monitoring --profile logging up -d
-	@echo "✅ Logging started!"
+	@echo "Starting LOGGING stack..."
+	docker compose up -d loki promtail
+	@echo "Logging started!"
 	@echo "   Loki API: http://localhost:3100"
-	@echo "   Logs in Grafana: http://localhost:3001 → Centralized Logs dashboard"
+	@echo "   Logs in Grafana: http://localhost:3001 -> Centralized Logs dashboard"
 
 .PHONY: full
 full: logs ## Start ALL services (alias for 'logs')
 
 .PHONY: stop-logs
 stop-logs: ## Stop logging stack
-	@echo "🛑 Stopping LOGGING stack..."
-	docker compose --profile logging stop loki promtail
-	@echo "✅ Logging stopped"
+	@echo "Stopping LOGGING stack..."
+	docker compose stop loki promtail
+	@echo "Logging stopped"
 
 .PHONY: stop-monitoring
 stop-monitoring: ## Stop monitoring stack
-	@echo "🛑 Stopping MONITORING stack..."
-	docker compose --profile monitoring stop prometheus grafana kafka-exporter node-exporter
-	@echo "✅ Monitoring stopped"
+	@echo "Stopping MONITORING stack..."
+	docker compose stop redis-exporter prometheus kafka-exporter node-exporter grafana
+	@echo "Monitoring stopped"
 
 .PHONY: stop-core
 stop-core: ## Stop core services
-	@echo "🛑 Stopping CORE services..."
-	docker compose --profile dev down
-	@echo "✅ Core stopped"
+	@echo "Stopping CORE services..."
+	docker compose down
+	@echo "Core stopped"
 
 .PHONY: stop-all
 stop-all: stop-logs stop-monitoring stop-core ## Stop ALL services
 
 .PHONY: restart-core
 restart-core: ## Restart core services
-	@echo "🔄 Restarting CORE services..."
+	@echo "Restarting CORE services..."
 	docker compose restart
-	@echo "✅ Core restarted"
+	@echo "Core restarted"
 
 # ─── Development (Legacy - uses old docker-compose.yml) ──────────────────────
 
 .PHONY: dev
 dev: ## Start all services in development mode (hot-reload, no SSL)
-	docker compose --profile dev up -d
+	docker compose up -d fastapi-dev nginx-dev
 
 .PHONY: dev-build
 dev-build: ## Rebuild and start in development mode
-	docker compose --profile dev up -d --build
+	docker compose up -d --build fastapi-dev nginx-dev
 
 .PHONY: dev-logs
 dev-logs: ## Tail logs for all services
@@ -76,21 +76,21 @@ dev-logs: ## Tail logs for all services
 
 .PHONY: dev-down
 dev-down: ## Stop all development services
-	docker compose --profile dev down
+	docker compose stop fastapi-dev nginx-dev
 
 # ─── Production ──────────────────────────────────────────────────────────────
 
 .PHONY: prod
 prod: ## Start all services in production mode (SSL, multi-worker)
-	docker compose --profile prod up -d
+	docker compose up -d fastapi-prod nginx-prod certbot-auto duckdns-auto
 
 .PHONY: prod-build
 prod-build: ## Rebuild and start in production mode
-	docker compose --profile prod up -d --build
+	docker compose up -d --build fastapi-prod nginx-prod certbot-auto duckdns-auto
 
 .PHONY: prod-down
 prod-down: ## Stop all production services
-	docker compose --profile prod down
+	docker compose stop fastapi-prod nginx-prod certbot-auto duckdns-auto
 
 # ─── Jobs ────────────────────────────────────────────────────────────────────
 
@@ -116,46 +116,47 @@ test-cov: ## Run tests with coverage report
 
 .PHONY: status
 status: ## Show status and RAM usage of all containers
-	@echo "📊 Container Status:"
-	@docker compose -f docker-compose.core.yml ps 2>/dev/null || true
-	@docker compose -f docker-compose.monitoring.yml ps 2>/dev/null || true
-	@docker compose -f docker-compose.elk.yml ps 2>/dev/null || true
+	@echo "Container Status:"
+	@docker compose ps
 	@echo ""
-	@echo "💾 RAM Usage (Top 20):"
+	@echo "RAM Usage:"
 	@docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" | head -20
 
 .PHONY: clean
 clean: ## Remove all containers, volumes, and networks (DANGEROUS)
-	@echo "⚠️  WARNING: This will remove ALL containers and volumes!"
+	@echo "WARNING: This will remove ALL containers and volumes!"
 	@read -p "Are you sure? [y/N] " -n 1 -r; \
 	echo; \
 	if [[ $$REPLY =~ ^[Yy]$$ ]]; then \
-		docker compose -f docker-compose.elk.yml down -v 2>/dev/null || true; \
-		docker compose -f docker-compose.monitoring.yml down -v 2>/dev/null || true; \
-		docker compose -f docker-compose.core.yml down -v 2>/dev/null || true; \
 		docker compose down -v --remove-orphans 2>/dev/null || true; \
-		echo "✅ All services and volumes removed"; \
+		echo "All services and volumes removed"; \
 	else \
-		echo "❌ Cancelled"; \
+		echo "Cancelled"; \
 	fi
 
 .PHONY: help
 help: ## Show this help
-	@echo "Lambda Architecture - Docker Compose Profiles"
+	@echo "Lambda Architecture - Docker Compose"
 	@echo ""
-	@echo "📦 Profile-Based Startup (Recommended):"
+	@echo "Startup:"
 	@echo "  make core              Start ONLY core services (17GB RAM) - Daily dev"
 	@echo "  make monitoring        Start core + monitoring (18GB RAM) - Performance"
 	@echo "  make logs              Start core + monitoring + logs (18.8GB RAM) - Debug"
 	@echo "  make full              Start ALL services (alias for 'logs')"
 	@echo ""
-	@echo "🛑 Stop Services:"
+	@echo "  make dev               Start FastAPI dev + Nginx dev (hot-reload)"
+	@echo "  make prod              Start FastAPI prod + Nginx prod (SSL)"
+	@echo ""
+	@echo "Stop Services:"
 	@echo "  make stop-logs         Stop logging stack"
 	@echo "  make stop-monitoring   Stop monitoring stack"
 	@echo "  make stop-core         Stop core services"
 	@echo "  make stop-all          Stop ALL services"
 	@echo ""
-	@echo "🔧 Other Commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v "Profile-Based\|Stop Services" | sort | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	@echo "Utilities:"
+	@echo "  make status            Show container status + RAM usage"
+	@echo "  make clean             Remove all containers + volumes (DANGEROUS)"
+	@echo "  make dev-logs          Tail logs for all containers"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | grep -v "Startup\|Stop Services\|Utilities" | sort | \
+		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 

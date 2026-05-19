@@ -21,12 +21,23 @@ from backend.api import (
     websocket,
     market,
     news,
+    market_overview,
 )
+from backend.tasks.news_fetcher import news_fetcher
+from backend.tasks.market_fetcher import market_fetcher
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Start background tasks
+    await news_fetcher.start()
+    await market_fetcher.start()
+
     yield
+
+    # Stop background tasks
+    await news_fetcher.stop()
+    await market_fetcher.stop()
     await close_all()
 
 
@@ -59,5 +70,6 @@ for router_module in (
     websocket,
     market,
     news,
+    market_overview,
 ):
     app.include_router(router_module.router)

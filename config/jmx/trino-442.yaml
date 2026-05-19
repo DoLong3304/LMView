@@ -1,0 +1,127 @@
+apiVersion: 1
+
+# JMX Prometheus Agent configuration for Trino 442 (Java 17)
+# Hooked via JVM_EXTRA_OPTS: -javaagent:/etc/trino/jmx/jmx_prometheus_javaagent.jar=9404:/etc/trino/jmx/trino-442.yaml
+# Scrape target: http://trino:9404/metrics
+
+lowercaseOutputName: true
+lowercaseOutputLabelNames: true
+
+# ─── JVM Metrics ────────────────────────────────────────────────────────────
+
+rules:
+  # JVM Heap Memory
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage> (\w+)'
+    name: jvm_memory_bytes_$1
+    type: GAUGE
+    help: "JVM heap memory usage state $1"
+  - pattern: 'java.lang<type=Memory><HeapMemoryUsage>'
+    name: jvm_memory_bytes_used
+    type: GAUGE
+    help: "JVM heap memory used in bytes"
+  - pattern: 'java.lang<type=Memory><HeapMemoryMax>'
+    name: jvm_memory_bytes_max
+    type: GAUGE
+    help: "JVM heap memory max in bytes"
+
+  # JVM Non-Heap Memory
+  - pattern: 'java.lang<type=Memory><NonHeapMemoryUsage> (\w+)'
+    name: jvm_memory_nonheap_bytes_$1
+    type: GAUGE
+
+  # JVM GC
+  - pattern: 'java.lang<type=GarbageCollector, name=([^>]+)><>CollectionCount'
+    name: jvm_gc_collection_count
+    labels:
+      gc: "$1"
+    type: COUNTER
+  - pattern: 'java.lang<type=GarbageCollector, name=([^>]+)><>CollectionTime'
+    name: jvm_gc_collection_seconds_total
+    labels:
+      gc: "$1"
+    type: COUNTER
+    help: "JVM garbage collection total time in seconds"
+
+  # JVM Threads
+  - pattern: 'java.lang<type=Threading><>ThreadCount'
+    name: jvm_threads_live_threads
+    type: GAUGE
+  - pattern: 'java.lang<type=Threading><>PeakThreadCount'
+    name: jvm_threads_peak_threads
+    type: GAUGE
+  - pattern: 'java.lang<type=Threading><>DaemonThreadCount'
+    name: jvm_threads_daemon_threads
+    type: GAUGE
+  - pattern: 'java.lang<type=Threading><>CurrentThreadCpuTime'
+    name: jvm_threads_current_cpu_time
+    type: GAUGE
+  - pattern: 'java.lang<type=Threading><>CurrentThreadUserTime'
+    name: jvm_threads_current_user_time
+    type: GAUGE
+
+  # JVM Class Loading
+  - pattern: 'java.lang<type=ClassLoading><>LoadedClassCount'
+    name: jvm_classes_loaded
+    type: GAUGE
+  - pattern: 'java.lang<type=ClassLoading><>TotalLoadedClassCount'
+    name: jvm_classes_total_loaded
+    type: COUNTER
+  - pattern: 'java.lang<type=ClassLoading><>UnloadedClassCount'
+    name: jvm_classes_unloaded
+    type: COUNTER
+
+# ─── Trino Metrics ──────────────────────────────────────────────────────────
+
+  # Trino — General cluster metrics (via jmx too)
+  - pattern: 'trino.plugin.jmx.<type=JmxExporter><>ExporterStatus'
+    name: trino_jmx_exporter_status
+    type: GAUGE
+    help: "Trino JMX exporter status (1=ok)"
+
+  # Trino — Query manager (via Trino's own metric registry exposed through JMX)
+  - pattern: 'trino.executor<name=QueryManager.*><>(RunningQueries|QueuedQueries|BlockedQueries)'
+    name: trino_executor_$1
+    type: GAUGE
+    help: "Trino executor query counts"
+  - pattern: 'trino.executor<name=ForScheduler.*><>(RunningQueries|QueuedQueries|BlockedQueries)'
+    name: trino_scheduler_$1
+    type: GAUGE
+    help: "Trino scheduler query counts"
+  - pattern: 'trino.memory<name=HeapUsage.*><>(AvailableMemory|ReservedMemory)'
+    name: trino_memory_$1
+    type: GAUGE
+  - pattern: 'trino.memory<name=GlobalExecutor.*><>(ActiveCount|CompletedTaskCount|PeakPoolSize|PoolSize)'
+    name: trino_executor_global_$1
+    type: GAUGE
+
+  # Trino — Cluster state (via NodeInfo / StateCache)
+  - pattern: 'trino.cluster<name=.*><>(ActiveNodes|InactiveNodes|ShuttingDownNodes)'
+    name: trino_cluster_$1
+    type: GAUGE
+  - pattern: 'trino.cluster<name=.*><>(RunningDrql|RunningDml|RunningDdl)'
+    name: trino_cluster_$1
+    type: GAUGE
+    help: "Trino cluster running query types"
+
+  # Trino — Exchange (shuffle) metrics
+  - pattern: 'trino.exchange<name=.*><>(InputPipeline.*|OutputPipeline.*|PageBufferServer.*)'
+    name: trino_exchange_$1
+    type: GAUGE
+
+  # Trino — Spilled bytes (if spilling is enabled)
+  - pattern: 'trino.operator<name=.*Spill.*><>(SpilledBytes|SpilledPages)'
+    name: trino_spill_$1
+    type: COUNTER
+
+  # Trino — Generic resource group metrics
+  - pattern: 'trino.resourcegroup<name=.*><>(RunningQueries|QueuedQueries|BlockedQueries|CpuQuotaUsage|QueuedTime)'
+    name: trino_resourcegroup_$1
+    type: GAUGE
+
+# ─── Trino JVM direct pattern matches ───────────────────────────────────────
+
+  # Note: Trino exposes most metrics via its own MetricRegistry,
+  # which gets exposed as JMX MBeans under the "trino.plugin.jmx" domain.
+  # The jmx_exporter agent picks these up via the default pattern below.
+
+lowercaseOutputLabelNames: true

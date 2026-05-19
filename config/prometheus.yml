@@ -56,3 +56,46 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
     scrape_interval: 30s
+
+  # ─── MinIO: native Prometheus endpoint (auth: MINIO_PROMETHEUS_AUTH_TYPE=public)
+  - job_name: 'minio'
+    static_configs:
+      - targets: ['minio:9000']
+    metrics_path: '/minio/v2/metrics/cluster'
+    scrape_interval: 30s
+
+  # ─── Trino: JMX Prometheus Java Agent (port 9404)
+  - job_name: 'trino'
+    static_configs:
+      - targets: ['trino:9404']
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # ─── Redis Sentinel HA: redis_exporter sidecar
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    scrape_interval: 15s
+
+  # ─── Kafka JVM: JMX Prometheus Java Agent (ports 9999 per broker)
+  - job_name: 'kafka-jvm'
+    static_configs:
+      - targets:
+          - 'kafka-1:9999'
+          - 'kafka-2:9999'
+          - 'kafka-3:9999'
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+
+  # ─── Spark: Prometheus Servlet (built-in Spark metrics sink)
+  - job_name: 'spark-master'
+    static_configs:
+      - targets: ['spark-master:8090']
+    metrics_path: '/metrics/master/prometheus'
+    scrape_interval: 30s
+
+  - job_name: 'spark-worker'
+    static_configs:
+      - targets: ['spark-worker:8091']
+    metrics_path: '/metrics/prometheus'
+    scrape_interval: 30s

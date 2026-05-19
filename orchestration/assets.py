@@ -1,234 +1,388 @@
-#!/usr/bin/env python3
-import os
-import subprocess
+"""
+Dagster Assets for Medallion Architecture & News Sentiment
+Orchestrates Bronze → Silver → Gold transformations
+"""
+from dagster import asset, AssetExecutionContext, schedule, define_asset_job, ScheduleDefinition
+from pyspark.sql import SparkSession
 import sys
+import os
 from pathlib import Path
-from typing import List, Optional
 
-from dagster import (
-    AssetExecutionContext,
-    Definitions,
-    ScheduleDefinition,
-    asset,
-    get_dagster_logger,
-)
-
-PROJECT_DIR = Path(os.environ.get("CRYPTO_PROJECT_DIR", "/app"))
-
-SPARK_HOME = Path(os.environ.get("SPARK_HOME", "/opt/spark"))
-
-SPARK_EVENTS_DIR = Path(os.environ.get("SPARK_EVENTS_DIR", "/opt/spark-events"))
-
-SPARK_MASTER = os.environ.get("SPARK_MASTER", "spark://spark-master:7077")
-
-SPARK_PACKAGES = ",".join([
-    "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2",
-    "org.apache.iceberg:iceberg-aws-bundle:1.5.2",
-    "org.apache.hadoop:hadoop-aws:3.3.4",
-    "org.postgresql:postgresql:42.7.2",
-])
-
-# Add project src to Python path for news modules
+# Add src to path
+PROJECT_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_DIR / "src"))
 
-def _run_spark_job(context: AssetExecutionContext, script_name: str, extra_args: Optional[List[str]] = None) -> None:
-    logger = get_dagster_logger()
-    script_path = PROJECT_DIR / "src" / script_name
+from lakehouse.silver.transformations import SilverTickerTransformation, SilverKlineAggregation
+from lakehouse.gold.aggregations import GoldMarketOverview, GoldSymbolStatistics, GoldSectorPerformance
+from news.multi_source_scraper import MultiSourceNewsScraper
+from news.sentiment_analyzer import SentimentAnalyzer
+from common.kafka_client import get_kafka_producer
+from common.avro_serializer import AvroSerializer
+import logging
 
-    if not script_path.exists():
-        raise FileNotFoundError(f"Script not found: {script_path}")
-
-    SPARK_EVENTS_DIR.mkdir(parents=True, exist_ok=True)
-
-    cmd = [
-        str(SPARK_HOME / "bin" / "spark-submit"),
-        "--master", SPARK_MASTER,
-        "--packages", SPARK_PACKAGES,
-        "--conf", "spark.eventLog.enabled=true",
-        "--conf", f"spark.eventLog.dir=file://{SPARK_EVENTS_DIR}",
-        str(script_path),
-    ]
-
-    if extra_args:
-        cmd.extend(extra_args)
-
-    logger.info("Running command: %s", " ".join(cmd))
-
-    process = subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,    # merge stderr into stdout for a single stream
-        text=True,
-        bufsize=1,                   # line-buffered
-        cwd=str(PROJECT_DIR),
-    )
-
-    for line in process.stdout:
-        line = line.rstrip()
-        if line:
-            logger.info(line)
-
-    process.wait()
-
-    if process.returncode != 0:
-        raise Exception(
-            f"Spark job '{script_name}' failed with exit code {process.returncode}. "
-            f"Check logs in Dagster UI or Spark History Server (http://localhost:18080)."
-        )
-
-    logger.info("Spark job '%s' completed successfully.", script_name)
+logger = logging.getLogger(__name__)
 
 
-@asset(
-    description=(
-        "Pulls 1h OHLCV klines from Binance API for all USDT pairs, "
-        "fetches only rows newer than the last run, then writes to Iceberg "
-        "table. Also detects & fills InfluxDB gaps from machine downtime."
-    ),
-    group_name="ingestion",
-)
-def backfill_historical(context: AssetExecutionContext) -> None:
-    _run_spark_job(
-        context,
-        script_name="batch/backfill.py",
-        extra_args=["--mode", "all", "--iceberg-mode", "incremental"],
-    )
+def get_spark_session() -> SparkSession:
+    """Create Spark session with Iceberg support"""
+    return SparkSession.builder \
+        .appName("Medallion_Pipeline") \
+        .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
+        .config("spark.sql.catalog.iceberg_catalog", "org.apache.iceberg.spark.SparkCatalog") \
+        .config("spark.sql.catalog.iceberg_catalog.type", "hadoop") \
+        .config("spark.sql.catalog.iceberg_catalog.warehouse", "s3a://lakehouse/warehouse") \
+        .getOrCreate()
 
 
-@asset(
-    description=(
-        "Aggregates 1-minute candles into hourly candles to reduce data bloat. "
-        "Runs on both InfluxDB (candles measurement) and Iceberg (coin_klines table). "
-        "Deletes 1m data older than RETENTION_1M_DAYS (default: 90 days)."
-    ),
-    group_name="maintenance",
-)
-def aggregate_candles(context: AssetExecutionContext) -> None:
-    _run_spark_job(
-        context,
-        script_name="batch/aggregate.py",
-        extra_args=["--mode", "all"],
-    )
+# ============================================================================
+# SILVER LAYER ASSETS
+# ============================================================================
 
-
-@asset(
-    description=(
-        "Runs 4 maintenance tasks on Iceberg tables: "
-        "(1) Compact small files into ~128 MB files, "
-        "(2) Rewrite manifests to reduce metadata overhead, "
-        "(3) Expire snapshots older than 48 hours, "
-        "(4) Remove orphan files no longer referenced."
-    ),
-    group_name="maintenance",
-)
-def iceberg_table_maintenance(context: AssetExecutionContext) -> None:
-    _run_spark_job(
-        context,
-        script_name="batch/maintenance.py",
-    )
-
-
-schedule_weekly_maintenance = ScheduleDefinition(
-    name="weekly_iceberg_maintenance",
-    target=iceberg_table_maintenance,
-    cron_schedule="0 3 * * 0",
-    description="Runs every Sunday at 03:00 AM to compact and clean up Iceberg tables.",
-)
-
-schedule_daily_aggregate = ScheduleDefinition(
-    name="daily_candle_aggregation",
-    target=aggregate_candles,
-    cron_schedule="0 4 * * *",
-    description="Runs daily at 04:00 AM to aggregate 1m candles into 1h and clean up old 1m data.",
-)
-
-@asset(
-    description="Scrapes crypto news from CryptoPanic and publishes sentiment analysis to Kafka"
-)
-def news_sentiment_pipeline(context: AssetExecutionContext) -> None:
-    """Fetch news, analyze sentiment, and publish to Kafka.
-
-    Runs every 5 minutes via schedule_news_sentiment.
+@asset(group_name="silver", compute_kind="spark")
+def silver_ticker_unified(context: AssetExecutionContext):
     """
-    logger = get_dagster_logger()
+    Transform Bronze ticker → Silver unified ticker
+    - Deduplicates data
+    - Calculates mid-price from Binance + OKX
+    - Quality scoring
+    """
+    spark = get_spark_session()
+    transformer = SilverTickerTransformation(spark)
 
-    try:
-        from news.scraper import NewsScraper
-        from news.sentiment_analyzer import SentimentAnalyzer
-        from common.kafka_client import init_producer, send_to_kafka, flush_and_close
-        from common.avro_serializer import AvroSerializer
-        from common.config import SCHEMA_REGISTRY_URL
-        import time
+    # Create table if not exists
+    transformer.create_table()
 
-        logger.info("Starting news sentiment pipeline...")
+    # Transform today's data
+    transformer.transform()
 
-        # Initialize components
-        scraper = NewsScraper()
-        analyzer = SentimentAnalyzer()
-
-        # Initialize Kafka producer
-        init_producer()
-        avro_serializer = AvroSerializer(SCHEMA_REGISTRY_URL)
-        schema_path = PROJECT_DIR / "schemas" / "news.avsc"
-        avro_serializer.register("crypto_news_sentiment", str(schema_path))
-
-        # Fetch latest news
-        news_items = scraper.fetch_latest(
-            currencies=["BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "MATIC", "DOT", "AVAX"],
-            limit=20,
-            filter_type="hot"
-        )
-
-        logger.info(f"Fetched {len(news_items)} news items")
-
-        # Process each news item
-        published_count = 0
-        for item in news_items:
-            try:
-                # Analyze sentiment
-                title = item.get("title", "")
-                sentiment_score = analyzer.analyze(title)
-
-                # Format for Kafka
-                record = scraper.format_for_kafka(item, sentiment_score)
-
-                # Publish to Kafka
-                send_to_kafka("crypto_news_sentiment", record, avro_serializer)
-                published_count += 1
-
-                logger.info(
-                    f"Published: {title[:60]}... | sentiment={sentiment_score:.3f} | symbols={record['symbols']}"
-                )
-
-            except Exception as e:
-                logger.error(f"Failed to process news item: {e}")
-                continue
-
-        # Flush Kafka producer
-        flush_and_close()
-
-        logger.info(f"News sentiment pipeline completed. Published {published_count}/{len(news_items)} items.")
-
-    except Exception as e:
-        logger.error(f"News sentiment pipeline failed: {e}")
-        raise
+    context.log.info("Silver ticker_unified transformation complete")
 
 
-defs = Definitions(
-    assets=[
-        backfill_historical,
-        aggregate_candles,
-        iceberg_table_maintenance,
-        news_sentiment_pipeline,
-    ],
-    schedules=[
-        schedule_weekly_maintenance,
-        schedule_daily_aggregate,
-        ScheduleDefinition(
-            name="schedule_news_sentiment",
-            target=news_sentiment_pipeline,
-            cron_schedule="*/5 * * * *",  # Every 5 minutes
-            execution_timezone="UTC",
-        ),
-    ],
+@asset(group_name="silver", compute_kind="spark")
+def silver_kline_5m(context: AssetExecutionContext):
+    """Aggregate 1m → 5m candles"""
+    spark = get_spark_session()
+    aggregator = SilverKlineAggregation(spark)
+
+    aggregator.create_table()
+    aggregator.aggregate_timeframe(source_interval="1m", target_interval="5m", multiplier=5)
+
+    context.log.info("Silver 5m klines aggregated")
+
+
+@asset(group_name="silver", compute_kind="spark")
+def silver_kline_15m(context: AssetExecutionContext):
+    """Aggregate 5m → 15m candles"""
+    spark = get_spark_session()
+    aggregator = SilverKlineAggregation(spark)
+
+    aggregator.aggregate_timeframe(source_interval="5m", target_interval="15m", multiplier=3)
+
+    context.log.info("Silver 15m klines aggregated")
+
+
+@asset(group_name="silver", compute_kind="spark")
+def silver_kline_1h(context: AssetExecutionContext):
+    """Aggregate 15m → 1h candles"""
+    spark = get_spark_session()
+    aggregator = SilverKlineAggregation(spark)
+
+    aggregator.aggregate_timeframe(source_interval="15m", target_interval="1h", multiplier=4)
+
+    context.log.info("Silver 1h klines aggregated")
+
+
+@asset(group_name="silver", compute_kind="spark")
+def silver_kline_4h(context: AssetExecutionContext):
+    """Aggregate 1h → 4h candles"""
+    spark = get_spark_session()
+    aggregator = SilverKlineAggregation(spark)
+
+    aggregator.aggregate_timeframe(source_interval="1h", target_interval="4h", multiplier=4)
+
+    context.log.info("Silver 4h klines aggregated")
+
+
+@asset(group_name="silver", compute_kind="spark")
+def silver_kline_1d(context: AssetExecutionContext):
+    """Aggregate 4h → 1d candles"""
+    spark = get_spark_session()
+    aggregator = SilverKlineAggregation(spark)
+
+    aggregator.aggregate_timeframe(source_interval="4h", target_interval="1d", multiplier=6)
+
+    context.log.info("Silver 1d klines aggregated")
+
+
+@asset(group_name="silver", compute_kind="spark")
+def silver_kline_1w(context: AssetExecutionContext):
+    """Aggregate 1d → 1w candles"""
+    spark = get_spark_session()
+    aggregator = SilverKlineAggregation(spark)
+
+    aggregator.aggregate_timeframe(source_interval="1d", target_interval="1w", multiplier=7)
+
+    context.log.info("Silver 1w klines aggregated")
+
+
+# ============================================================================
+# GOLD LAYER ASSETS
+# ============================================================================
+
+@asset(group_name="gold", compute_kind="spark", deps=[silver_ticker_unified])
+def gold_market_overview(context: AssetExecutionContext):
+    """
+    Calculate market overview metrics
+    - Top 10 gainers/losers
+    - Total volume
+    - Market statistics
+    """
+    spark = get_spark_session()
+    calculator = GoldMarketOverview(spark)
+
+    calculator.create_table()
+    calculator.calculate()
+
+    context.log.info("Gold market_overview calculated")
+
+
+@asset(group_name="gold", compute_kind="spark", deps=[silver_kline_1d, silver_ticker_unified])
+def gold_symbol_statistics(context: AssetExecutionContext):
+    """
+    Calculate per-symbol daily statistics
+    - OHLCV
+    - Volatility
+    - Change %
+    """
+    spark = get_spark_session()
+    calculator = GoldSymbolStatistics(spark)
+
+    calculator.create_table()
+
+    # Calculate for today
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    calculator.calculate(date=today)
+
+    context.log.info("Gold symbol_statistics calculated")
+
+
+@asset(group_name="gold", compute_kind="spark", deps=[silver_ticker_unified])
+def gold_sector_performance(context: AssetExecutionContext):
+    """
+    Calculate sector-level performance
+    - Large/Mid/Small cap performance
+    - Top symbols per sector
+    """
+    spark = get_spark_session()
+    calculator = GoldSectorPerformance(spark)
+
+    calculator.create_table()
+    calculator.calculate()
+
+    context.log.info("Gold sector_performance calculated")
+
+
+# ============================================================================
+# NEWS SENTIMENT ASSETS
+# ============================================================================
+
+@asset(group_name="news", compute_kind="python")
+def news_sentiment_multi_source(context: AssetExecutionContext):
+    """
+    Fetch news from 10+ sources and analyze sentiment
+    - CryptoPanic, CoinDesk, CoinTelegraph, Decrypt, The Block
+    - Bitcoin Magazine, CryptoSlate, BeInCrypto, NewsBTC, U.Today
+    - Bitcoinist, CryptoNews
+    """
+    # Initialize scraper
+    api_key = os.getenv("CRYPTOPANIC_API_KEY")
+    scraper = MultiSourceNewsScraper(cryptopanic_api_key=api_key)
+
+    # Fetch recent news (last 5 minutes)
+    articles = scraper.fetch_recent(hours=0.1, articles_per_source=5)  # 6 minutes = 0.1 hours
+
+    if not articles:
+        context.log.warning("No articles fetched")
+        return
+
+    # Analyze sentiment
+    analyzer = SentimentAnalyzer()
+    for article in articles:
+        sentiment = analyzer.analyze(article["title"] + " " + article["content"])
+        article["sentiment_score"] = sentiment["compound"]
+        article["sentiment_label"] = sentiment["label"]
+
+    # Publish to Kafka
+    producer = get_kafka_producer()
+    serializer = AvroSerializer("news")
+
+    for article in articles:
+        # Add timestamp
+        article["event_time"] = article["published_at"]
+
+        # Serialize and send
+        key = article["url"].encode("utf-8")
+        value = serializer.serialize(article)
+        producer.send("crypto_news_sentiment", key=key, value=value)
+
+    producer.flush()
+
+    context.log.info(f"Published {len(articles)} articles to Kafka")
+    context.log.info(f"Sources: {set(a['source'] for a in articles)}")
+
+
+# ============================================================================
+# JOBS & SCHEDULES
+# ============================================================================
+
+# Silver transformation job (every 5 minutes)
+silver_transformation_job = define_asset_job(
+    name="silver_transformation",
+    selection=[
+        silver_ticker_unified,
+        silver_kline_5m,
+        silver_kline_15m,
+        silver_kline_1h
+    ]
 )
+
+@schedule(
+    job=silver_transformation_job,
+    cron_schedule="*/5 * * * *"  # Every 5 minutes
+)
+def silver_transformation_schedule():
+    return {}
+
+
+# Gold aggregation job (every 5 minutes)
+gold_aggregation_job = define_asset_job(
+    name="gold_aggregation",
+    selection=[
+        gold_market_overview,
+        gold_symbol_statistics,
+        gold_sector_performance
+    ]
+)
+
+@schedule(
+    job=gold_aggregation_job,
+    cron_schedule="*/5 * * * *"  # Every 5 minutes
+)
+def gold_aggregation_schedule():
+    return {}
+
+
+# Daily aggregation job (for 4h, 1d, 1w candles)
+daily_aggregation_job = define_asset_job(
+    name="daily_aggregation",
+    selection=[
+        silver_kline_4h,
+        silver_kline_1d,
+        silver_kline_1w
+    ]
+)
+
+@schedule(
+    job=daily_aggregation_job,
+    cron_schedule="0 0 * * *"  # Daily at midnight
+)
+def daily_aggregation_schedule():
+    return {}
+
+
+# News sentiment job (every 5 minutes)
+news_sentiment_job = define_asset_job(
+    name="news_sentiment",
+    selection=[news_sentiment_multi_source]
+)
+
+@schedule(
+    job=news_sentiment_job,
+    cron_schedule="*/5 * * * *"  # Every 5 minutes
+)
+def news_sentiment_schedule():
+    return {}
+
+
+# ============================================================================
+# ADVANCED GOLD METRICS ASSETS
+# ============================================================================
+
+@asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_ticker_unified])
+def gold_market_dominance(context: AssetExecutionContext):
+    """Calculate BTC/ETH dominance and market cap metrics"""
+    from lakehouse.gold.market_metrics import GoldMarketDominance
+
+    spark = get_spark_session()
+    calculator = GoldMarketDominance(spark)
+
+    calculator.create_table()
+    calculator.calculate()
+
+    context.log.info("Gold market_dominance calculated")
+
+
+@asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_ticker_unified])
+def gold_volatility_ranking(context: AssetExecutionContext):
+    """Calculate volatility rankings for all symbols"""
+    from lakehouse.gold.market_metrics import GoldVolatilityRanking
+
+    spark = get_spark_session()
+    calculator = GoldVolatilityRanking(spark)
+
+    calculator.create_table()
+    calculator.calculate()
+
+    context.log.info("Gold volatility_ranking calculated")
+
+
+@asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_ticker_unified])
+def gold_movers_ranking(context: AssetExecutionContext):
+    """Calculate top gainers/losers with volume context"""
+    from lakehouse.gold.market_metrics import GoldMoversRanking
+
+    spark = get_spark_session()
+    calculator = GoldMoversRanking(spark)
+
+    calculator.create_table()
+    calculator.calculate()
+
+    context.log.info("Gold movers_ranking calculated")
+
+
+@asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_kline_1h])
+def gold_momentum_indicators(context: AssetExecutionContext):
+    """Calculate RSI, MACD, Bollinger Bands"""
+    import subprocess
+
+    result = subprocess.run(
+        ["spark-submit", "/app/src/batch/calculate_indicators.py"],
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode != 0:
+        context.log.error(f"Indicators calculation failed: {result.stderr}")
+        raise RuntimeError(f"Indicators calculation failed")
+
+    context.log.info("Gold momentum_indicators calculated")
+
+
+# Advanced gold metrics job (every 5 minutes)
+gold_advanced_job = define_asset_job(
+    name="gold_advanced_metrics",
+    selection=[
+        gold_market_dominance,
+        gold_volatility_ranking,
+        gold_movers_ranking,
+        gold_momentum_indicators
+    ]
+)
+
+@schedule(
+    job=gold_advanced_job,
+    cron_schedule="*/5 * * * *"  # Every 5 minutes
+)
+def gold_advanced_schedule():
+    return {}

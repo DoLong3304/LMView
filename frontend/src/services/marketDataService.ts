@@ -12,7 +12,7 @@ import type { Candle, SymbolInfo, Ticker, Trade } from "../types";
 
 // ─── Config ──────────────────────────────────────────────────────
 // Toggle to 'mock' for local development without backend.
-const DATA_SOURCE = import.meta.env.VITE_DATA_SOURCE || "api"; // 'mock' | 'api'
+const DATA_SOURCE = "api"; // 'mock' | 'api'
 
 // Base URL of your backend REST/WebSocket endpoint.
 // Defaults to '/api' when served behind a reverse proxy.
@@ -95,6 +95,7 @@ function generateMockCandles(
 
   let price = seedPrices[symbol] || seedPrices.default;
   const volatility = price * 0.008; // 0.8% per candle std dev
+  const is1s = timeframeKey === "1s";
   const candles: Candle[] = [];
 
   for (let i = 0; i < count; i++) {
@@ -102,9 +103,19 @@ function generateMockCandles(
     const open = price;
     const change = (Math.random() - 0.49) * volatility * 2;
     const close = Math.max(open + change, 1);
-    const wick = Math.random() * volatility;
-    const high = Math.max(open, close) + wick;
-    const low = Math.max(Math.min(open, close) - wick, 1);
+
+    let high: number, low: number;
+    if (is1s) {
+      // 1s: Only 1 tick per candle → Open=High=Low=Close, NO wicks
+      high = close;
+      low = close;
+    } else {
+      // 1m+: Multiple ticks per candle → realistic wicks
+      const wick = Math.random() * volatility;
+      high = Math.max(open, close) + wick;
+      low = Math.max(Math.min(open, close) - wick, 1);
+    }
+
     const volume = Math.round(price * (0.5 + Math.random()) * 10);
 
     candles.push({
@@ -130,17 +141,19 @@ function generateMockCandles(
  * @param timeframe   key of TIMEFRAMES, e.g. '1h'
  * @param limit       number of candles
  * @param endTime     optional end timestamp in seconds (exclusive)
+ * @param exchange    exchange name (default: 'binance')
  */
 export async function fetchCandles(
   symbol: string,
   timeframe: string = "1h",
   limit: number = 200,
   endTime: number | null = null,
+  exchange: string = "binance",
 ): Promise<Candle[]> {
   if (DATA_SOURCE === "api") {
     // Normalize interval to lowercase for backend API
     const interval = timeframe.toLowerCase();
-    let url = `${API_BASE_URL}/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}`;
+    let url = `${API_BASE_URL}/klines?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&limit=${limit}&exchange=${encodeURIComponent(exchange)}`;
     if (endTime) {
       // Convert seconds to milliseconds for backend API
       url += `&endTime=${endTime * 1000}`;
@@ -168,17 +181,19 @@ export async function fetchCandles(
  * @param symbol
  * @param timeframe
  * @param onCandle   called with latest candle
+ * @param exchange   exchange name (default: 'binance')
  * @returns          unsubscribe function — call it on cleanup
  */
 export function subscribeCandle(
   symbol: string,
   timeframe: string,
   onCandle: (candle: Candle) => void,
+  exchange: string = "binance",
 ): () => void {
   if (DATA_SOURCE === "api") {
     // Normalize interval to lowercase for backend API
     const interval = timeframe.toLowerCase();
-    const wsUrl = `${getWsBaseUrl()}/stream?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`;
+    const wsUrl = `${getWsBaseUrl()}/stream?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&exchange=${encodeURIComponent(exchange)}`;
     const ws = new WebSocket(wsUrl);
     ws.onmessage = (e: MessageEvent) => {
       const k: RawKline = JSON.parse(e.data as string);
@@ -198,6 +213,130 @@ export function subscribeCandle(
       onCandle(latest);
     }
   }, 2000);
+
+  return () => clearInterval(interval);
+}
+
+// ─── Multi-Timeframe Streaming ─────────────────────────────────────
+
+export type TimeframeCallback = (timeframe: string, candle: Candle) => void;
+
+interface MultiTimeframeOptions {
+  symbol: string;
+  exchange?: string;
+  onCandle: TimeframeCallback;
+  onError?: (error: Event) => void;
+}
+
+/**
+ * Subscribe to ALL timeframes simultaneously via a single WebSocket.
+ * This ensures all timeframes update at the same time when price changes.
+ *
+ * @param options  { symbol, exchange, onCandle, onError }
+ * @returns        unsubscribe function
+ */
+export function subscribeAllTimeframes(
+  options: MultiTimeframeOptions,
+): () => void {
+  const {
+    symbol,
+    exchange = "binance",
+    onCandle,
+    onError,
+  } = options;
+
+  if (DATA_SOURCE === "api") {
+    const wsUrl = `${getWsBaseUrl()}/stream/all?symbol=${encodeURIComponent(symbol)}&exchange=${encodeURIComponent(exchange)}`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (e: MessageEvent) => {
+      // Message shape: { "1s": candle, "1m": candle, "5m": candle, ... }
+      const data: Record<string, RawKline> = JSON.parse(e.data as string);
+      for (const [tf, kline] of Object.entries(data)) {
+        if (kline) {
+          onCandle(tf, mapRawToCandle(kline));
+        }
+      }
+    };
+
+    if (onError) {
+      ws.onerror = onError;
+    } else {
+      ws.onerror = (err) => console.error("[WS stream/all error]", err);
+    }
+
+    return () => ws.close();
+  }
+
+  // Mock fallback: simulate all timeframes updating simultaneously
+  // Logic: Generate 1s ticks, aggregate into proper timeframe candles
+  const tfKeys = Object.keys(TIMEFRAMES);
+
+  // Track open candles for each timeframe (in-progress)
+  const openCandles: Record<string, Candle> = {};
+
+  // Seed price
+  const seedPrices: Record<string, number> = {
+    BTCUSDT: 64000, ETHUSDT: 3400, BNBUSDT: 580, SOLUSDT: 165,
+    XRPUSDT: 2.35, DOGEUSDT: 0.158, ADAUSDT: 0.72, AVAXUSDT: 35.2,
+    DOTUSDT: 7.5, LINKUSDT: 18.5, MATICUSDT: 0.72, LTCUSDT: 95,
+  };
+  let price = seedPrices[symbol] || 100;
+  const volatility = price * 0.008;
+
+  const interval = setInterval(() => {
+    const now = Math.floor(Date.now() / 1000);
+
+    // Generate 1s tick
+    const tickPrice = price + (Math.random() - 0.5) * volatility;
+    price = tickPrice;
+
+    // Process each timeframe
+    for (const tf of tfKeys) {
+      const tfSeconds = TIMEFRAMES[tf]?.seconds || 60;
+      const currentPeriod = Math.floor(now / tfSeconds) * tfSeconds;
+      const is1s = tf === "1s";
+
+      if (is1s) {
+        // 1s: Each tick is a complete candle (Open=High=Low=Close)
+        const candle: Candle = {
+          time: currentPeriod,
+          open: +tickPrice.toFixed(2),
+          high: +tickPrice.toFixed(2),
+          low: +tickPrice.toFixed(2),
+          close: +tickPrice.toFixed(2),
+          volume: Math.round(Math.random() * 100),
+        };
+        onCandle(tf, candle);
+      } else {
+        // 1m+: Accumulate ticks into current candle
+        const openCandle = openCandles[tf];
+
+        if (!openCandle || openCandle.time < currentPeriod) {
+          // New candle period started - close old, start new
+          if (openCandle) {
+            onCandle(tf, { ...openCandle }); // Close previous candle
+          }
+          openCandles[tf] = {
+            time: currentPeriod,
+            open: +tickPrice.toFixed(2),
+            high: +tickPrice.toFixed(2),
+            low: +tickPrice.toFixed(2),
+            close: +tickPrice.toFixed(2),
+            volume: Math.round(Math.random() * 1000),
+          };
+          onCandle(tf, { ...openCandles[tf] });
+        } else {
+          // Update in-progress candle
+          openCandle.close = +tickPrice.toFixed(2);
+          openCandle.high = Math.max(openCandle.high, tickPrice);
+          openCandle.low = Math.min(openCandle.low, tickPrice);
+          openCandle.volume += Math.round(Math.random() * 100);
+          onCandle(tf, { ...openCandle });
+        }
+      }
+    }
+  }, 1000); // 1 tick per second
 
   return () => clearInterval(interval);
 }

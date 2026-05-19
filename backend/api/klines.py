@@ -34,6 +34,7 @@ async def get_klines(
     interval: str = "1m",
     limit: int = Query(200, ge=1, le=1500),
     endTime: int | None = Query(None, description="End timestamp in milliseconds (exclusive). If provided, returns candles before this time."),
+    exchange: str = Query("binance", description="Exchange name (e.g. binance)"),
 ):
     """
     Historical OHLCV candles.
@@ -42,9 +43,10 @@ async def get_klines(
     """
     symbol = validate_symbol(symbol)
     interval, target_sec = validate_interval(interval)
+    exchange = exchange.strip().lower() or "binance"
 
     r = await get_redis()
-    cache_key = f"klines_cache:{symbol}:{interval}:{limit}"
+    cache_key = f"klines_cache:{exchange}:{symbol}:{interval}:{limit}"
 
     # Check Redis cache (skip for scroll queries)
     if not endTime:
@@ -73,7 +75,7 @@ async def get_klines(
         result = candles[-limit:] if candles else []
     else:
         if interval not in ("1s", "1m"):
-            candles = await _enrich_with_live_ticker(r, symbol, target_sec, candles)
+            candles = await _enrich_with_live_ticker(r, symbol, target_sec, candles, exchange)
         result = candles[-limit:]
 
     # Cache result (skip for scroll queries)
@@ -89,15 +91,15 @@ async def get_klines(
     return result
 
 
-async def _fetch_1s_candles(r, symbol: str, limit: int, end_time: int | None, now_ms: int) -> list[dict]:
+async def _fetch_1s_candles(r, symbol: str, limit: int, end_time: int | None, now_ms: int, exchange: str = "binance") -> list[dict]:
     """Fetch 1-second candles exclusively from KeyDB (speed layer)."""
     needed_1s = min(limit + 2, MAX_RAW_CANDLES)
     live_lookback_ms = max(needed_1s * 1000, 120_000)
     score_min = (end_time - needed_1s * 1000) if end_time else str(now_ms - live_lookback_ms)
     score_max = (end_time - 1) if end_time else "+inf"
-    raw = await r.zrangebyscore(f"candle:1s:{symbol}", score_min, score_max)
+    raw = await r.zrangebyscore(f"candle:1s:{exchange}:{symbol}", score_min, score_max)
     if not raw and not end_time:
-        raw = await r.zrevrange(f"candle:1s:{symbol}", 0, needed_1s - 1)
+        raw = await r.zrevrange(f"candle:1s:{exchange}:{symbol}", 0, needed_1s - 1)
 
     best_by_time: dict[int, dict] = {}
     for item in raw if raw else []:
@@ -163,17 +165,17 @@ async def _fetch_1m_plus_candles(
     return candles
 
 
-async def _fetch_keydb_1m(r, symbol: str, limit: int, now_ms: int) -> list[dict]:
+async def _fetch_keydb_1m(r, symbol: str, limit: int, now_ms: int, exchange: str = "binance") -> list[dict]:
     """Fetch 1-minute candles from KeyDB (speed layer, 7 days retention)."""
     # KeyDB stores last 7 days of 1m candles
     lookback_ms = min(limit * 60 * 1000, 7 * 24 * 3600 * 1000)  # Max 7 days
     score_min = now_ms - lookback_ms
     score_max = "+inf"
 
-    raw = await r.zrangebyscore(f"candle:1m:{symbol}", score_min, score_max)
+    raw = await r.zrangebyscore(f"candle:1m:{exchange}:{symbol}", score_min, score_max)
     if not raw:
         # Fallback: get last N candles regardless of time
-        raw = await r.zrevrange(f"candle:1m:{symbol}", 0, limit - 1)
+        raw = await r.zrevrange(f"candle:1m:{exchange}:{symbol}", 0, limit - 1)
 
     best_by_time: dict[int, dict] = {}
     for item in raw if raw else []:
@@ -194,12 +196,12 @@ async def _fetch_keydb_1m(r, symbol: str, limit: int, now_ms: int) -> list[dict]
     return candles
 
 
-async def _enrich_with_live_ticker(r, symbol: str, target_sec: int, candles: list[dict]) -> list[dict]:
+async def _enrich_with_live_ticker(r, symbol: str, target_sec: int, candles: list[dict], exchange: str = "binance") -> list[dict]:
     """Enrich the latest candle with live ticker price for 5m+ intervals.
 
     Only enriches if ticker is fresher than the latest sub-candle data.
     """
-    ticker = await r.hgetall(f"ticker:latest:{symbol}")
+    ticker = await r.hgetall(f"ticker:latest:{exchange}:{symbol}")
     if not (ticker.get("price") and ticker.get("event_time")):
         return candles
 
@@ -215,7 +217,7 @@ async def _enrich_with_live_ticker(r, symbol: str, target_sec: int, candles: lis
     if candles and candles[-1]["openTime"] == aligned_time and window_is_open:
         # Query the latest sub-candle timestamp for this window
         source_interval = "1m"  # 5m+ intervals aggregate from 1m
-        source_key = f"candle:{source_interval}:{symbol}"
+        source_key = f"candle:{source_interval}:{exchange}:{symbol}"
         latest_sub = await r.zrevrange(source_key, 0, 0, withscores=True)
 
         latest_sub_ts = 0

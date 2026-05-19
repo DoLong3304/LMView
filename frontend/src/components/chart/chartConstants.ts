@@ -1,22 +1,33 @@
 import type { LucideIcon } from "lucide-react";
-import { BarChart3, BookOpen, ArrowLeftRight } from "lucide-react";
+import { BarChart3, BookOpen, ArrowLeftRight, Newspaper } from "lucide-react";
 import type { IndicatorSettings } from "../../types";
+import { tradingTheme } from "../../styles/tradingTheme";
 
+// Pure Black Theme — dùng tradingTheme tokens
 export const THEME = {
-  background: "#1a1d26",
-  textColor: "#9ca3af",
-  gridColor: "#2d2f3e",
-  borderColor: "#374151",
-  upColor: "#26a69a",
-  downColor: "#ef5350",
-  volumeUp: "rgba(38,166,154,0.35)",
-  volumeDown: "rgba(239,83,80,0.35)",
-  sma20: "#f59e0b",
-  sma50: "#8b5cf6",
-  ema: "#06b6d4",
-  rsi: "#a78bfa",
-  mfi: "#34d399",
-  crosshair: "#6b7280",
+  // Background
+  background: tradingTheme.bgPrimary,           // #000000
+  textColor: tradingTheme.priceScaleText,       // #b0b0b0
+  gridColor: tradingTheme.gridColor,            // #1a1a1a
+  borderColor: tradingTheme.borderColor,        // #222222
+
+  // Candle colors — bright on black
+  upColor: tradingTheme.candleUpColor,          // #00c853
+  downColor: tradingTheme.candleDownColor,      // #ff1744
+
+  // Crosshair
+  crosshair: tradingTheme.crosshair,            // #555555
+
+  // Volume
+  volumeUp: tradingTheme.volumeUp,              // rgba(0, 200, 83, 0.5)
+  volumeDown: tradingTheme.volumeDown,          // rgba(255, 23, 68, 0.5)
+
+  // Indicators — giữ nguyên màu để phân biệt
+  sma20: "#fbbf24",    // Yellow — vẫn dễ nhìn trên nền đen
+  sma50: "#f97316",    // Orange
+  ema: "#8b5cf6",      // Purple
+  rsi: "#06b6d4",      // Cyan
+  mfi: "#ec4899",      // Pink
 } as const;
 
 export const TIMEFRAMES = ["1s", "1m", "5m", "15m", "1H", "4H", "1D", "1W"] as const;
@@ -73,13 +84,14 @@ export function localTimeFormatter(time: number): string {
 // Real-time polling interval (ms)
 export const REALTIME_POLL_MS = 2000;
 
-export const CHART_TABS = ["chart", "orderBook", "recentTrades"] as const;
+export const CHART_TABS = ["chart", "orderBook", "recentTrades", "marketNews"] as const;
 export type ChartTab = (typeof CHART_TABS)[number];
 
 export const TAB_ICONS: Record<ChartTab, LucideIcon> = {
   chart: BarChart3,
   orderBook: BookOpen,
   recentTrades: ArrowLeftRight,
+  marketNews: Newspaper,
 };
 
 export const DEFAULT_INDICATOR_SETTINGS: Record<string, IndicatorSettings> = {

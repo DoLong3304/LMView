@@ -1,7 +1,7 @@
 # TRACKING — AI Assistant Working Document
 
 > **Purpose:** Personal reference for AI assistant to maintain context across sessions.  
-> **Last updated:** 2026-04-28
+> **Last updated:** 2026-05-15
 
 ---
 
@@ -252,6 +252,120 @@ dist/assets/index-*.js          471.79 kB │ gzip: 146.62 kB
 ## 4. Changelog
 
 All changes made by AI assistant, in reverse chronological order.
+
+### 2026-05-15 — Session 11: Grafana Dashboards + Prometheus Exporters for MinIO / Trino / Redis / Kafka / Spark
+
+**Task:** Import Grafana dashboards for 5 services (MinIO, Trino, Redis, Kafka, Spark), configure Prometheus exporters for all of them, and write a monitoring plan doc.
+
+**Changes:**
+
+1. **`docs/Monitoring.md` (NEW)** — Full monitoring plan with:
+   - Architecture overview (Prometheus scrape targets)
+   - Per-service metric tables (name, meaning, alert threshold)
+   - Rationale for each metric
+   - Metrics that were intentionally excluded
+   - Deployment verification commands
+
+2. **`docker-compose.yml` (modified)** — 4 infrastructure changes:
+   - **MinIO:** Added `MINIO_PROMETHEUS_AUTH_TYPE=public` environment variable to unlock the native `/minio/v2/metrics/cluster` endpoint without Bearer token auth
+   - **Kafka 1/2/3:** Added `KAFKA_OPTS="-javaagent:/jmx/jmx_prometheus_javaagent.jar=9999:/jmx/kafka-17x.yaml"`, mounted `config/jmx:/jmx:ro` volume, and custom entrypoint to download the jar at startup
+   - **Trino:** Added `JVM_EXTRA_OPTS="-javaagent:/etc/trino/jmx/jmx_prometheus_javaagent.jar=9404:/etc/trino/jmx/trino-442.yaml"` and mounted `config/jmx:/etc/trino/jmx:ro`
+   - **Redis Sentinel HA:** Added `redis-exporter` service (oliver006/redis_exporter:v1.61) with `profiles: ["monitoring", "all"]`, port 9121, monitoring `redis-master:6379`
+   - **Spark Master/Worker:** Added `SPARK_CONF_DIR=/opt/spark/conf` env var and mounted `config/spark/metrics.properties` into each container
+
+3. **`config/jmx/kafka-17x.yaml` (NEW)** — JMX Prometheus agent config for Kafka 3.9 (Java 17):
+   - JVM heap, GC, threads, deadlocked threads
+   - Kafka broker topic metrics (messages in/out, bytes in/out)
+   - Request latency, handler idle percent
+   - Under-replicated/offline partitions
+   - Controller metrics, log size per partition
+
+4. **`config/jmx/trino-442.yaml` (NEW)** — JMX Prometheus agent config for Trino 442:
+   - JVM heap, GC, threads, class loading
+   - Trino executor/scheduler query counts (running/queued/blocked)
+   - Cluster node state (active/inactive nodes)
+   - Exchange (shuffle) metrics, spill metrics
+
+5. **`config/spark/metrics.properties` (NEW)** — Spark metrics config enabling built-in PrometheusServlet:
+   - Master: `/metrics/master/prometheus` endpoint
+   - Worker: `/metrics/worker/prometheus` endpoint
+   - JvmSource for Master/Worker/Executor (heap, GC, threads)
+
+6. **`docker/kafka/entrypoint.sh` (NEW)** — Custom entrypoint that downloads `jmx_prometheus_javaagent-0.20.0.jar` from Maven Central at startup if not already present, then starts Kafka
+
+7. **`docker/trino/entrypoint.sh` (rewritten)** — Added JMX agent download (if not mounted) and builds `TRINO_OPTS` to prepend the `-javaagent` flag before calling `run-trino`
+
+8. **`docker/spark/entrypoint.sh` (updated)** — Added logic to copy `metrics.properties` into `$SPARK_CONF_DIR` if mounted read-only, supporting both master and worker modes
+
+9. **`config/prometheus.yml` (modified)** — Added 8 new scrape jobs:
+   - `minio` → `minio:9000/minio/v2/metrics/cluster`
+   - `trino` → `trino:9404/metrics`
+   - `redis` → `redis-exporter:9121`
+   - `kafka-jvm` → `kafka-1:9999`, `kafka-2:9999`, `kafka-3:9999` (all `/metrics`)
+   - `spark-master` → `spark-master:8090/metrics/master/prometheus`
+   - `spark-worker` → `spark-worker:8091/metrics/prometheus`
+
+10. **5 Grafana dashboard JSON files (NEW)** in `config/grafana/dashboards/`:
+    - `minio-dashboard.json` (12 panels): Cluster status, disk storage, S3 request rate, S3 error rate, S3 latency P50/P95/P99, network throughput, bucket object counts, heal activity, CPU, memory, drive latency
+    - `trino-dashboard.json` (11 panels): JVM heap, GC, query states, execution time P50/P95/P99, queue wait time, success vs failure, worker nodes, executor threads, JVM threads
+    - `redis-dashboard.json` (13 panels): Redis status, memory used/max/peak, clients, rejected connections, key counts per DB, top commands, network I/O, AOF/RDB status, Sentinel health, slowlog, memory fragmentation
+    - `kafka-jvm-dashboard.json` (14 panels): JVM heap, heap %, GC time, messages in/sec, URP/offline partitions, request errors, request latency P50/P99, handler idle %, network I/O, threads, deadlocked threads, GC count, active brokers, log size
+    - `spark-dashboard.json` (9 panels): Status, active workers, applications, cluster resources, tasks, shuffle, GC time, task runtime, streaming batch latency
+
+**Notes/Gotchas discovered:**
+- MinIO `/minio/v2/metrics/cluster` requires `MINIO_PROMETHEUS_AUTH_TYPE=public` env var or a valid Bearer token generated via `mc admin prometheus generate`. The public option is used for simplicity.
+- Kafka JMX agent must be a Java agent (not a sidecar container) to hook into the Kafka JVM via `KAFKA_OPTS`. The jar is downloaded at startup from Maven Central (bitnami/jmx-exporter 0.20.0 is a Maven artifact, not a Docker image — the kafka image has `wget` available for the entrypoint script).
+- Trino JMX agent is similarly injected as a Java agent via `JVM_EXTRA_OPTS`, with the jar downloaded at startup if not pre-mounted.
+- Spark's PrometheusServlet is built into Spark 3.x but requires `metrics.properties` to be placed in `$SPARK_CONF_DIR` (configured via `SPARK_CONF_DIR` env var).
+- All new monitoring services use `profiles: ["monitoring", "all"]` to stay consistent with the existing profile architecture.
+
+**Impact:**
+- Monitoring: 8 new Prometheus scrape targets, 5 new Grafana dashboards (62 total panels), complete observability for MinIO, Trino, Redis, Kafka, Spark
+- Docs: `docs/Monitoring.md` provides metric reference and rationale for each panel
+
+### 2026-05-14 — Session 10: Docker Network Configuration Fix for Grafana/API
+
+**Task:** Check why Grafana wasn't starting and the frontend showed "Unable to connect to server" error. Diagnose and fix the issue.
+
+**Root Cause:** fastapi-dev and nginx-dev services were not properly connected to the `crypto-net` Docker network due to inheritance issue with `docker-compose.yml` `extends` keyword. While the x-fastapi and x-nginx templates declared network configuration, the concrete fastapi-dev/fastapi-prod/nginx-dev/nginx-prod services didn't inherit this properly, causing DNS resolution failures for inter-container communication.
+
+**Changes:**
+1. **`docker-compose.yml` — Network Configuration Fix:**
+   - Added explicit `networks: crypto-net: aliases: [fastapi]` to `fastapi-dev` service
+   - Added explicit `networks: crypto-net: aliases: [fastapi]` to `fastapi-prod` service
+   - Added explicit `networks: crypto-net: aliases: [nginx]` to `nginx-dev` service
+   - Added explicit `networks: crypto-net: aliases: [nginx]` to `nginx-prod` service
+   - Reason: Docker Compose's `extends` with profiles can skip network inheritance; explicit declaration ensures proper network attachment regardless of profile selection.
+
+2. **Verification:**
+   - Confirmed fastapi-dev now resolves in crypto-net DNS (`docker network inspect cryptoprice_crypto-net`)
+   - Confirmed fastapi-dev can reach Redis Sentinels (health check passing)
+   - Confirmed all datasources load in Grafana (Prometheus, InfluxDB, Loki)
+
+**Service Status After Fix:**
+| Service | Status | Details |
+|---------|--------|---------|
+| fastapi-dev | ✅ Healthy | HTTP 200 on /api/health, all deps (redis, influxdb, trino) OK |
+| nginx-dev | ✅ Healthy | Connected to crypto-net, routing /api/* to fastapi-dev |
+| grafana | ✅ Healthy | Datasources loaded (Prometheus UID: PBFA97CFB590B2093) |
+| prometheus | ✅ Healthy | Scraping metrics from fastapi, kafka, flink, node |
+| influxdb | ✅ Healthy | Ready for candle data |
+
+**Technical Details:**
+- fastapi-dev logs before fix: `"Temporary failure in name resolution"` (redis-sentinel-1, redis-sentinel-2, redis-sentinel-3)
+- fastapi-dev logs after fix: Clean startup, successful Redis Sentinel connection via `RedisSentinelManager`
+- Nginx config properly routes: `/api/*` → `fastapi:8000` (via `upstream fastapi_backend`)
+
+**Notes/Gotchas discovered:**
+- Docker Compose's `extends` keyword doesn't always inherit all keys from the template, particularly network configuration when a `profiles` restriction is on the base template.
+- Services with `profiles: ["dont-start"]` on templates need explicit restatement of network config in child services to guarantee network attachment.
+- The error manifested as "Unable to connect to server" on the frontend (JavaScript fetch to `/api/*` returning connection errors), not directly as Docker network errors.
+
+**Impact:**
+- Infrastructure: All services now properly connected to the internal Docker network
+- Frontend: API requests now route correctly through nginx to fastapi-dev
+- Monitoring: Grafana can now properly scrape Prometheus metrics
+- TRACKING.md: Updated last_updated date to 2026-05-14
 
 ### 2026-05-09 — Session 9: High Availability Architecture Migration
 
