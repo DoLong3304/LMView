@@ -7,10 +7,33 @@ from typing import Optional, List, Dict, Any
 import logging
 from datetime import datetime, timedelta
 
-from backend.core.database import get_influx
+import asyncio
+from backend.core.database import get_trino_connection
 
 router = APIRouter(prefix="/api/market", tags=["market-overview"])
 logger = logging.getLogger(__name__)
+
+class AsyncTrinoClient:
+    def __init__(self):
+        self.conn = get_trino_connection()
+
+    async def fetch_one(self, query: str):
+        def _fetch():
+            cursor = self.conn.cursor()
+            cursor.execute(query)
+            return cursor.fetchone()
+        return await asyncio.to_thread(_fetch)
+
+    async def fetch_all(self, query: str):
+        def _fetch():
+            cursor = self.conn.cursor()
+            cursor.execute(query)
+            return cursor.fetchall()
+        return await asyncio.to_thread(_fetch)
+
+async def get_trino():
+    return AsyncTrinoClient()
+
 
 
 @router.get("/overview")

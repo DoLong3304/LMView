@@ -109,14 +109,14 @@ LMView uses **Lambda Architecture** — parallel processing paths for real-time 
 | Time-series DB | InfluxDB | 2.7 | influxdb |
 | Cold storage | Apache Iceberg + MinIO | 1.5.2 + latest | minio |
 | Federated query | Trino | 442 | trino |
-| Orchestration | Dagster | latest | dagster-daemon, dagster-webserver |
+| Orchestration | Dagster | 1.8.10 | dagster-daemon, dagster-webserver |
 | API server | FastAPI + Uvicorn | 0.115+ (Python 3.11) | fastapi |
 | Producer | Python WebSocket | Python 3.11 | producer |
 | Frontend | React 19 + lightweight-charts v5.1.0 | TypeScript 5.7+ / Vite 6.4 | frontend |
 | CSS framework | TailwindCSS | 3.4.4 | (bundled) |
-| Reverse proxy | Nginx | 1.27 | nginx |
+| Reverse proxy | Nginx | 1.31.0 | nginx |
 | Metadata DB | PostgreSQL | 16 | postgres |
-| Monitoring | Prometheus + Grafana + Loki | 2.45 / 10.2 / 2.9 | prometheus, grafana, loki, promtail |
+| Monitoring | Prometheus + Grafana + Loki | 2.45 / 10.2 / 2.9 | prometheus, grafana, loki, promtail, redis-exporter |
 
 ---
 
@@ -137,6 +137,7 @@ lmview/
 │   │   ├── symbols.py          # GET /api/symbols
 │   │   ├── indicators.py       # GET /api/indicators
 │   │   ├── market.py           # GET /api/market
+│   │   ├── market_overview.py  # GET /api/market/overview, /heatmap
 │   │   └── news.py             # GET /api/news
 │   ├── core/                   # Config, constants, connections
 │   │   ├── config.py           # Environment variable reader
@@ -144,7 +145,11 @@ lmview/
 │   │   ├── database.py         # Singleton InfluxDB/Trino connections
 │   │   └── redis_sentinel.py   # RedisSentinelManager (HA client)
 │   ├── services/               # Business logic layer
-│   │   └── candle_service.py   # OHLCV validation, aggregation, merge
+│   │   ├── candle_service.py   # OHLCV validation, aggregation, merge
+│   │   └── heatmap_service.py  # Heatmap data aggregation
+│   ├── tasks/                  # Background task workers
+│   │   ├── market_fetcher.py   # Continuous market data fetching
+│   │   └── news_fetcher.py     # Continuous news data fetching
 │   └── models/                 # Pydantic response models
 │       ├── candle.py
 │       └── ticker.py
@@ -180,6 +185,9 @@ lmview/
 │       ├── App.tsx             # Main dashboard layout
 │       ├── index.tsx           # Entry point
 │       ├── components/         # 19 components + chart/ subdir
+│       │   ├── LeftSidebar.tsx
+│       │   ├── RightPanel.tsx
+│       │   └── TopToolbar.tsx
 │       ├── services/           # marketDataService.ts, symbolMetaService.ts
 │       ├── hooks/              # useApiCall.ts, useSymbolMeta.ts
 │       ├── contexts/           # AuthContext.tsx
@@ -187,6 +195,8 @@ lmview/
 │       ├── types/              # index.ts (shared interfaces)
 │       ├── data/               # fallbackSymbolMeta.ts
 │       ├── pages/              # Page-level components
+│       │   ├── MarketOverviewPage.tsx
+│       │   └── NewsPageRedesigned.tsx
 │       └── utils/              # storageHelpers.ts, errors.ts
 ├── orchestration/              # Dagster workflow definitions
 │   ├── assets.py               # Asset + schedule definitions
@@ -310,6 +320,8 @@ Config: `maxmemory 2560mb`, `maxmemory-policy allkeys-lru`, Sentinel cluster (1 
 ### 6.3 Iceberg + MinIO (Cold Storage)
 
 - **Tables:** `historical_hourly`, `coin_klines_hourly` — partitioned by symbol + year + month
+- **Medallion Architecture (News):** `bronze.news`, `silver.news_enriched`, `gold.news_sentiment_daily`
+- **Gold Metrics Tables:** `gold.market_dominance`, `gold.volatility_ranking`, `gold.movers_ranking`, `gold.momentum_indicators`
 - **Format:** Parquet on MinIO (`s3a://cryptoprice/`)
 - **Query:** Trino SQL with predicate pushdown
 - **Catalog:** PostgreSQL (`iceberg_catalog` database)
@@ -335,7 +347,7 @@ Config: `maxmemory 2560mb`, `maxmemory-policy allkeys-lru`, Sentinel cluster (1 
 
 - **Containers:** spark-master + spark-worker (4GB RAM, 4 vCores)
 - **Only runs** when called by Dagster (no idle resources)
-- **Jobs:** backfill.py, aggregate.py, maintenance.py
+- **Jobs:** backfill.py, aggregate.py, maintenance.py, calculate_all_metrics.py, calculate_indicators.py
 
 ---
 
@@ -356,6 +368,8 @@ Config: `maxmemory 2560mb`, `maxmemory-policy allkeys-lru`, Sentinel cluster (1 
 | GET | `/api/klines/historical` | Trino → Iceberg | Long-range date queries |
 | GET | `/api/health` | All backends | Service health check |
 | GET | `/api/market` | Redis | Market overview data |
+| GET | `/api/market/overview` | Trino | Market overview aggregations |
+| GET | `/api/market/heatmap` | Trino | Market heatmap data |
 | GET | `/api/news` | Redis | News sentiment data |
 
 ### 8.2 Architecture
@@ -468,6 +482,7 @@ Wire format: `0x00` magic byte + 4-byte big-endian schema_id + Avro binary paylo
 ### 12.3 Monitoring
 
 - **7 Grafana dashboards** (3 metrics + 4 logs), 47+ panels
+- **Metrics integration**: Spark metrics via JMX, Redis Exporter (`redis-exporter`)
 - **8 alerting rules** (Flink restart, Kafka down, API error rate, memory/CPU thresholds)
 - **Loki** — centralized logs from all containers, 7-day retention
 - **Nginx routing** — Grafana at `/grafana/`, Prometheus at `/prometheus/`, Loki at `/loki/`
@@ -576,6 +591,6 @@ make test-all                                          # Everything
 
 ---
 
-> **Document version:** 3.0
-> **Last updated:** 2026-05-16
+> **Document version:** 3.1
+> **Last updated:** 2026-05-19
 > **Maintained by:** AI agents + human contributors (see `docs/CHANGELOG.md`)

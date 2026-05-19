@@ -11,16 +11,13 @@
  */
 import React, { useState, useEffect } from 'react';
 import {
+  Search,
   TrendingUp,
   TrendingDown,
   Clock,
-  Search,
   ExternalLink,
   Flame,
-  Filter,
-  RefreshCw,
-  ChevronLeft,
-  ChevronRight
+  RefreshCw
 } from 'lucide-react';
 
 interface NewsArticle {

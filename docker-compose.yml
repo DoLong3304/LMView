@@ -41,6 +41,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   zookeeper:
+    profiles: ["dev", "prod"]
     image: confluentinc/cp-zookeeper:7.6.0
     container_name: zookeeper
     hostname: zookeeper
@@ -61,6 +62,7 @@ services:
       retries: 5
 
   kafka-1:
+    profiles: ["dev", "prod"]
     image: apache/kafka:3.9.0
     container_name: kafka-1
     hostname: kafka-1
@@ -104,6 +106,7 @@ services:
       start_period: 30s
 
   kafka-2:
+    profiles: ["dev", "prod"]
     image: apache/kafka:3.9.0
     container_name: kafka-2
     hostname: kafka-2
@@ -149,6 +152,7 @@ services:
       start_period: 30s
 
   kafka-3:
+    profiles: ["dev", "prod"]
     image: apache/kafka:3.9.0
     container_name: kafka-3
     hostname: kafka-3
@@ -198,6 +202,7 @@ services:
   # ═══════════════════════════════════════════════════════════════════════════════
 
   schema-registry:
+    profiles: ["dev", "prod"]
     image: apicurio/apicurio-registry-mem:2.6.2.Final
     container_name: schema-registry
     hostname: schema-registry
@@ -223,6 +228,7 @@ services:
       start_period: 20s
 
   minio:
+    profiles: ["dev", "prod"]
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: minio
     hostname: minio
@@ -251,6 +257,7 @@ services:
 
   # MinIO bucket init - runs once then exits
   minio-init:
+    profiles: ["dev", "prod"]
     image: minio/mc:RELEASE.2025-08-13T08-35-41Z
     container_name: minio-init
     depends_on:
@@ -271,6 +278,7 @@ services:
     restart: "no"
 
   influxdb:
+    profiles: ["dev", "prod"]
     image: influxdb:2.7
     container_name: influxdb
     hostname: influxdb
@@ -300,6 +308,7 @@ services:
       retries: 5
 
   postgres:
+    profiles: ["dev", "prod"]
     image: postgres:16-alpine
     container_name: postgres
     hostname: postgres
@@ -330,6 +339,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   redis-master:
+    profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-master
     hostname: redis-master
@@ -360,6 +370,7 @@ services:
       retries: 3
 
   redis-replica-1:
+    profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-replica-1
     hostname: redis-replica-1
@@ -388,6 +399,7 @@ services:
       retries: 3
 
   redis-replica-2:
+    profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-replica-2
     hostname: redis-replica-2
@@ -416,6 +428,7 @@ services:
       retries: 3
 
   redis-sentinel-1:
+    profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-sentinel-1
     hostname: redis-sentinel-1
@@ -439,6 +452,7 @@ services:
       retries: 3
 
   redis-sentinel-2:
+    profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-sentinel-2
     hostname: redis-sentinel-2
@@ -462,6 +476,7 @@ services:
       retries: 3
 
   redis-sentinel-3:
+    profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-sentinel-3
     hostname: redis-sentinel-3
@@ -489,6 +504,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   flink-jobmanager:
+    profiles: ["dev", "prod"]
     build:
       context: ./docker/flink
     image: cryptoprice/flink:1.18.1
@@ -543,6 +559,7 @@ services:
         condition: service_healthy
 
   flink-taskmanager:
+    profiles: ["dev", "prod"]
     build:
       context: ./docker/flink
     image: cryptoprice/flink:1.18.1
@@ -587,6 +604,7 @@ services:
       - flink-jobmanager
 
   spark-master:
+    profiles: ["dev", "prod"]
     build:
       context: .
       dockerfile: docker/spark/Dockerfile
@@ -630,6 +648,7 @@ services:
         condition: service_healthy
 
   spark-worker:
+    profiles: ["dev", "prod"]
     build:
       context: .
       dockerfile: docker/spark/Dockerfile
@@ -664,6 +683,7 @@ services:
       - spark-master
 
   auto-submit-jobs:
+    profiles: ["dev", "prod"]
     image: docker:27.0-cli
     container_name: auto-submit-jobs
     restart: "no"
@@ -692,6 +712,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   trino:
+    profiles: ["dev", "prod"]
     build:
       context: .
       dockerfile: docker/trino/Dockerfile
@@ -729,6 +750,7 @@ services:
       start_period: 30s
 
   dagster-webserver:
+    profiles: ["dev", "prod"]
     build:
       context: ./docker/dagster
     image: cryptoprice/dagster:1.8.10
@@ -765,6 +787,7 @@ services:
       - spark-master
 
   dagster-daemon:
+    profiles: ["dev", "prod"]
     build:
       context: ./docker/dagster
     image: cryptoprice/dagster:1.8.10
@@ -891,7 +914,7 @@ services:
     build:
       context: .
       dockerfile: docker/nginx/Dockerfile
-    image: cryptoprice/nginx:1.27.10
+    image: cryptoprice/nginx:1.31.0
     ports:
       - "80:80"
       - "443:443"
@@ -930,6 +953,8 @@ services:
     environment:
       - CERTBOT_DOMAIN=localhost
       - NGINX_AUTO_RELOAD_ENABLE=0
+      - MONITORING_USER=${MONITORING_USER:-admin}
+      - MONITORING_PASSWORD=${MONITORING_PASSWORD:-admin}
 
   nginx-prod:
     extends: x-nginx
@@ -944,6 +969,8 @@ services:
       - CERTBOT_DOMAIN=${CERTBOT_DOMAIN:-localhost}
       - NGINX_AUTO_RELOAD_ENABLE=${NGINX_AUTO_RELOAD_ENABLE:-1}
       - NGINX_RELOAD_INTERVAL_SECONDS=${NGINX_RELOAD_INTERVAL_SECONDS:-21600}
+      - MONITORING_USER=${MONITORING_USER:-admin}
+      - MONITORING_PASSWORD=${MONITORING_PASSWORD:-admin}
 
   certbot-auto:
     profiles: ["prod"]
@@ -981,6 +1008,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   influx-backfill:
+    profiles: ["dev", "prod"]
     build:
       context: .
       dockerfile: docker/backfill/Dockerfile
@@ -1002,6 +1030,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   producer:
+    profiles: ["dev", "prod"]
     build:
       context: .
       dockerfile: docker/producer/Dockerfile
@@ -1041,7 +1070,6 @@ services:
           memory: 128M
     profiles:
       - monitoring
-      - all
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9121/metrics"]
       interval: 15s
@@ -1062,6 +1090,8 @@ services:
       - --storage.tsdb.retention.time=30d
       - --web.console.libraries=/usr/share/prometheus/console_libraries
       - --web.console.templates=/usr/share/prometheus/consoles
+      - --web.external-url=/prometheus/
+      - --web.route-prefix=/prometheus/
     ports:
       - "9090:9090"
     networks:
@@ -1127,7 +1157,8 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
+      - GF_SERVER_SERVE_FROM_SUB_PATH=true
       - GF_INSTALL_PLUGINS=
     volumes:
       - grafana-data:/var/lib/grafana
@@ -1151,7 +1182,6 @@ services:
       retries: 3
     profiles:
       - monitoring
-      - all 
 
   # ══════════════════════════════════════════════════════════════════════════════
   # LOGGING STACK (opt-in via --profile logging)

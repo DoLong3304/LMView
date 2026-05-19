@@ -7,9 +7,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
+## [0.12.0] — 2026-05-19 — Market Overview & News Features (merged from `feature/viet-work`)
 
-_No unreleased changes._
+### Added
+- **Market Overview API** — `backend/api/market_overview.py` and `backend/services/heatmap_service.py` to serve comprehensive market aggregations and heatmap data via Trino.
+- **News API** — Background fetcher and endpoints for aggregating sentiment-driven news.
+- **Background Tasks** — `market_fetcher.py` and `news_fetcher.py` integrated into FastAPI lifespan to continuously fetch necessary external data.
+- **Frontend Components** — Added `LeftSidebar`, `RightPanel`, `TopToolbar`, `MarketOverviewPage`, `NewsPageRedesigned`, and `MarketNews` for an enriched UI.
+- **Spark Metrics** — JMX metrics exporting via `metrics.properties` for Spark clusters.
+- **Redis Monitoring** — Added `redis-exporter` to the monitoring stack.
+
+### Changed
+- **Dagster** — Version upgraded to `1.8.10`.
+- **Nginx** — Version upgraded to `1.31.0`.
+- **Certbot** — Version upgraded to `v5.6.0`.
+- **Trino** — Added JMX javaagent opts for Prometheus scraping.
 
 ---
 

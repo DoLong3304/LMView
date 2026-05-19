@@ -19,7 +19,8 @@
 - **~400 trading pairs** — All USDT spot pairs from Binance, streamed in real-time
 - **Lambda Architecture** — Speed layer (Flink) + Batch layer (Spark) + Serving layer (FastAPI)
 - **High Availability** — Kafka 3-node KRaft cluster, Redis Sentinel (1 master + 2 replicas + 3 sentinels)
-- **Full observability** — Prometheus + Grafana (7 dashboards) + Loki centralized logging
+- **Full observability** — Prometheus + Grafana (7 dashboards) + Loki centralized logging + Redis metrics
+- **Market Overview & News** — Comprehensive aggregations, heatmap data, and sentiment-driven news
 - **12 drawing tools** — Trendlines, Fibonacci, horizontal lines, and more
 - **Technical indicators** — SMA, EMA, RSI, MFI with real-time calculation
 
@@ -58,6 +59,7 @@ Once running, access the platform at **http://localhost**:
 
 - **Real-time charts** with live WebSocket price updates
 - **Multi-timeframe** switching (1s to 1w)
+- **Market Overview** and **News** dashboards for full market sentiment tracking
 - **Order book** and **recent trades** panels
 - **Historical browsing** with date range picker and scroll-left loading
 - **Drawing tools** for technical analysis
@@ -164,5 +166,5 @@ See [AGENTS.md](docs/AGENTS.md) for coding guidelines if contributing with AI as
 ---
 
 **Status:** ✅ Active Development
-**Version:** 0.11.0
+**Version:** 0.12.0
 **License:** [MIT](LICENSE)
