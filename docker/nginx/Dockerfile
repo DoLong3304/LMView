@@ -16,10 +16,10 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Serve with Nginx
-FROM nginx:1.27-alpine
+FROM nginx:1.31.0-alpine
 
-# Required by entrypoint.sh for temporary self-signed certificate generation
-RUN apk add --no-cache openssl
+# Required by entrypoint.sh for self-signed cert + htpasswd generation
+RUN apk add --no-cache openssl apache2-utils
 
 # Remove default config
 RUN rm /etc/nginx/conf.d/default.conf
