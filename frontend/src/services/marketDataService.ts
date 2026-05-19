@@ -8,14 +8,12 @@
  *  { time: number (unix seconds), open, high, low, close, volume }
  */
 
-import type { Candle, SymbolInfo, Ticker, Trade } from "../types";
+import type { Candle, SymbolInfo, Ticker, Trade, NewsItem } from "../types";
 
 // ─── Config ──────────────────────────────────────────────────────
-// Toggle to 'mock' for local development without backend.
-const DATA_SOURCE = "api"; // 'mock' | 'api'
+const DATA_SOURCE = import.meta.env.VITE_DATA_SOURCE === "mock" ? "mock" : "api";
 
 // Base URL of your backend REST/WebSocket endpoint.
-// Defaults to '/api' when served behind a reverse proxy.
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
 // ─── Timeframe helpers ────────────────────────────────────────────
@@ -62,75 +60,7 @@ function mapRawToCandle(k: RawKline): Candle {
   };
 }
 
-// ─── Mock data generator ──────────────────────────────────────────
-/**
- * Generates a realistic OHLCV series using a random-walk model.
- * Replace this entire block — not the function signature — when switching to API.
- */
-function generateMockCandles(
-  symbol: string,
-  timeframeKey: string,
-  count: number = 200,
-): Candle[] {
-  const tf = TIMEFRAMES[timeframeKey] || TIMEFRAMES["1h"];
-  const now = Math.floor(Date.now() / 1000);
-  const startTime = now - tf.seconds * count;
-
-  // Seed prices per symbol so they feel realistic
-  const seedPrices: Record<string, number> = {
-    BTCUSDT: 64000,
-    ETHUSDT: 3400,
-    BNBUSDT: 580,
-    SOLUSDT: 165,
-    XRPUSDT: 2.35,
-    DOGEUSDT: 0.158,
-    ADAUSDT: 0.72,
-    AVAXUSDT: 35.2,
-    DOTUSDT: 7.5,
-    LINKUSDT: 18.5,
-    MATICUSDT: 0.72,
-    LTCUSDT: 95,
-    default: 100,
-  };
-
-  let price = seedPrices[symbol] || seedPrices.default;
-  const volatility = price * 0.008; // 0.8% per candle std dev
-  const is1s = timeframeKey === "1s";
-  const candles: Candle[] = [];
-
-  for (let i = 0; i < count; i++) {
-    const time = startTime + i * tf.seconds;
-    const open = price;
-    const change = (Math.random() - 0.49) * volatility * 2;
-    const close = Math.max(open + change, 1);
-
-    let high: number, low: number;
-    if (is1s) {
-      // 1s: Only 1 tick per candle → Open=High=Low=Close, NO wicks
-      high = close;
-      low = close;
-    } else {
-      // 1m+: Multiple ticks per candle → realistic wicks
-      const wick = Math.random() * volatility;
-      high = Math.max(open, close) + wick;
-      low = Math.max(Math.min(open, close) - wick, 1);
-    }
-
-    const volume = Math.round(price * (0.5 + Math.random()) * 10);
-
-    candles.push({
-      time,
-      open: +open.toFixed(2),
-      high: +high.toFixed(2),
-      low: +low.toFixed(2),
-      close: +close.toFixed(2),
-      volume,
-    });
-    price = close;
-  }
-
-  return candles;
-}
+import { generateMockCandles, generateMockOrderBook, generateMockTrades, generateMockTickers, generateMockNews } from "../mock/mockDataGenerator";
 
 // ─── Public API ───────────────────────────────────────────────────
 
@@ -409,53 +339,11 @@ export async function fetchHistoricalCandles(
 
 // ─── Order Book ───────────────────────────────────────────────────
 
-interface RawOrderBook {
-  bids: [number, number][];
-  asks: [number, number][];
-  spread: number;
-  best_bid?: number;
-  best_ask?: number;
-}
-
-function generateMockOrderBook(
-  basePrice: number,
-  depth: number = 20,
-): RawOrderBook {
-  const asks: [number, number][] = [];
-  const bids: [number, number][] = [];
-  let seed = Math.floor(basePrice * 100);
-  function rand(): number {
-    seed = (seed * 9301 + 49297) % 233280;
-    return seed / 233280;
-  }
-  for (let i = 0; i < depth; i++) {
-    const askP = +(
-      basePrice *
-      (1 + (i + 1) * 0.0005 + rand() * 0.0003)
-    ).toFixed(2);
-    const bidP = +(
-      basePrice *
-      (1 - (i + 1) * 0.0005 - rand() * 0.0003)
-    ).toFixed(2);
-    asks.push([askP, +(rand() * 5 + 0.1).toFixed(4)]);
-    bids.push([bidP, +(rand() * 5 + 0.1).toFixed(4)]);
-  }
-  asks.sort((a, b) => a[0] - b[0]);
-  bids.sort((a, b) => b[0] - a[0]);
-  return {
-    bids,
-    asks,
-    spread: +(asks[0][0] - bids[0][0]).toFixed(2),
-    best_bid: bids[0][0],
-    best_ask: asks[0][0],
-  };
-}
-
 /**
  * Fetch order book for a symbol.
  * Backend returns { bids: [[price, qty], ...], asks: [[price, qty], ...], spread, best_bid, best_ask }
  */
-export async function fetchOrderBook(symbol: string): Promise<RawOrderBook> {
+export async function fetchOrderBook(symbol: string) {
   if (DATA_SOURCE === "api") {
     const res = await fetch(
       `${API_BASE_URL}/orderbook/${encodeURIComponent(symbol)}`,
@@ -467,28 +355,6 @@ export async function fetchOrderBook(symbol: string): Promise<RawOrderBook> {
 }
 
 // ─── Recent Trades ────────────────────────────────────────────────
-
-function generateMockTrades(basePrice: number, count: number = 50): Trade[] {
-  const trades: Trade[] = [];
-  let seed = Math.floor(basePrice * 37);
-  function rand(): number {
-    seed = (seed * 9301 + 49297) % 233280;
-    return seed / 233280;
-  }
-  const now = Math.floor(Date.now() / 1000);
-  let price = basePrice;
-  for (let i = 0; i < count; i++) {
-    const side: "buy" | "sell" = rand() > 0.5 ? "buy" : "sell";
-    price = Math.max(price + (rand() - 0.5) * basePrice * 0.002, 1);
-    trades.push({
-      time: (now - (count - i) * (Math.floor(rand() * 30) + 5)) * 1000,
-      price: +price.toFixed(2),
-      volume: +(rand() * 3 + 0.001).toFixed(4),
-      side,
-    });
-  }
-  return trades.reverse();
-}
 
 /**
  * Fetch recent trades / price ticks.
@@ -533,15 +399,26 @@ export async function fetchTickers(): Promise<Ticker[]> {
     if (!res.ok) throw new Error(`API error ${res.status}`);
     return res.json();
   }
-  // Mock fallback — return static prices
-  return [
-    { symbol: "BTCUSDT", price: 64444, change24h: 0.33 },
-    { symbol: "ETHUSDT", price: 3400, change24h: -0.53 },
-    { symbol: "BNBUSDT", price: 580, change24h: -0.27 },
-    { symbol: "SOLUSDT", price: 165, change24h: 0.54 },
-    { symbol: "XRPUSDT", price: 2.35, change24h: -0.16 },
-    { symbol: "DOGEUSDT", price: 0.158, change24h: -0.6 },
-    { symbol: "ADAUSDT", price: 0.72, change24h: -0.83 },
-    { symbol: "AVAXUSDT", price: 35.2, change24h: 0.33 },
-  ];
+  // Mock fallback
+  return generateMockTickers();
+}
+
+// ─── News ─────────────────────────────────────────────────────────
+
+/**
+ * Fetch latest news for a symbol.
+ */
+export async function fetchNews(symbol: string, limit: number = 10): Promise<NewsItem[]> {
+  if (DATA_SOURCE === "api") {
+    try {
+      const res = await fetch(`${API_BASE_URL}/news/${encodeURIComponent(symbol)}?limit=${limit}`);
+      if (!res.ok) throw new Error(`API error ${res.status}`);
+      return res.json();
+    } catch (e) {
+      console.warn("Failed to fetch news from API, falling back to mock", e);
+      return generateMockNews(limit, symbol);
+    }
+  }
+
+  return generateMockNews(limit, symbol);
 }

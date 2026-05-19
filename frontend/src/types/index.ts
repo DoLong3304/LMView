@@ -57,6 +57,20 @@ export interface Trade {
   side: "buy" | "sell";
 }
 
+/** News item */
+export interface NewsItem {
+  id: string;
+  title: string;
+  summary: string;
+  url: string;
+  source: string;
+  image_url?: string;
+  published_at: string;
+  sentiment_label: string;
+  sentiment_score: number;
+  symbols: string[];
+}
+
 /** Symbol info from /api/symbols */
 export interface SymbolInfo {
   symbol: string;

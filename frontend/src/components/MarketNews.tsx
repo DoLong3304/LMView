@@ -1,4 +1,10 @@
 import React, { useState, useEffect } from "react";
+import { 
+  fetchMarketOverview, 
+  fetchTopGainers, 
+  fetchTopLosers, 
+  fetchLatestMarketNews 
+} from "../services/marketOverviewService";
 
 interface NewsArticle {
   id: string;
@@ -37,30 +43,18 @@ const MarketNews: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        setLoading(true);
-        setError(null);
-
         // Fetch news, market overview, gainers, losers in parallel
         const [newsRes, overviewRes, gainersRes, losersRes] = await Promise.all([
-          fetch("/api/news/latest?limit=100&hours=24"),
-          fetch("/api/market/overview"),
-          fetch("/api/market/gainers?limit=5"),
-          fetch("/api/market/losers?limit=5"),
+          fetchLatestMarketNews(100, 24),
+          fetchMarketOverview(),
+          fetchTopGainers(5),
+          fetchTopLosers(5),
         ]);
 
-        if (!newsRes.ok || !overviewRes.ok || !gainersRes.ok || !losersRes.ok) {
-          throw new Error("Failed to fetch data");
-        }
-
-        const newsData = await newsRes.json();
-        const overviewData = await overviewRes.json();
-        const gainersData = await gainersRes.json();
-        const losersData = await losersRes.json();
-
-        setNews(newsData.articles || newsData.data || []);
-        setMetrics(overviewData.data);
-        setGainers(gainersData.data || []);
-        setLosers(losersData.data || []);
+        setNews(newsRes.articles || newsRes.data || []);
+        setMetrics(overviewRes.data);
+        setGainers(gainersRes.data || []);
+        setLosers(losersRes.data || []);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error");
         console.error("Error fetching data:", err);

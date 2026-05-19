@@ -128,6 +128,20 @@ const TopToolbar: React.FC<TopToolbarProps> = ({
           );
         })}
       </div>
+
+      {/* Mode Indicator */}
+      <div className="ml-auto">
+        <div
+          className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+            import.meta.env.VITE_DATA_SOURCE === "mock"
+              ? "bg-amber-500/20 text-amber-500 border border-amber-500/30"
+              : "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
+          }`}
+          title="Current Data Source"
+        >
+          {import.meta.env.VITE_DATA_SOURCE === "mock" ? "MOCK" : "API"}
+        </div>
+      </div>
     </div>
   );
 };
