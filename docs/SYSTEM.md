@@ -112,7 +112,7 @@ LMView uses **Lambda Architecture** — parallel processing paths for real-time 
 | Orchestration | Dagster | 1.8.10 | dagster-daemon, dagster-webserver |
 | API server | FastAPI + Uvicorn | 0.115+ (Python 3.11) | fastapi |
 | Producer | Python WebSocket | Python 3.11 | producer |
-| Frontend | React 19 + lightweight-charts v5.1.0 | TypeScript 5.7+ / Vite 6.4 | frontend |
+| Frontend | React 19 + lightweight-charts v5.2.0 | TypeScript 5.7+ / Vite 6.4 | frontend |
 | CSS framework | TailwindCSS | 3.4.4 | (bundled) |
 | Reverse proxy | Nginx | 1.31.0 | nginx |
 | Metadata DB | PostgreSQL | 16 | postgres |
@@ -386,7 +386,7 @@ MVC pattern in `backend/`:
 
 ### 9.1 Stack
 
-React 19 + TypeScript 5.7+ + Vite 6.4 + TailwindCSS 3.4 + lightweight-charts v5.1.0
+React 19 + TypeScript 5.7+ + Vite 6.4 + TailwindCSS 3.4 + lightweight-charts v5.2.0
 
 ### 9.2 Component Tree
 

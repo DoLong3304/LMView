@@ -148,7 +148,7 @@ app.include_router(my_feature.router)
 - **Language:** TypeScript (strict mode). All props and state must have explicit interfaces.
 - **Build tool:** Vite 6. Use `import.meta.env` for environment variables (VITE_ prefix).
 - **Styling:** TailwindCSS 3.4
-- **Charts:** lightweight-charts v5.1.0
+- **Charts:** lightweight-charts v5.2.0
 - **Naming:** Components = PascalCase `.tsx`. Services/utils = camelCase `.ts`.
 
 ### Patterns

@@ -7,6 +7,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.12.3] — 2026-05-21 — Charting Library Upgrade
+
+### Changed
+- **Dependencies** — Upgraded `lightweight-charts` to `5.2.0` in `frontend/package.json`.
+
+---
+
 ## [0.12.2] — 2026-05-20 — Frontend Mock Data Isolation & Service Refactor
 
 ### Added
