@@ -1,7 +1,3 @@
----
-trigger: always_on
----
-
 # AGENTS.md - LMView
 
 Project rules for AI coding agents.

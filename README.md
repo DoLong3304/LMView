@@ -43,7 +43,7 @@ LMView focuses on data engineering first, with a clean path for future AI/ML fea
 
 Primary app:
 
-- Dev/prod Nginx: `https://localhost` after `make dev` (port 80 redirects to HTTPS; dev cert is self-signed).
+- Dev/prod Nginx: `http://localhost` after `make dev` (port 80 redirects to HTTPS; dev cert is self-signed).
 - FastAPI docs: `http://localhost:8080/docs`.
 
 API examples:
@@ -59,7 +59,7 @@ Web UIs:
 
 | Service | URL |
 |---|---|
-| Frontend/Nginx | `https://localhost` |
+| Frontend/Nginx | `http://localhost` |
 | FastAPI docs | `http://localhost:8080/docs` |
 | Flink | `http://localhost:8081` |
 | Spark | `http://localhost:8082` |
@@ -148,6 +148,6 @@ Built and maintained by D22 Fintech, PTIT students:
 
 ---
 
-Status: Active development
-Version: 0.12.3
+Status: Active development  
+Version: 0.13.0  
 License: Not specified in this repository

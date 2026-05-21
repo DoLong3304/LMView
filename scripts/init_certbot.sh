@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 # Bootstrap HTTPS automation variables and start automation services.
 # Usage: ./init_certbot.sh <domain> <email>
+#
+# The domain can be any publicly reachable domain:
+#   - DuckDNS:  myapp.duckdns.org
+#   - Custom:   trading.example.com
+#
+# If the domain is a *.duckdns.org host AND DUCKDNS_SUBDOMAINS is not already
+# set in .env, the script will auto-populate it. Otherwise DuckDNS settings
+# are left untouched (you can add them manually if needed).
 set -euo pipefail
 
 DOMAIN="${1:?Usage: $0 <domain> <email>}"
@@ -31,17 +39,15 @@ upsert_env() {
   fi
 }
 
-# If the domain is a duckdns host, infer subdomain for duckdns-auto.
-DUCK_SUBDOMAIN=""
-if [[ "$DOMAIN" =~ ^([a-zA-Z0-9-]+)\.duckdns\.org$ ]]; then
-  DUCK_SUBDOMAIN="${BASH_REMATCH[1]}"
-fi
-
 upsert_env "CERTBOT_DOMAIN" "$DOMAIN"
 upsert_env "CERTBOT_EMAIL" "$EMAIL"
 
-if [ -n "$DUCK_SUBDOMAIN" ] && ! grep -q '^DUCKDNS_SUBDOMAINS=' "$ENV_FILE"; then
-  upsert_env "DUCKDNS_SUBDOMAINS" "$DUCK_SUBDOMAIN"
+# If the domain is a duckdns host, auto-populate DUCKDNS_SUBDOMAINS if not set.
+if [[ "$DOMAIN" =~ ^([a-zA-Z0-9-]+)\.duckdns\.org$ ]]; then
+  DUCK_SUBDOMAIN="${BASH_REMATCH[1]}"
+  if ! grep -q '^DUCKDNS_SUBDOMAINS=' "$ENV_FILE"; then
+    upsert_env "DUCKDNS_SUBDOMAINS" "$DUCK_SUBDOMAIN"
+  fi
 fi
 
 # Ensure automation toggles have sane defaults.
@@ -59,19 +65,29 @@ if ! grep -q '^DUCKDNS_UPDATE_INTERVAL_SECONDS=' "$ENV_FILE"; then
 fi
 
 echo "Starting HTTPS automation services..."
-docker compose up -d nginx certbot-auto duckdns-auto
+SERVICES="nginx-prod certbot-auto"
+
+# Only start duckdns-auto if DuckDNS is configured
+if grep -q '^DUCKDNS_TOKEN=' "$ENV_FILE" && ! grep -q '^DUCKDNS_TOKEN=change-me' "$ENV_FILE"; then
+  SERVICES="$SERVICES duckdns-auto"
+fi
+
+docker compose --profile prod up -d $SERVICES
 
 echo ""
 echo "Current service status:"
-docker compose ps nginx certbot-auto duckdns-auto
+docker compose ps nginx-prod certbot-auto 2>/dev/null || true
 
 echo ""
 echo "Recent certbot logs:"
-docker logs --tail 20 certbot-auto || true
+docker logs --tail 20 certbot-auto 2>/dev/null || true
 
-echo ""
-echo "Recent duckdns logs:"
-docker logs --tail 20 duckdns-auto || true
+# Show duckdns logs only if the service is running
+if docker ps --format '{{.Names}}' | grep -q duckdns-auto; then
+  echo ""
+  echo "Recent duckdns logs:"
+  docker logs --tail 20 duckdns-auto 2>/dev/null || true
+fi
 
 echo ""
 echo "Bootstrap complete for https://${DOMAIN}"

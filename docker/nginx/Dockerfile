@@ -18,22 +18,23 @@ RUN npm run build
 # Stage 2: Serve with Nginx
 FROM nginx:1.31.0-alpine
 
-# Required by entrypoint.sh for self-signed cert + htpasswd generation
+# Required by entrypoint.sh for self-signed cert (prod) + htpasswd generation
 RUN apk add --no-cache openssl apache2-utils
 
 # Remove default config
 RUN rm /etc/nginx/conf.d/default.conf
 
-# Copy custom nginx config
-COPY docker/nginx/nginx.conf /etc/nginx/conf.d/default.conf
+# Copy both dev and prod nginx configs — entrypoint selects the right one
+COPY docker/nginx/nginx-dev.conf /etc/nginx/conf.d/nginx-dev.conf
+COPY docker/nginx/nginx-prod.conf /etc/nginx/conf.d/nginx-prod.conf
 
 # Copy built React app from Stage 1
 COPY --from=build /app/dist /usr/share/nginx/html
 
-# Create ACME challenge directory
+# Create ACME challenge directory (used in prod mode)
 RUN mkdir -p /var/www/certbot
 
-# Copy entrypoint that templates the domain into nginx config
+# Copy entrypoint that selects config and templates domain
 COPY docker/nginx/entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 

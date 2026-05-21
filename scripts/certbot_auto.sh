@@ -8,10 +8,11 @@ SLEEP_SECS="${CERTBOT_RENEW_INTERVAL_SECONDS:-43200}"
 LE_DIR="/etc/letsencrypt"
 RENEW_WINDOW_SECONDS="${CERTBOT_RENEW_WINDOW_SECONDS:-2592000}"
 
-if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ] || [ "$DOMAIN" = "your-subdomain.duckdns.org" ] || [ "$EMAIL" = "you@example.com" ]; then
-  echo "[certbot-auto] CERTBOT_DOMAIN or CERTBOT_EMAIL is not set; sleeping."
+if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ] || [ "$DOMAIN" = "example.com" ] || [ "$EMAIL" = "you@example.com" ]; then
+  echo "[certbot-auto] CERTBOT_DOMAIN or CERTBOT_EMAIL is not configured; sleeping."
   exec sleep infinity
 fi
+
 
 cleanup_broken_state() {
   live_dir="$LE_DIR/live/$DOMAIN"

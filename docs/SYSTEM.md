@@ -134,7 +134,8 @@ Important ports:
 
 | Service | Host port | Notes |
 |---|---:|---|
-| Nginx frontend/proxy | 80, 443 | HTTP redirects to HTTPS; dev uses self-signed cert if no real cert |
+| Nginx frontend/proxy (dev) | 80 | Plain HTTP only — no SSL, no browser warnings |
+| Nginx frontend/proxy (prod) | 80, 443 | HTTP redirects to HTTPS; certbot for real certs, self-signed fallback |
 | FastAPI | 8080 | `/docs`, `/api/health` |
 | Flink UI | 8081 | JobManager UI |
 | Spark master UI | 8082 | Host maps Spark master UI |
@@ -649,7 +650,9 @@ cp .env.example .env
 make dev
 ```
 
-Nginx dev mode creates a temporary self-signed cert if no cert exists. Browser access may redirect from `http://localhost` to `https://localhost`.
+Nginx dev mode serves plain HTTP on port 80 — no SSL, no browser warnings. Access the app at `http://localhost`.
+
+For production HTTPS, set `CERTBOT_DOMAIN` and `CERTBOT_EMAIL` in `.env` and run `scripts/init_certbot.sh <domain> <email>`. Any domain works (DuckDNS, custom, etc.).
 
 Useful commands:
 
@@ -771,7 +774,7 @@ General gotchas:
 5. **Influx scroll-left:** Use absolute `range(start: RFC3339, stop: RFC3339)`.
 6. **Flink writer env vars:** Read env vars inside `open()` for functions shipped to workers.
 7. **Schema changes:** Avro changes require producer, Flink, Spark, and tests to change together.
-8. **Nginx dev TLS:** Port 80 redirects to HTTPS; self-signed cert is expected in dev.
+8. **Nginx dev HTTP:** Dev mode uses plain HTTP on port 80 only (no SSL). Prod uses HTTPS on 443 with certbot; self-signed cert is used as fallback until certbot runs.
 9. **Python versions:** Backend/producer/backfill Dockerfiles use Python 3.11. Spark and Flink images install `python3` inside their containers. Do not force Python 3.12+ without validating PyFlink/Spark compatibility.
 10. **Do not delete state manually:** Flink checkpoints, InfluxDB data, MinIO/Iceberg objects, Redis volumes, and Kafka volumes need explicit operator approval before destructive changes.
 

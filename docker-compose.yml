@@ -915,12 +915,6 @@ services:
       context: .
       dockerfile: docker/nginx/Dockerfile
     image: cryptoprice/nginx:1.31.0
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - letsencrypt:/etc/letsencrypt
-      - certbot-webroot:/var/www/certbot
     restart: unless-stopped
     networks:
       crypto-net:
@@ -934,7 +928,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "wget -q --spider --no-check-certificate http://127.0.0.1/ || exit 1",
+          "wget -q --spider http://127.0.0.1/ || exit 1",
         ]
       interval: 15s
       timeout: 5s
@@ -946,12 +940,14 @@ services:
     profiles: ["dev"]
     container_name: nginx-dev
     hostname: nginx-dev
+    ports:
+      - "80:80"
     networks:
       crypto-net:
         aliases:
           - nginx
     environment:
-      - CERTBOT_DOMAIN=localhost
+      - NGINX_MODE=dev
       - NGINX_AUTO_RELOAD_ENABLE=0
       - MONITORING_USER=${MONITORING_USER:-admin}
       - MONITORING_PASSWORD=${MONITORING_PASSWORD:-admin}
@@ -961,11 +957,18 @@ services:
     profiles: ["prod"]
     container_name: nginx-prod
     hostname: nginx-prod
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot-webroot:/var/www/certbot
     networks:
       crypto-net:
         aliases:
           - nginx
     environment:
+      - NGINX_MODE=prod
       - CERTBOT_DOMAIN=${CERTBOT_DOMAIN:-localhost}
       - NGINX_AUTO_RELOAD_ENABLE=${NGINX_AUTO_RELOAD_ENABLE:-1}
       - NGINX_RELOAD_INTERVAL_SECONDS=${NGINX_RELOAD_INTERVAL_SECONDS:-21600}
