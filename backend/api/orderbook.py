@@ -45,10 +45,21 @@ async def _fetch_binance_orderbook(symbol: str, limit: int = 50) -> dict | None:
 async def get_orderbook(symbol: str):
     symbol_u = symbol.upper()
     r = await get_redis()
-    data = await r.hgetall(f"orderbook:{symbol_u}")
+    # Try Binance first
+    data = await r.hgetall(f"orderbook:binance:{symbol_u}")
+    if not data:
+        # Fallback to OKX
+        data = await r.hgetall(f"orderbook:okx:{symbol_u}")
+    if not data:
+        # Fallback to old format
+        data = await r.hgetall(f"orderbook:{symbol_u}")
+        
     if not data:
         # Try with binance exchange prefix (new format)
         ticker = await r.hgetall(f"ticker:latest:binance:{symbol_u}")
+        if not ticker:
+            # Fallback to okx
+            ticker = await r.hgetall(f"ticker:latest:okx:{symbol_u}")
         if not ticker:
             # Fallback to old format (no exchange prefix)
             ticker = await r.hgetall(f"ticker:latest:{symbol_u}")
@@ -74,7 +85,7 @@ async def get_orderbook(symbol: str):
         # Warm cache for clients that poll frequently - use master for writes
         r_master = await get_redis_master()
         await r_master.hset(
-            f"orderbook:{symbol_u}",
+            f"orderbook:binance:{symbol_u}",
             mapping={
                 "bids": json.dumps(fallback["bids"]),
                 "asks": json.dumps(fallback["asks"]),
@@ -84,7 +95,7 @@ async def get_orderbook(symbol: str):
                 "event_time": fallback["event_time"],
             },
         )
-        await r.expire(f"orderbook:{symbol_u}", 30)
+        await r_master.expire(f"orderbook:binance:{symbol_u}", 30)
         return {"symbol": symbol_u, **fallback}
 
     return {

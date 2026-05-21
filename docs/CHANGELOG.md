@@ -7,6 +7,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.13.1] — 2026-05-22 — Bug Fixes: Data Pipeline & Backend APIs
+
+### Fixed
+- **Kafka Topics** — Resolved `Unrecognized partition` errors in the Python producer by recreating `crypto_ticker`, `crypto_klines`, `crypto_trades`, and `crypto_depth` topics with the correct 12 partitions. Data ingestion is now stable.
+- **Orderbook API** — Fixed an HTTP 500 `ReadOnlyError` in `/api/orderbook/{symbol}` by routing the fallback cache expiration write (`expire`) to the Redis Master node instead of a read-only Sentinel replica.
+- **Exchange Fallback Logic** — Updated `/api/trades` and `/api/orderbook` to correctly parse new exchange-aware Redis keys. Implemented Binance-first lookup with automatic fallback to OKX (and then legacy keys) to fully utilize OKX as a redundant backup source.
+
+---
+
 ## [0.13.0] — 2026-05-22 — Dev HTTP / Prod HTTPS Nginx Routing
 
 ### Changed
@@ -17,10 +26,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`certbot_auto.sh`** — Removed DuckDNS-specific sentinel domain check.
 - **`.env.example`** — Generalized HTTPS automation section; `CERTBOT_DOMAIN` default changed from DuckDNS to `example.com`.
 - **`docker-compose.yml`** — `nginx-dev` exposes port 80 only; `nginx-prod` exposes 80+443 with letsencrypt/certbot volumes. Ports and volumes moved from base template to concrete services.
-
-### Agent
-- Agent: Claude (Antigravity)
-- Files modified: 9
 
 ---
 
@@ -245,10 +250,5 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Known Issues
 - Description of any remaining issues
-
-### Agent
-- Agent: [Agent name/model]
-- Session duration: [approximate]
-- Files modified: [count]
 
 -->

@@ -11,12 +11,21 @@ async def get_trades(symbol: str, limit: int = Query(50, ge=1, le=200)):
     Recent price ticks derived from the ticker history sorted set in KeyDB.
 
     Note: These are ticker-level price movements, not individual exchange trades.
-    The Flink pipeline stores ``{price}:{volume}`` in ``ticker:history:{symbol}``
+    The Flink pipeline stores ``{price}:{volume}`` in ``ticker:history:{exchange}:{symbol}``
     with score = event_time (ms).
     """
     r = await get_redis()
-    key = f"ticker:history:{symbol.upper()}"
+    # Try Binance first
+    key = f"ticker:history:binance:{symbol.upper()}"
     raw = await r.zrevrange(key, 0, limit - 1, withscores=True)
+    if not raw:
+        # Fallback to OKX
+        key = f"ticker:history:okx:{symbol.upper()}"
+        raw = await r.zrevrange(key, 0, limit - 1, withscores=True)
+    if not raw:
+        # Fallback to old format
+        key = f"ticker:history:{symbol.upper()}"
+        raw = await r.zrevrange(key, 0, limit - 1, withscores=True)
     if not raw:
         raise HTTPException(404, f"No trade data for {symbol}")
     trades = []

@@ -5,15 +5,17 @@ NGINX_MODE="${NGINX_MODE:-prod}"
 DOMAIN="${CERTBOT_DOMAIN:-localhost}"
 
 # ── Select the correct nginx config based on mode ─────────────────
+# Nginx loads ALL files in conf.d/, so we must remove the unused config
+# to avoid duplicate zone/upstream conflicts.
 if [ "$NGINX_MODE" = "dev" ]; then
     echo "==> Nginx mode: DEV (plain HTTP, no SSL)"
-    cp /etc/nginx/conf.d/nginx-dev.conf /etc/nginx/conf.d/default.conf
+    rm -f /etc/nginx/conf.d/nginx-prod.conf
 else
     echo "==> Nginx mode: PROD (HTTPS with Let's Encrypt)"
-    cp /etc/nginx/conf.d/nginx-prod.conf /etc/nginx/conf.d/default.conf
+    rm -f /etc/nginx/conf.d/nginx-dev.conf
 
     # Substitute the domain placeholder in the prod config
-    sed -i "s/\${CERTBOT_DOMAIN}/$DOMAIN/g" /etc/nginx/conf.d/default.conf
+    sed -i "s/\${CERTBOT_DOMAIN}/$DOMAIN/g" /etc/nginx/conf.d/nginx-prod.conf
 
     # If certificates don't exist yet, use a self-signed placeholder so nginx can start.
     # Certbot will replace these once it runs successfully.

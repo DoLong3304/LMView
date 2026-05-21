@@ -727,7 +727,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      JVM_EXTRA_OPTS: "-javaagent:/etc/trino/jmx/jmx_prometheus_javaagent.jar=9404:/etc/trino/jmx/trino-442.yaml"
+
     volumes:
       - trino-data:/data/trino
       - ./config/jmx:/etc/trino/jmx:ro
@@ -946,6 +946,9 @@ services:
       crypto-net:
         aliases:
           - nginx
+    depends_on:
+      fastapi-dev:
+        condition: service_healthy
     environment:
       - NGINX_MODE=dev
       - NGINX_AUTO_RELOAD_ENABLE=0
@@ -967,6 +970,9 @@ services:
       crypto-net:
         aliases:
           - nginx
+    depends_on:
+      fastapi-prod:
+        condition: service_healthy
     environment:
       - NGINX_MODE=prod
       - CERTBOT_DOMAIN=${CERTBOT_DOMAIN:-localhost}

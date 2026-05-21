@@ -2,14 +2,10 @@
 set -e
 
 # JMX Prometheus Agent for Trino
-JMX_JAR="/etc/trino/jmx/jmx_prometheus_javaagent.jar"
+# Jar is pre-staged at build time in /opt/trino-jmx/.
+# Config yaml is mounted from host at /etc/trino/jmx/ (read-only).
+JMX_JAR="/opt/trino-jmx/jmx_prometheus_javaagent.jar"
 JMX_CFG="/etc/trino/jmx/trino-442.yaml"
-if [ -f "$JMX_CFG" ] && [ ! -f "$JMX_JAR" ]; then
-  echo "Downloading jmx_prometheus_javaagent..."
-  mkdir -p /etc/trino/jmx
-  wget -q -O "$JMX_JAR" \
-    "https://repo1.maven.org/maven2/io/prometheus/jmx/jmx_prometheus_javaagent/0.20.0/jmx_prometheus_javaagent-0.20.0.jar"
-fi
 
 # Substituting env-var placeholders in Trino catalog properties
 CATALOG="/etc/trino/catalog/iceberg.properties"
@@ -22,14 +18,12 @@ if [ -f "$CATALOG" ]; then
     "$CATALOG"
 fi
 
-# Build Trino JVM opts (prepend JMX agent if config exists)
-TRINO_OPTS=""
+# Append JMX agent to jvm.config (Trino reads JVM opts from this file, not CLI args)
+JVM_CONFIG="/etc/trino/jvm.config"
 if [ -f "$JMX_JAR" ] && [ -f "$JMX_CFG" ]; then
   JMX_PORT="${JMX_EXPORTER_PORT:-9404}"
-  TRINO_OPTS="-javaagent:${JMX_JAR}=${JMX_PORT}:${JMX_CFG}"
+  echo "-javaagent:${JMX_JAR}=${JMX_PORT}:${JMX_CFG}" >> "$JVM_CONFIG"
   echo "JMX Prometheus agent enabled on port ${JMX_PORT}"
 fi
 
-ALL_OPTS="${TRINO_OPTS} ${JVM_EXTRA_OPTS:-}"
-
-exec /usr/lib/trino/bin/run-trino "$@" $ALL_OPTS
+exec /usr/lib/trino/bin/run-trino "$@"
