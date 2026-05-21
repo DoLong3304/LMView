@@ -1,170 +1,153 @@
-# 📊 LMView
+# LMView
 
-[![Docker](https://img.shields.io/badge/Docker-27_Services-blue?logo=docker)](docker-compose.core.yml)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?logo=fastapi)](backend/)
-[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](frontend/)
+[![Docker](https://img.shields.io/badge/Docker-27_dev_services-blue?logo=docker)](docker-compose.yml)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688?logo=fastapi)](backend/)
+[![React](https://img.shields.io/badge/React-19.1-61DAFB?logo=react)](frontend/)
 [![Apache Flink](https://img.shields.io/badge/Apache_Flink-1.18.1-E6522C?logo=apacheflink)](src/processing/)
-[![Apache Kafka](https://img.shields.io/badge/Apache_Kafka-3.9.0-231F20?logo=apachekafka)](docker-compose.core.yml)
-[![Prometheus](https://img.shields.io/badge/Prometheus-2.45-E6522C?logo=prometheus)](docker-compose.monitoring.yml)
-[![Grafana](https://img.shields.io/badge/Grafana-10.2-F46800?logo=grafana)](docker-compose.monitoring.yml)
+[![Apache Kafka](https://img.shields.io/badge/Apache_Kafka-3.9.0-231F20?logo=apachekafka)](docker-compose.yml)
+[![Prometheus](https://img.shields.io/badge/Prometheus-2.45-E6522C?logo=prometheus)](config/prometheus.yml)
+[![Grafana](https://img.shields.io/badge/Grafana-10.2-F46800?logo=grafana)](config/grafana/)
 
-> *Real-time cryptocurrency technical analysis platform built on Lambda Architecture.*
-
----
-
-## 🌟 Highlights
-
-- **Sub-second latency** — Flink stream processing delivers live OHLCV data in <1s
-- **Multi-timeframe charts** — 1s, 1m, 5m, 15m, 1h, 4h, 1d, 1w with TradingView-style UI
-- **~400 trading pairs** — All USDT spot pairs from Binance, streamed in real-time
-- **Lambda Architecture** — Speed layer (Flink) + Batch layer (Spark) + Serving layer (FastAPI)
-- **High Availability** — Kafka 3-node KRaft cluster, Redis Sentinel (1 master + 2 replicas + 3 sentinels)
-- **Full observability** — Prometheus + Grafana (7 dashboards) + Loki centralized logging + Redis metrics
-- **Market Overview & News** — Comprehensive aggregations, heatmap data, and sentiment-driven news
-- **12 drawing tools** — Trendlines, Fibonacci, horizontal lines, and more
-- **Technical indicators** — SMA, EMA, RSI, MFI with real-time calculation
+Real-time cryptocurrency technical-analysis platform built on Lambda Architecture.
 
 ---
 
-## ℹ️ Overview
+## Highlights
 
-**LMView** is a data engineering platform that streams cryptocurrency market data from exchanges, processes it through parallel real-time and batch pipelines, and serves it via a modern web interface with TradingView-style charting.
+- **Real-time candles** through Kafka, Flink, Redis Sentinel, FastAPI, and WebSocket.
+- **Multi-timeframe charts**: `1s`, `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`.
+- **Exchange abstraction** with Binance as primary path and OKX integration under active hardening.
+- **Lambda Architecture**: speed layer (Flink), batch/lakehouse layer (Spark/Iceberg), serving layer (FastAPI).
+- **High availability infrastructure**: 3 Kafka brokers and Redis Sentinel with 1 master, 2 replicas, 3 Sentinels.
+- **Market overview and news**: gold-table metrics, heatmaps, rankings, multi-source news and sentiment cache.
+- **Trading UI**: lightweight-charts v5.2.0, drawing tools, replay mode, i18n, mock/API data mode.
+- **Observability**: Prometheus, Grafana, Loki, exporters, 11 dashboards, alert rules.
 
-The system focuses on two engineering disciplines:
-- **Data Engineering** — Lambda Architecture with Kafka, Flink, Spark, InfluxDB, Iceberg, and Redis for multi-layered data processing and storage
-- **AI Engineering** — Foundation for ML/DL price prediction models and AI-driven technical analysis (roadmap)
+---
 
-### Architecture
+## Overview
 
+```text
+Exchange WS/REST -> Producer -> Kafka -> Flink/Spark
+                                  -> Redis + InfluxDB + Iceberg/MinIO
+                                  -> FastAPI -> Nginx -> React
 ```
-Exchange WebSocket → Kafka HA (3 brokers) → Flink (speed) / Spark (batch)
-                                                    ↓
-                                    Redis (hot) / InfluxDB (warm) / Iceberg (cold)
-                                                    ↓
-                                          FastAPI → Nginx → React 19 SPA
-```
+
 ![Data Flow Diagram](docs/crypto.png)
-### ✍️ Author
 
-Built and maintained by D22 Fintech, PTIT students:
-- [@DoLong3304](https://github.com/DoLong3304):  Project Manager, DevOps and AI Engineer.
-- [@StupidDuck64](https://github.com/StupidDuck64):  Data Engineer.
-- [@EzraaOP](https://github.com/EzraaOP):  Frontend Developer.
+LMView focuses on data engineering first, with a clean path for future AI/ML features: durable lakehouse data, low-latency Redis features, Trino analytics, and FastAPI serving boundaries.
 
 ---
 
-## 🚀 Usage
+## Usage
 
-Once running, access the platform at **http://localhost**:
+Primary app:
 
-- **Real-time charts** with live WebSocket price updates
-- **Multi-timeframe** switching (1s to 1w)
-- **Market Overview** and **News** dashboards for full market sentiment tracking
-- **Order book** and **recent trades** panels
-- **Historical browsing** with date range picker and scroll-left loading
-- **Drawing tools** for technical analysis
-- **System health** monitoring card
+- Dev/prod Nginx: `https://localhost` after `make dev` (port 80 redirects to HTTPS; dev cert is self-signed).
+- FastAPI docs: `http://localhost:8080/docs`.
 
-### API Examples
+API examples:
 
 ```bash
-# Live ticker
-curl http://localhost:8080/api/ticker/BTCUSDT | jq
-
-# OHLCV candles
-curl "http://localhost:8080/api/klines?symbol=BTCUSDT&interval=1m&limit=100" | jq
-
-# Health check
-curl http://localhost:8080/api/health | jq
+curl http://localhost:8080/api/health
+curl "http://localhost:8080/api/klines?symbol=BTCUSDT&interval=1m&limit=100"
+curl "http://localhost:8080/api/ticker/BTCUSDT"
+curl "http://localhost:8080/api/news/latest?limit=10"
 ```
 
-### Web UIs
+Web UIs:
 
-| Service | URL | Credentials |
-|---|---|---|
-| Frontend | http://localhost | — |
-| FastAPI Docs | http://localhost:8080/docs | — |
-| Grafana | http://localhost/grafana/ | admin/admin |
-| Prometheus | http://localhost/prometheus/ | MONITORING_USER/PASSWORD |
-| Loki | http://localhost/loki/ | MONITORING_USER/PASSWORD |
-| Flink | http://localhost:8081 | — |
-| Dagster | http://localhost:3000 | — |
-| MinIO | http://localhost:9001 | minioadmin/minioadmin |
+| Service | URL |
+|---|---|
+| Frontend/Nginx | `https://localhost` |
+| FastAPI docs | `http://localhost:8080/docs` |
+| Flink | `http://localhost:8081` |
+| Spark | `http://localhost:8082` |
+| Trino | `http://localhost:8083` |
+| InfluxDB | `http://localhost:8086` |
+| Dagster | `http://localhost:3000` |
+| Grafana | `http://localhost:3001` or `/grafana/` through Nginx |
+| Prometheus | `http://localhost:9090` or `/prometheus/` through Nginx |
+| MinIO Console | `http://localhost:9001` |
 
 ---
 
-## ⬇️ Installation
+## Installation
 
-### Prerequisites
+Prerequisites:
 
-- **Docker Engine** >= 24.x or **Docker Desktop** >= 4.x
-- **RAM:** 32GB recommended (24GB minimum)
-- **Disk:** 100GB+ free space
-- **CPU:** 8 cores recommended
+- Docker Engine 24+ or Docker Desktop 4+.
+- 32GB RAM recommended; 24GB minimum for full local stack.
+- 100GB+ disk recommended.
+- 8 CPU cores recommended.
 
-### Quick Start
+Quick start:
 
 ```bash
-# Clone
 git clone https://github.com/DoLong3304/LMView.git
 cd LMView
-
-# Configure environment
 cp .env.example .env
-# Edit .env — set INFLUX_TOKEN, passwords, etc.
-
-# Start core services in dev mode
+# Edit .env: set INFLUX_TOKEN, passwords, API keys, monitoring credentials.
 make dev
-
-# Open http://localhost
 ```
 
-### Startup Profiles
+Profiles:
 
-| Command | Services | RAM |
-|---|---|---|
-| `make dev` | Core + dev containers (hot-reload, localhost) | ~17GB |
-| `make monitoring` | + Prometheus, Grafana, exporters | ~18GB |
-| `make logging` | + Loki, Promtail | ~18.8GB |
-| `make prod` | Core + prod containers + monitoring + logging | ~18.8GB |
+| Command | Starts |
+|---|---|
+| `make dev` | Core dev stack, 27 services |
+| `make monitoring` | Dev + Prometheus/Grafana/exporters |
+| `make logging` | Dev + monitoring + Loki/Promtail |
+| `make prod` | Production profile + monitoring + logging |
 
-### Backfill Historical Data (Optional)
+Optional backfill:
 
 ```bash
-# Populate 90 days of 1m candles (~30-60 min)
 docker compose run --rm influx-backfill python /app/src/batch/backfill.py --mode populate --days 90
 ```
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
-make test          # Unit + integration tests
-make test-all      # All 161 tests
-make test-cov      # With coverage report
+make test
+make test-all
+make test-cov
 ```
+
+Frontend checks:
+
+```bash
+cd frontend
+npm run typecheck
+npm run build
+```
+
+Current source contains 193 pytest test functions and 35 frontend hook test specs. `frontend/package.json` currently has no frontend test script.
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 | Document | Description |
 |---|---|
-| [SYSTEM.md](docs/SYSTEM.md) | Complete system documentation — architecture, data flow, tech stack |
-| [CHANGELOG.md](docs/CHANGELOG.md) | Project change history |
-| [AGENTS.md](docs/AGENTS.md) | AI agent coding instructions |
+| [SYSTEM.md](docs/SYSTEM.md) | Full system architecture, data flow, APIs, caveats |
+| [CHANGELOG.md](docs/CHANGELOG.md) | Project history |
+| [AGENTS.md](AGENTS.md) | AI agent workflow and coding rules |
 
 ---
 
-## 💭 Feedback and Contributing
+## Authors
 
-Open an [issue](https://github.com/DoLong3304/LMView/issues) for bug reports or feature requests.
+Built and maintained by D22 Fintech, PTIT students:
 
-See [AGENTS.md](docs/AGENTS.md) for coding guidelines if contributing with AI assistance.
+- [@DoLong3304](https://github.com/DoLong3304): Project Manager, DevOps and AI Engineer.
+- [@StupidDuck64](https://github.com/StupidDuck64): Data Engineer.
+- [@EzraaOP](https://github.com/EzraaOP): Frontend Developer.
 
 ---
 
-**Status:** ✅ Active Development
-**Version:** 0.12.1
-**License:** [MIT](LICENSE)
+Status: Active development
+Version: 0.12.3
+License: Not specified in this repository

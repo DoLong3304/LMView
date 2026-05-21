@@ -1,596 +1,828 @@
-# LMView — System Documentation
+# LMView System Documentation
 
-> **Purpose:** Complete technical reference for the LMView platform — for human understanding and AI agent context.
-> **Last updated:** 2026-05-16
-
----
-
-## Table of Contents
-
-1. [Project Overview](#1-project-overview)
-2. [Architecture](#2-architecture)
-3. [Tech Stack](#3-tech-stack)
-4. [Directory Structure](#4-directory-structure)
-5. [Data Flow](#5-data-flow)
-6. [Storage Layer](#6-storage-layer)
-7. [Processing Layer](#7-processing-layer)
-8. [API Layer](#8-api-layer)
-9. [Frontend](#9-frontend)
-10. [Schemas & Data Formats](#10-schemas--data-formats)
-11. [Orchestration](#11-orchestration)
-12. [Infrastructure](#12-infrastructure)
-13. [Setup & Operations](#13-setup--operations)
-14. [Testing](#14-testing)
-15. [Known Issues & Gotchas](#15-known-issues--gotchas)
+> Complete project map for humans and coding agents.
+> Last reviewed from code: 2026-05-21.
 
 ---
 
-## 1. Project Overview
+## 1. Project Snapshot
 
-**LMView** (Lambda View) is a real-time cryptocurrency technical analysis platform. It streams market data from exchanges, processes it through a Lambda Architecture (speed + batch layers), and serves it via a TradingView-style web interface.
+**LMView** is a real-time cryptocurrency technical-analysis platform. It combines:
 
-**Key capabilities:**
-- Real-time OHLCV candlestick charting for ~400 USDT pairs
-- Multi-timeframe support: 1s, 1m, 5m, 15m, 1h, 4h, 1d, 1w
-- Order book depth, recent trades, ticker data
-- Technical indicators (SMA, EMA, RSI, MFI)
-- Historical data browsing with date range picker
-- 12 drawing tools (trendline, fibonacci, etc.)
-- Full observability stack (Prometheus, Grafana, Loki)
+- A speed layer for live market data.
+- A batch/lakehouse layer for historical data and analytics.
+- A serving layer for REST/WebSocket APIs.
+- A React TradingView-style frontend.
 
-**Deployment target:** AWS t3a.2xlarge (8 vCPU, 32GB RAM, 100GB gp3 SSD)
+Current project version from `docs/CHANGELOG.md`: **0.12.3**.
+
+Current repo state at this audit:
+
+- Source branch: `main`.
+- Runtime orchestration: one `docker-compose.yml` with profiles.
+- Development profile service count: **27** services.
+- Full dev + monitoring + logging count: **34** services.
+- Production + monitoring + logging count: **36** services.
+- Backend tests in source: **193 pytest test functions** across **24 Python test files**.
+- Frontend hook tests in source: **35 Jest-style specs** across **2 files**.
+- Existing uncommitted user change observed: `frontend/tsconfig.json`.
+
+This document describes the code as it exists now, including caveats where implementation and intended architecture differ.
 
 ---
 
-## 2. Architecture
+## 2. Architecture Overview
 
-LMView uses **Lambda Architecture** — parallel processing paths for real-time and historical data:
+LMView follows Lambda Architecture:
 
-```
-                    ┌──────────────────────────────┐
-                    │    Exchange WebSocket APIs    │
-                    │  (Binance ~400 USDT pairs)   │
-                    └──────────────┬───────────────┘
-                                   │
-                          [src/producer/main.py]
-                         Avro serialize → Kafka HA
-                                   │
-              ┌────────────────────┼────────────────────┐
-              │                    │                     │
-       crypto_ticker        crypto_klines         crypto_depth
-       crypto_trades               │              crypto_trades
-              │                    │                     │
-              │           ┌────────▼────────┐           │
-              │           │  Apache Flink   │◄──────────┘
-              │           │ (Speed Layer)   │
-              │           │ <1s latency     │
-              │           └────────┬────────┘
-              │                    │
-              │    ┌───────────────┼───────────────┐
-              │    │               │               │
-              ▼    ▼               ▼               │
-         Redis Sentinel      InfluxDB 2.7         │
-         (hot cache)         (warm storage)       │
-         TTL: 8h-7d          retention: 90d       │
-              │                    │               │
-              │               [Batch Layer]        │
-              │           Spark + Dagster          │
-              │                    │               │
-              │              Iceberg/MinIO         │
-              │              (cold storage)        │
-              │                    │               │
-              └────────┬──────────┘               │
-                       │                           │
-                  [FastAPI API]                    │
-                  REST + WebSocket                 │
-                       │                           │
-                  [Nginx Proxy]                    │
-                       │                           │
-                  [React 19 SPA]                   │
-                  lightweight-charts               │
+```text
+Exchange WebSockets / REST
+  -> src/producer/main.py
+  -> Avro serialization + Kafka topics
+  -> Speed layer: Flink -> Redis Sentinel + InfluxDB
+  -> Batch layer: Spark -> Iceberg tables on MinIO, queried by Trino
+  -> Serving layer: FastAPI REST + WebSocket
+  -> Nginx reverse proxy
+  -> React 19 frontend
 ```
 
-**Why Lambda?**
-- **Speed layer** (Flink): Real-time with <1s latency → Redis + InfluxDB
-- **Batch layer** (Spark): Accurate historical reprocessing → Iceberg (MinIO)
-- **Serving layer** (FastAPI): Merges sources by priority: Redis → InfluxDB → Trino/Iceberg
+Main runtime paths:
 
----
-
-## 3. Tech Stack
-
-| Component | Technology | Version | Container |
-|---|---|---|---|
-| Message broker | Apache Kafka HA (KRaft) | 3.9.0 | kafka-1, kafka-2, kafka-3 |
-| Schema registry | Apicurio | 2.6.2 | schema-registry |
-| Stream processing | Apache Flink (PyFlink) | 1.18.1 (Python 3.10) | flink-jobmanager, flink-taskmanager |
-| Batch processing | Apache Spark (PySpark) | 3.5 (Python 3.10) | spark-master, spark-worker |
-| Hot cache | Redis Sentinel HA | latest | redis-master, redis-replica-1/2, redis-sentinel-1/2/3 |
-| Time-series DB | InfluxDB | 2.7 | influxdb |
-| Cold storage | Apache Iceberg + MinIO | 1.5.2 + latest | minio |
-| Federated query | Trino | 442 | trino |
-| Orchestration | Dagster | 1.8.10 | dagster-daemon, dagster-webserver |
-| API server | FastAPI + Uvicorn | 0.115+ (Python 3.11) | fastapi |
-| Producer | Python WebSocket | Python 3.11 | producer |
-| Frontend | React 19 + lightweight-charts v5.2.0 | TypeScript 5.7+ / Vite 6.4 | frontend |
-| CSS framework | TailwindCSS | 3.4.4 | (bundled) |
-| Reverse proxy | Nginx | 1.31.0 | nginx |
-| Metadata DB | PostgreSQL | 16 | postgres |
-| Monitoring | Prometheus + Grafana + Loki | 2.45 / 10.2 / 2.9 | prometheus, grafana, loki, promtail, redis-exporter |
-
----
-
-## 4. Directory Structure
-
-```
-lmview/
-├── backend/                    # FastAPI API layer (MVC architecture)
-│   ├── app.py                  # App entry point, router registration
-│   ├── api/                    # Route handlers (thin controllers)
-│   │   ├── health.py           # GET /api/health
-│   │   ├── klines.py           # GET /api/klines (main OHLCV endpoint)
-│   │   ├── historical.py       # GET /api/klines/historical (Trino)
-│   │   ├── websocket.py        # WS /api/stream
-│   │   ├── ticker.py           # GET /api/ticker
-│   │   ├── orderbook.py        # GET /api/orderbook
-│   │   ├── trades.py           # GET /api/trades
-│   │   ├── symbols.py          # GET /api/symbols
-│   │   ├── indicators.py       # GET /api/indicators
-│   │   ├── market.py           # GET /api/market
-│   │   ├── market_overview.py  # GET /api/market/overview, /heatmap
-│   │   └── news.py             # GET /api/news
-│   ├── core/                   # Config, constants, connections
-│   │   ├── config.py           # Environment variable reader
-│   │   ├── constants.py        # Shared constants (intervals, limits)
-│   │   ├── database.py         # Singleton InfluxDB/Trino connections
-│   │   └── redis_sentinel.py   # RedisSentinelManager (HA client)
-│   ├── services/               # Business logic layer
-│   │   ├── candle_service.py   # OHLCV validation, aggregation, merge
-│   │   └── heatmap_service.py  # Heatmap data aggregation
-│   ├── tasks/                  # Background task workers
-│   │   ├── market_fetcher.py   # Continuous market data fetching
-│   │   └── news_fetcher.py     # Continuous news data fetching
-│   └── models/                 # Pydantic response models
-│       ├── candle.py
-│       └── ticker.py
-├── src/                        # Data processing layer
-│   ├── common/                 # Shared infrastructure
-│   │   ├── config.py           # Centralized env config
-│   │   ├── kafka_client.py     # Thread-safe Kafka HA producer
-│   │   ├── avro_serializer.py  # Confluent wire format Avro
-│   │   ├── flink_redis_sentinel.py  # Flink-specific Redis Sentinel client
-│   │   └── logging.py          # Structured logging setup
-│   ├── exchanges/              # Exchange abstraction layer
-│   │   ├── base.py             # ExchangeClient abstract base class
-│   │   ├── binance/            # Binance implementation
-│   │   └── okx/                # OKX implementation
-│   ├── producer/               # Kafka producer (WebSocket → Kafka)
-│   │   └── main.py             # Exchange-agnostic WS orchestrator
-│   ├── processing/             # Flink streaming pipeline
-│   │   ├── pipeline.py         # Job entry point
-│   │   └── writers/            # Individual writer modules
-│   ├── lakehouse/              # Spark Structured Streaming → Iceberg
-│   │   └── pipeline.py
-│   ├── batch/                  # Historical data jobs
-│   │   ├── backfill.py         # Multi-mode backfill (Spark/direct)
-│   │   ├── aggregate.py        # 1m → 1h aggregation
-│   │   └── maintenance.py      # Iceberg compaction
-│   └── news/                   # News sentiment analysis
-│       ├── scraper.py
-│       ├── enhanced_scraper.py
-│       ├── multi_source_scraper.py
-│       └── sentiment_analyzer.py
-├── frontend/                   # React 19 SPA (Vite + TypeScript)
-│   └── src/
-│       ├── App.tsx             # Main dashboard layout
-│       ├── index.tsx           # Entry point
-│       ├── components/         # 19 components + chart/ subdir
-│       │   ├── LeftSidebar.tsx
-│       │   ├── RightPanel.tsx
-│       │   └── TopToolbar.tsx
-│       ├── services/           # marketDataService.ts, symbolMetaService.ts
-│       ├── hooks/              # useApiCall.ts, useSymbolMeta.ts
-│       ├── contexts/           # AuthContext.tsx
-│       ├── i18n/               # translations.ts, index.tsx
-│       ├── types/              # index.ts (shared interfaces)
-│       ├── data/               # fallbackSymbolMeta.ts
-│       ├── pages/              # Page-level components
-│       │   ├── MarketOverviewPage.tsx
-│       │   └── NewsPageRedesigned.tsx
-│       └── utils/              # storageHelpers.ts, errors.ts
-├── orchestration/              # Dagster workflow definitions
-│   ├── assets.py               # Asset + schedule definitions
-│   ├── medallion_assets.py     # Bronze/Silver/Gold layer assets
-│   └── workspace.yaml
-├── schemas/                    # Avro schemas (5 files)
-│   ├── ticker.avsc, kline.avsc, trade.avsc, depth.avsc, news.avsc
-├── config/                     # Service configurations
-│   ├── prometheus.yml, loki-config.yml, promtail-config.yml
-│   ├── spark-defaults.conf
-│   └── grafana/                # Dashboard + datasource provisioning
-├── docker/                     # Dockerfiles (10 subdirs)
-│   ├── backfill/, dagster/, fastapi/, flink/, nginx/
-│   ├── postgres/, producer/, redis/, spark/, trino/
-├── scripts/                    # Shell scripts
-│   ├── auto_submit_jobs.sh     # Flink + Spark job submission
-│   ├── create_kafka_topics.sh  # Topic initialization
-│   ├── certbot_auto.sh         # SSL certificate automation
-│   ├── setup_influx_retention.sh/.ps1  # InfluxDB retention setup
-│   └── duckdns_auto.sh, nginx_auto_reload.sh
-├── tests/                      # pytest test suite (161 tests)
-│   ├── conftest.py
-│   ├── unit/, integration/, e2e/, security/, performance/
-├── docs/                       # Documentation
-│   ├── SYSTEM.md               # This file
-│   ├── CHANGELOG.md            # Change history
-│   └── AGENTS.md               # AI agent coding instructions
-├── docker-compose.yml          # All services (profiles: dev/prod/monitoring/logging)
-├── Makefile                    # Convenience targets
-├── pyproject.toml              # pytest config
-├── .env.example                # Environment variable template
-└── README.md                   # User-facing overview
-```
-
----
-
-## 5. Data Flow
-
-### 5.1 Real-time Path (<1s latency)
-
-```
-Binance WS (!miniTicker@arr, @kline_1s, @aggTrade, @depth20@100ms)
-  → src/producer/main.py
-  → Avro serialize (Confluent wire format: 0x00 + schema_id + binary)
-  → Kafka HA topics (3 brokers, replication factor 3)
-  → Flink consumers (5 parallel pipelines)
-```
-
-**Pipeline 1 — Ticker:** `crypto_ticker` → KeyDBWriter (buffer 100, flush 0.5s) → `ticker:latest:{symbol}` + InfluxDBWriter → `market_ticks`
-
-**Pipeline 2 — Raw 1s candles:** `crypto_klines` → KeyDBKlineWriter → `candle:1s:{symbol}` (ZREMRANGEBYSCORE + ZADD, TTL 8h) + InfluxDBKlineWriter → `candles` measurement
-
-**Pipeline 3 — 1s→1m aggregation:** `crypto_klines` → KlineWindowAggregator (KeyedProcessFunction):
-- MapState stores 1s candles per minute window
-- On minute boundary: aggregate 60 candles → emit 1m candle
-- Safety timer at 65s: emit partial if stream silent
-- Gap-fill: forward-fill close price for missing seconds
-- Output → KeyDBKlineWriter (`candle:1m`, TTL 7d) + InfluxDBKlineWriter + IndicatorWriter (SMA/EMA)
-
-**Pipeline 4 — Depth:** `crypto_depth` → DepthWriter → `orderbook:{symbol}` (HSET)
-
-**Pipeline 5 — Trades:** `crypto_trades` → TradeWriter → `trades:{symbol}` (LPUSH + LTRIM 100)
-
-### 5.2 Batch Path
-
-| Job | Schedule | Input | Output |
-|---|---|---|---|
-| `backfill.py --mode populate` | Manual | Binance REST 1m API (90d) | InfluxDB |
-| `backfill.py --mode influx` | Manual | Binance REST (gap fill) | InfluxDB |
-| `backfill.py --mode iceberg` | Manual | Binance REST 1h API | Iceberg |
-| `aggregate.py` | Daily 04:00 UTC | InfluxDB 1m | InfluxDB 1h + Iceberg |
-| `maintenance.py` | Weekly Sun 03:00 | Iceberg | Compacted Iceberg |
-
-### 5.3 API Serving Path
-
-**GET /api/klines (real-time):**
-1. Check Redis cache `klines_cache:{symbol}:{interval}:{limit}` (100ms TTL)
-2. Query Redis `candle:1m:{symbol}` via ZRANGEBYSCORE
-3. If insufficient: fallback to InfluxDB (90d range)
-4. Client-side aggregate: 1m → target interval (5m/15m/1h/4h/1d/1w)
-5. Build in-progress candle from `candle:1s` sub-candles + ticker enrichment
-6. Cache 100ms → return JSON
-
-**GET /api/klines (scroll-left with endTime):**
-1. Skip cache and Redis (only 7d data)
-2. Calculate absolute range from endTime
-3. Query InfluxDB with `range(start: RFC3339, stop: RFC3339)`
-4. Aggregate → return
-
-**WS /api/stream:**
-- Loop every 0.5s
-- Build candle from sub-candles, enrich with ticker if fresher
-- Push on diff (avoid spam)
-
----
-
-## 6. Storage Layer
-
-### 6.1 Redis Sentinel HA (Hot Cache)
-
-| Key Pattern | Type | TTL | Content |
-|---|---|---|---|
-| `ticker:latest:{symbol}` | Hash | None | price, bid, ask, volume, change24h, event_time |
-| `candle:1s:{symbol}` | Sorted Set | 8h | score=kline_start_ms, member=candle JSON |
-| `candle:1m:{symbol}` | Sorted Set | 7d | score=kline_start_ms, member=candle JSON |
-| `indicator:latest:{symbol}` | Hash | None | sma20, sma50, ema12, ema26 |
-| `orderbook:{symbol}` | Hash | None | bids JSON, asks JSON, ts |
-| `trades:{symbol}` | List | None | max 100 trade JSONs |
-| `klines_cache:*` | String | 100ms | Cached API response |
-
-Candle JSON format: `{"t": ms, "o": open, "h": high, "l": low, "c": close, "v": volume, "qv": quote_vol, "n": trades, "x": is_closed}`
-
-Config: `maxmemory 2560mb`, `maxmemory-policy allkeys-lru`, Sentinel cluster (1 master + 2 replicas + 3 sentinels)
-
-### 6.2 InfluxDB 2.7 (Warm Storage)
-
-- **Org:** `vi`, **Bucket:** `crypto`, **Retention:** 90 days (managed by Spark aggregate job)
-- **Measurements:** `candles` (tags: symbol, exchange, interval; fields: OHLCV), `market_ticks`, `indicators`
-- **Query language:** Flux
-
-### 6.3 Iceberg + MinIO (Cold Storage)
-
-- **Tables:** `historical_hourly`, `coin_klines_hourly` — partitioned by symbol + year + month
-- **Medallion Architecture (News):** `bronze.news`, `silver.news_enriched`, `gold.news_sentiment_daily`
-- **Gold Metrics Tables:** `gold.market_dominance`, `gold.volatility_ranking`, `gold.movers_ranking`, `gold.momentum_indicators`
-- **Format:** Parquet on MinIO (`s3a://cryptoprice/`)
-- **Query:** Trino SQL with predicate pushdown
-- **Catalog:** PostgreSQL (`iceberg_catalog` database)
-
-### 6.4 Kafka HA (Message Broker)
-
-- 3 KRaft brokers, 3 partitions per topic, replication factor 3, retention 48h, LZ4 compression
-- **Topics:** `crypto_ticker`, `crypto_klines`, `crypto_trades`, `crypto_depth`, `crypto_news_sentiment`
-
----
-
-## 7. Processing Layer
-
-### 7.1 Flink (Speed Layer)
-
-- **Containers:** jobmanager (2.5GB cap) + taskmanager (7GB cap, 6GB reserved)
-- **Checkpointing:** HashMapStateBackend, 120s interval, EXACTLY_ONCE, unaligned
-- **Web UI:** http://localhost:8081
-- **Job file:** `src/processing/pipeline.py`
-- **Writers:** Split into `src/processing/writers/` (one file per writer)
-
-### 7.2 Spark (Batch Layer)
-
-- **Containers:** spark-master + spark-worker (4GB RAM, 4 vCores)
-- **Only runs** when called by Dagster (no idle resources)
-- **Jobs:** backfill.py, aggregate.py, maintenance.py, calculate_all_metrics.py, calculate_indicators.py
-
----
-
-## 8. API Layer
-
-### 8.1 Endpoints
-
-| Method | Endpoint | Source | Description |
-|---|---|---|---|
-| GET | `/api/klines` | Redis → InfluxDB | OHLCV candles with scroll-left support |
-| WS | `/api/stream` | Redis (real-time) | Live candle stream (0.5s interval) |
-| GET | `/api/ticker/{symbol}` | Redis | Price, bid, ask, 24h change |
-| GET | `/api/ticker` | Redis scan | All tickers |
-| GET | `/api/orderbook/{symbol}` | Redis | Top-20 bid/ask depth |
-| GET | `/api/trades/{symbol}` | Redis | 100 most recent trades |
-| GET | `/api/symbols` | Redis scan | All available symbols |
-| GET | `/api/indicators/{symbol}` | Redis | SMA20/50, EMA12/26 |
-| GET | `/api/klines/historical` | Trino → Iceberg | Long-range date queries |
-| GET | `/api/health` | All backends | Service health check |
-| GET | `/api/market` | Redis | Market overview data |
-| GET | `/api/market/overview` | Trino | Market overview aggregations |
-| GET | `/api/market/heatmap` | Trino | Market heatmap data |
-| GET | `/api/news` | Redis | News sentiment data |
-
-### 8.2 Architecture
-
-MVC pattern in `backend/`:
-- `api/` — Thin route handlers. No business logic.
-- `services/` — Business logic (candle_service.py: validate, aggregate, merge, dedup)
-- `models/` — Pydantic response models
-- `core/` — Config, constants, database singletons, Redis Sentinel manager
-
----
-
-## 9. Frontend
-
-### 9.1 Stack
-
-React 19 + TypeScript 5.7+ + Vite 6.4 + TailwindCSS 3.4 + lightweight-charts v5.2.0
-
-### 9.2 Component Tree
-
-```
-App.tsx (TradingDashboard)
-├── ErrorBoundary.tsx
-├── ToastProvider.tsx
-├── I18nProvider
-├── AuthContext.Provider
-├── Header.tsx + LanguageSwitcher.tsx
-├── DrawingToolbar.tsx + ToolSettingsPopup.tsx
-├── CandlestickChart.tsx (~1020 lines — CORE)
-│   ├── MarketSelector.tsx
-│   ├── DateRangePicker.tsx
-│   ├── chart/IndicatorPanel.tsx, OHLCVBar.tsx, OscillatorPane.tsx
-│   ├── ChartOverlay.tsx (SVG drawings)
-│   ├── OrderBook.tsx
-│   └── RecentTrades.tsx
-├── Watchlist.tsx
-├── OverviewChart.tsx
-├── SystemHealthCard.tsx
-└── AuthModal.tsx
-```
-
-### 9.3 Key Patterns
-
-- **API layer:** All calls through `marketDataService.ts`. Never direct `fetch()` in components.
-- **3 update channels:** Initial load (`setData`), WebSocket (`update`), Poll incremental (1s interval, skip live bar for 1m+)
-- **Scroll-left:** On `visibleLogicalRangeChanged`, if `range.from < 20`, fetch 500 older candles via `endTime` param
-- **Time convention:** lightweight-charts = seconds, API = milliseconds. Convert at service layer.
-- **i18n:** ~130 keys (en + vi) via `useI18n()` hook
-
----
-
-## 10. Schemas & Data Formats
-
-### Avro Schemas (in `schemas/`)
-
-**crypto_ticker** — `ticker.avsc`: symbol, event_time, close, bid, ask, h24_open/high/low/volume/quote_volume/price_change/price_change_pct/trade_count
-
-**crypto_klines** — `kline.avsc`: symbol, interval, kline_start, kline_close, OHLCV, quote_volume, trade_count, is_closed, event_time
-
-**crypto_trades** — `trade.avsc`: symbol, event_time, agg_trade_id, price, quantity, trade_time, is_buyer_maker
-
-**crypto_depth** — `depth.avsc`: symbol, event_time, last_update_id, bids[][], asks[][]
-
-**crypto_news_sentiment** — `news.avsc`: news sentiment data
-
-Wire format: `0x00` magic byte + 4-byte big-endian schema_id + Avro binary payload
-
----
-
-## 11. Orchestration
-
-**Dagster** — 2 containers (webserver + daemon), state in PostgreSQL
-
-| Asset | Description | Schedule |
+| Path | Purpose | Main files |
 |---|---|---|
-| `backfill_historical` | Binance → Iceberg + InfluxDB gap fill | Manual |
-| `aggregate_candles` | 1m→1h aggregation + retention cleanup | Daily 04:00 UTC |
-| `iceberg_table_maintenance` | Compact + expire snapshots | Weekly Sun 03:00 UTC |
-
-**Web UI:** http://localhost:3000
-
----
-
-## 12. Infrastructure
-
-### 12.1 Docker Profiles
-
-| Profile | Services | RAM |
-|---|---|---|
-| `dev` | 21 core services | ~17GB |
-| `monitoring` | + Prometheus, Grafana, exporters | ~18GB |
-| `logging` | + Loki, Promtail | ~18.8GB |
-
-### 12.2 Port Reference
-
-| Service | Port | URL |
-|---|---|---|
-| Frontend (Nginx) | 80, 443 | http://localhost |
-| FastAPI docs | 8080 | http://localhost:8080/docs |
-| Grafana | via nginx | http://localhost/grafana/ |
-| Prometheus | via nginx | http://localhost/prometheus/ |
-| Loki | via nginx | http://localhost/loki/ |
-| Flink UI | 8081 | http://localhost:8081 |
-| Spark UI | 8082 | http://localhost:8082 |
-| Trino UI | 8083 | http://localhost:8083 |
-| InfluxDB | 8086 | http://localhost:8086 |
-| Dagster | 3000 | http://localhost:3000 |
-| MinIO Console | 9001 | http://localhost:9001 |
-
-### 12.3 Monitoring
-
-- **7 Grafana dashboards** (3 metrics + 4 logs), 47+ panels
-- **Metrics integration**: Spark metrics via JMX, Redis Exporter (`redis-exporter`)
-- **8 alerting rules** (Flink restart, Kafka down, API error rate, memory/CPU thresholds)
-- **Loki** — centralized logs from all containers, 7-day retention
-- **Nginx routing** — Grafana at `/grafana/`, Prometheus at `/prometheus/`, Loki at `/loki/`
-- **Basic Auth** — Prometheus and Loki protected via htpasswd (MONITORING_USER/MONITORING_PASSWORD)
+| Ingestion | Stream exchange ticker, kline, trade, depth data to Kafka | `src/producer/main.py`, `src/exchanges/*` |
+| Speed processing | Hot candles/tickers/order books/indicators | `src/processing/pipeline.py`, `src/processing/writers/*` |
+| Warm storage | Recent analytical history | InfluxDB via Flink writers and batch jobs |
+| Cold storage | Long-term historical/lakehouse data | `src/lakehouse/pipeline.py`, `src/batch/*`, MinIO, Iceberg, Trino |
+| Serving | API and WebSocket data access | `backend/app.py`, `backend/api/*`, `backend/services/*` |
+| UI | Trading dashboard, market overview, news, drawings, replay | `frontend/src/*` |
+| Operations | Compose, Nginx, monitoring, logging | `docker-compose.yml`, `docker/*`, `config/*` |
 
 ---
 
-## 13. Setup & Operations
+## 3. Repository Map
 
-### 13.1 Prerequisites
+```text
+backend/
+  app.py                    FastAPI app, lifespan tasks, router registration
+  api/                      Thin route handlers
+  core/                     Config, constants, DB and Redis Sentinel clients
+  models/                   Pydantic response models
+  services/                 Business logic and in-memory market/news caches
+  tasks/                    Background market/news fetchers
 
-- Docker Engine >= 24.x or Docker Desktop >= 4.x
-- RAM: 32GB recommended (24GB minimum)
-- Disk: 100GB+ free
-- CPU: 8 cores recommended
+src/
+  common/                   Shared config, Kafka client, Avro serializer, logging
+  exchanges/                Exchange abstraction plus Binance and OKX clients
+  producer/                 Exchange -> Kafka WebSocket producer
+  processing/               Flink speed-layer pipeline
+  processing/writers/       Redis, InfluxDB, indicator, and kline aggregation writers
+  lakehouse/                Spark structured streaming and Bronze/Silver/Gold helpers
+  batch/                    Backfill, retention, metrics, unified medallion jobs
+  news/                     News scraping and sentiment analysis
 
-### 13.2 First-Time Setup
+frontend/
+  src/App.tsx               Main dashboard shell
+  src/components/           Chart, toolbars, panels, market/news UI
+  src/services/             API, market overview, symbol metadata, drawing storage
+  src/hooks/                API, symbol metadata, replay, zoom, keyboard shortcuts
+  src/i18n/                 English/Vietnamese translation system
+  src/mock/                 Mock market/news data generator
+  src/types/                Shared TypeScript types
+
+orchestration/
+  assets.py                 Dagster assets and schedules
+  workspace.yaml            Dagster code location
+
+schemas/                    Avro contracts for Kafka payloads
+docker/                     Dockerfiles and service configs
+config/                     Prometheus, Loki, Promtail, Spark, JMX, Grafana
+scripts/                    Job submission, Kafka topic creation, certbot/DuckDNS helpers
+tests/                      Pytest unit/integration/e2e/security/performance suites
+docs/                       System docs and changelog
+```
+
+---
+
+## 4. Runtime Services
+
+`docker-compose.yml` is the single source of truth.
+
+Profiles:
+
+| Profile | Role | Service count from compose config |
+|---|---|---:|
+| `dev` | Core local stack with hot reload/local CORS | 27 |
+| `monitoring` | Prometheus, Grafana, exporters | +5 |
+| `logging` | Loki, Promtail | +2 |
+| `prod` | Production FastAPI/Nginx, SSL automation, DuckDNS | 36 with monitoring+logging |
+| `dont-start` | Compose extension templates only | internal |
+
+Core service groups:
+
+| Group | Services |
+|---|---|
+| Kafka | `kafka-1`, `kafka-2`, `kafka-3`, `zookeeper`, `schema-registry` |
+| Storage | `redis-master`, `redis-replica-1`, `redis-replica-2`, three Sentinels, `influxdb`, `minio`, `postgres`, `trino` |
+| Processing | `producer`, `flink-jobmanager`, `flink-taskmanager`, `spark-master`, `spark-worker`, `auto-submit-jobs`, `influx-backfill` |
+| API/UI | `fastapi-dev` or `fastapi-prod`, `nginx-dev` or `nginx-prod` |
+| Orchestration | `dagster-webserver`, `dagster-daemon` |
+| Monitoring/logging | `prometheus`, `grafana`, `kafka-exporter`, `redis-exporter`, `node-exporter`, `loki`, `promtail` |
+| Production helpers | `certbot-auto`, `duckdns-auto` |
+
+Important ports:
+
+| Service | Host port | Notes |
+|---|---:|---|
+| Nginx frontend/proxy | 80, 443 | HTTP redirects to HTTPS; dev uses self-signed cert if no real cert |
+| FastAPI | 8080 | `/docs`, `/api/health` |
+| Flink UI | 8081 | JobManager UI |
+| Spark master UI | 8082 | Host maps Spark master UI |
+| Trino UI | 8083 | Query engine |
+| InfluxDB | 8086 | Warm time-series store |
+| Dagster | 3000 | Orchestration UI |
+| Grafana direct | 3001 | Also proxied under `/grafana/` |
+| Prometheus direct | 9090 | Also proxied under `/prometheus/` |
+| MinIO API/console | 9000/9001 | Object storage |
+| Loki direct | 3100 | Also proxied under `/loki/` |
+
+---
+
+## 5. Ingestion Layer
+
+### 5.1 Exchange Abstraction
+
+Exchange clients implement `src/exchanges/base.py`.
+
+Current clients:
+
+| Exchange | Files | State |
+|---|---|---|
+| Binance | `src/exchanges/binance/*` | Primary path. REST and combined-stream URL builders fit current producer logic. |
+| OKX | `src/exchanges/okx/*` | Present and started by producer, but should be treated as experimental until OKX WebSocket subscription handling is validated. OKX uses subscription frames, while current generic producer mostly assumes Binance-style URL streams. |
+
+Producer entry point: `src/producer/main.py`.
+
+Default producer tuning from `src/common/config.py`:
+
+| Setting | Default |
+|---|---:|
+| `MAX_SYMBOLS` | 200 per exchange client |
+| `SYMBOLS_PER_CONNECTION` | 25 |
+| `SYMBOLS_PER_DEPTH_CONN` | 15 |
+| `KLINE_INTERVAL` | `1m` |
+| `DEPTH_LEVEL` | `20` |
+| `DEPTH_UPDATE_MS` | `100` |
+| `TICKER_HEARTBEAT_SEC` | 5 seconds |
+
+Producer streams:
+
+| Stream | Kafka topic | Schema |
+|---|---|---|
+| All ticker / mini ticker | `crypto_ticker` | `schemas/ticker.avsc` |
+| Aggregate trades | `crypto_trades` | `schemas/trade.avsc` |
+| Klines | `crypto_klines` | `schemas/kline.avsc` |
+| Depth snapshots | `crypto_depth` | `schemas/depth.avsc` |
+
+The producer registers Avro schemas through Apicurio's Confluent-compatible endpoint:
+
+```text
+http://schema-registry:8080/apis/ccompat/v7
+```
+
+Wire format:
+
+```text
+0x00 magic byte + 4-byte schema id + Avro binary payload
+```
+
+All market Avro schemas currently include an `exchange` field with default `binance`.
+
+---
+
+## 6. Kafka Layer
+
+Kafka uses three brokers with KRaft-style images plus a Zookeeper service still present in compose.
+
+Topics used by code:
+
+| Topic | Produced by | Consumed by |
+|---|---|---|
+| `crypto_ticker` | Producer | Flink speed layer, Spark lakehouse |
+| `crypto_klines` | Producer | Flink speed layer, Spark lakehouse |
+| `crypto_trades` | Producer | Spark lakehouse |
+| `crypto_depth` | Producer | Flink speed layer |
+| `crypto_news_sentiment` | Dagster/news path | News/lakehouse path, partially wired |
+| `reference_prices` | Price-change stream | `src/processing/price_change_stream.py` |
+
+Topic creation helper: `scripts/create_kafka_topics.sh`.
+
+---
+
+## 7. Speed Layer: Flink + Redis + InfluxDB
+
+Main job: `src/processing/pipeline.py`.
+
+Flink config:
+
+- Image: `flink:1.18.1-java11` with `apache-flink==1.18.1`.
+- Parallelism default: `FLINK_PARALLELISM=12`.
+- State backend: `HashMapStateBackend`.
+- Checkpoint interval: 120 seconds.
+- Checkpoint mode: `EXACTLY_ONCE`.
+- Unaligned checkpoints enabled.
+- Checkpoint path: `file:///tmp/flink-checkpoints`.
+
+Pipeline branches:
+
+| Branch | Input | Output |
+|---|---|---|
+| Ticker | `crypto_ticker` | Redis latest/history, InfluxDB `market_ticks` |
+| Raw kline | `crypto_klines` | Redis `candle:1s:*`, InfluxDB closed `1m` candles only |
+| Kline aggregation | `crypto_klines` 1s rows | Flink state aggregation to 1m, Redis, InfluxDB, indicators |
+| Indicators | Closed 1m candles | Redis `indicator:latest:*`, InfluxDB `indicators` |
+| Depth | `crypto_depth` | Redis order book hashes |
+
+Current speed-layer gap:
+
+- `crypto_trades` is produced and written to Iceberg by Spark, but no current Flink hot-cache trade writer exists.
+- `/api/trades/{symbol}` currently derives ticker-level price ticks, not true exchange trades.
+
+### 7.1 Kline Aggregation
+
+`src/processing/writers/kline_aggregator.py` performs in-flight `1s -> 1m` aggregation.
+
+Behavior:
+
+- Stores 1s candles in keyed Flink `MapState`.
+- Deduplicates by `kline_start`.
+- Emits previous minute when a new minute appears.
+- Has a 65-second processing-time safety timer.
+- Forward-fills missing seconds using last close.
+- Emits closed 1m candles with OHLCV and trade count.
+
+Current caveat:
+
+- Aggregator is keyed by `symbol` only and emitted records do not preserve `exchange`. For multi-exchange candle correctness, future work should key by `(exchange, symbol)` and carry `exchange` through all downstream sinks.
+
+### 7.2 Redis Sentinel Hot Cache
+
+Redis HA layout:
+
+- `redis-master`
+- `redis-replica-1`
+- `redis-replica-2`
+- `redis-sentinel-1`
+- `redis-sentinel-2`
+- `redis-sentinel-3`
+
+Main client code:
+
+- Backend: `backend/core/redis_sentinel.py`
+- Flink: `src/common/flink_redis_sentinel.py`
+
+Current writer key patterns:
+
+| Key | Type | Writer | Notes |
+|---|---|---|---|
+| `ticker:latest:{exchange}:{symbol}` | hash | `keydb_ticker.py` | Latest price, bid/ask, volume, change, event time |
+| `ticker:history:{exchange}:{symbol}` | sorted set | `keydb_ticker.py` | Ticker-level history, 24h TTL |
+| `candle:1s:{exchange}:{symbol}` | sorted set | `keydb_kline.py` | 1s candles, TTL from writer config |
+| `candle:1m:{exchange}:{symbol}` | sorted set | `keydb_kline.py` | 1m candles, TTL from writer config |
+| `candle:latest:{exchange}:{symbol}` | hash | `keydb_kline.py` | Latest 1m+ candle snapshot |
+| `indicator:latest:{symbol}` | hash | `indicators.py` | SMA20, SMA50, EMA12, EMA26 |
+| `orderbook:{exchange}:{symbol}` | hash | `keydb_depth.py` | Bids/asks JSON, TTL 300s |
+| `klines_cache:{exchange}:{symbol}:{interval}:{limit}` | string | `backend/api/klines.py` | API cache, 200ms for 1s, 1500ms for other intervals |
+
+Important mismatch to fix:
+
+- `backend/api/orderbook.py` reads `orderbook:{symbol}` but Flink writes `orderbook:{exchange}:{symbol}`.
+- `backend/api/trades.py` reads `ticker:history:{symbol}` but Flink writes `ticker:history:{exchange}:{symbol}`.
+
+Until those API paths are aligned, order book and recent trades may fall back, return synthetic data, or 404 even when exchange-qualified data exists.
+
+### 7.3 InfluxDB Warm Storage
+
+InfluxDB 2.7 stores recent analytical data.
+
+Default config:
+
+| Setting | Default |
+|---|---|
+| URL | `http://influxdb:8086` |
+| Org | `vi` |
+| Bucket | `crypto` |
+| Retention constant | `INFLUX_1M_RETENTION_DAYS=90` |
+
+Measurements used by code:
+
+| Measurement | Writer | Notes |
+|---|---|---|
+| `market_ticks` | `influxdb_ticker.py`, backfill path | Ticker samples |
+| `candles` | `influxdb_kline.py`, backfill path | Closed 1m candles and historical OHLCV |
+| `indicators` | `indicators.py` | SMA/EMA metrics |
+
+Flux historical scroll queries must use absolute RFC3339 ranges for `endTime` mode. Relative ranges can break scroll-left semantics.
+
+---
+
+## 8. Batch and Lakehouse Layer
+
+### 8.1 Spark Structured Streaming
+
+Main job: `src/lakehouse/pipeline.py`.
+
+Purpose:
+
+- Read Kafka topics.
+- Strip Confluent Avro wire header.
+- Decode with `from_avro`.
+- Write append streams to Iceberg tables.
+
+Tables created in `iceberg_catalog.crypto_lakehouse`:
+
+| Table | Source topic | Checkpoint |
+|---|---|---|
+| `coin_ticker` | `crypto_ticker` | `s3a://cryptoprice/checkpoints/crypto_ticker_v1` |
+| `coin_trades` | `crypto_trades` | `s3a://cryptoprice/checkpoints/crypto_trades_v1` |
+| `coin_klines` | `crypto_klines` | `s3a://cryptoprice/checkpoints/crypto_klines_v1` |
+
+Current caveat:
+
+- The Avro schemas contain `exchange`, but current Spark table DDLs in `src/lakehouse/pipeline.py` do not include `exchange`. Multi-exchange lakehouse correctness needs schema/table alignment before relying on exchange-level historical analytics.
+
+### 8.2 Batch Jobs
+
+| File | Role |
+|---|---|
+| `src/batch/backfill.py` | Unified historical import and gap fill for InfluxDB/Iceberg |
+| `src/batch/aggregate.py` | 1m retention maintenance for InfluxDB/Iceberg |
+| `src/batch/maintenance.py` | Iceberg compaction, manifest optimization, orphan cleanup |
+| `src/batch/calculate_all_metrics.py` | Gold metrics orchestration |
+| `src/batch/calculate_indicators.py` | Momentum indicators |
+| `src/batch/bronze_to_silver.py`, `silver_to_gold.py` | Older medallion jobs |
+| `src/batch/unified/*` | Consolidated medallion jobs for ticker/kline/news/indicators |
+
+### 8.3 Medallion Tables
+
+Bronze/Silver/Gold modules exist under `src/lakehouse/`.
+
+Examples:
+
+| Layer | Examples |
+|---|---|
+| Bronze | Raw ticker/kline/news writers |
+| Silver | `ticker_unified`, `kline_multi_timeframe`, `news_enriched` |
+| Gold | `market_overview`, `symbol_stats_daily`, `sector_performance`, `market_dominance`, `volatility_ranking`, `movers_ranking`, `momentum_indicators`, `news_sentiment_daily` |
+
+Gold table outputs back the market overview, heatmap, ranking, news sentiment, and future AI features.
+
+### 8.4 Dagster
+
+Dagster files:
+
+- `orchestration/assets.py`
+- `orchestration/workspace.yaml`
+
+Declared schedules:
+
+| Schedule | Cron | Role |
+|---|---|---|
+| `silver_transformation_schedule` | `*/5 * * * *` | Ticker unification and 5m/15m/1h kline aggregation |
+| `gold_aggregation_schedule` | `*/5 * * * *` | Market overview/statistics/sector metrics |
+| `daily_aggregation_schedule` | `0 0 * * *` | 4h/1d/1w candle aggregation |
+| `news_sentiment_schedule` | `*/5 * * * *` | News scraping and sentiment |
+| `gold_advanced_schedule` | `*/5 * * * *` | Dominance, volatility, movers, momentum indicators |
+
+Current caveat:
+
+- `assets.py` declares assets and schedules but does not currently expose a `Definitions` object. Validate Dagster code-location loading before relying on all schedules in production.
+
+---
+
+## 9. Serving Layer: FastAPI
+
+FastAPI entry point: `backend/app.py`.
+
+Lifecycle:
+
+- Starts `news_fetcher` and `market_fetcher` on startup.
+- Stops both fetchers and closes database clients on shutdown.
+- Adds CORS from `backend/core/config.py`.
+- Optionally exposes Prometheus metrics if `prometheus-fastapi-instrumentator` is installed.
+
+Router inclusion order matters:
+
+```text
+health, ticker, klines, historical, orderbook, trades, symbols,
+indicators, websocket, market_overview, market, news
+```
+
+`market_overview` is registered before legacy `market`, so overlapping routes such as `/api/market/overview` resolve to `backend/api/market_overview.py`.
+
+### 9.1 API Endpoints
+
+| Method | Path | Main source | Notes |
+|---|---|---|---|
+| GET | `/api/health` | Redis, InfluxDB, Trino | Reports dependency status and latency |
+| GET | `/api/klines` | Redis -> InfluxDB -> Trino | Live/recent candles, `endTime` scroll-left mode |
+| GET | `/api/klines/historical` | InfluxDB recent + Trino old | Range query, max 1 year, derives intervals from 1m |
+| WS | `/api/stream/all` | Redis | Single WebSocket that sends all timeframes |
+| GET | `/api/ticker/{symbol}` | Redis | Aggregates Binance/OKX mid-price unless `exchange` query is set |
+| GET | `/api/ticker` | Redis scan | All tickers, optional exchange filter |
+| GET | `/api/orderbook/{symbol}` | Redis or synthetic fallback | Needs key alignment for real exchange-qualified book data |
+| GET | `/api/trades/{symbol}` | Redis ticker history | Ticker-level price ticks, not true trade topic data |
+| GET | `/api/symbols` | Redis scan | Supports old and exchange-qualified ticker keys |
+| GET | `/api/indicators/{symbol}` | Redis | SMA20, SMA50, EMA12, EMA26 |
+| GET | `/api/market/overview` | Placeholder object | Currently returns zero/default overview fields |
+| GET | `/api/market/heatmap` | Trino gold tables | Heatmap data |
+| GET | `/api/market/rankings/{category}` | Trino gold tables | `gainers`, `losers`, `volume`, `volatile` |
+| GET | `/api/market/metrics` | In-memory cache | Legacy market cache |
+| GET | `/api/market/gainers` | In-memory cache | Legacy market cache |
+| GET | `/api/market/losers` | In-memory cache | Legacy market cache |
+| GET | `/api/market/symbol/{symbol}` | In-memory cache | Legacy market cache |
+| GET | `/api/news/latest` | In-memory news cache | Optional source/symbol/hour filters |
+| GET | `/api/news/sources` | Static service data | News source list |
+| GET | `/api/news/trending` | In-memory news cache | Trending articles and symbols |
+| GET | `/api/news/sentiment/{symbol}` | In-memory news cache | Sentiment by symbol |
+| GET | `/api/news/search` | In-memory news cache | Search by query |
+
+### 9.2 Candle Serving Logic
+
+`backend/api/klines.py` and `backend/services/candle_service.py` are the core candle serving path.
+
+Live `/api/klines`:
+
+1. Normalize symbol and interval.
+2. Use cache key `klines_cache:{exchange}:{symbol}:{interval}:{limit}` unless `endTime` is provided.
+3. For `1s`, read `candle:1s:{exchange}:{symbol}` from Redis.
+4. For `1m+`, read `candle:1m:{exchange}:{symbol}` first.
+5. If Redis is sparse, fall back to InfluxDB.
+6. If historical scroll requires older data, use InfluxDB then Trino.
+7. Aggregate 1m rows into target interval for `5m+`.
+8. For live `5m+`, enrich latest candle with ticker only when ticker is fresher than source sub-candle.
+9. Cache result briefly.
+
+Historical `/api/klines/historical`:
+
+1. Validates range, max 1 year.
+2. Recent range uses InfluxDB 1m.
+3. Older range uses Trino/Iceberg 1m.
+4. If no 1m rows and interval is `1h+`, falls back to hourly cold table.
+5. Aggregates to requested interval.
+
+### 9.3 Background Tasks
+
+| Task | File | Interval | Notes |
+|---|---|---:|---|
+| Market fetcher | `backend/tasks/market_fetcher.py` | 300s | Queries Trino and updates `market_service` in-memory cache |
+| News fetcher | `backend/tasks/news_fetcher.py` | 300s | Scrapes news, runs VADER sentiment, updates `news_service` in-memory cache |
+
+The in-memory caches reset on FastAPI restart. Future production hardening should move these caches to Redis or lakehouse-backed queries.
+
+---
+
+## 10. Frontend
+
+Stack:
+
+- React `19.1.0`
+- TypeScript `5.8.3`
+- Vite `6.3.3`
+- TailwindCSS `3.4.4`
+- lightweight-charts `5.2.0`
+- lucide-react `0.396.0`
+
+Build scripts from `frontend/package.json`:
+
+| Script | Command |
+|---|---|
+| `dev` | `vite` |
+| `build` | `tsc --noEmit && vite build` |
+| `preview` | `vite preview` |
+| `typecheck` | `tsc --noEmit` |
+
+`frontend/tsconfig.json` uses strict TypeScript, `moduleResolution: bundler`, `@/*` alias, and excludes `src/**/__tests__`.
+
+### 10.1 Main UI Areas
+
+| Area | Files |
+|---|---|
+| App shell | `App.tsx`, `Header.tsx`, `LeftSidebar.tsx`, `RightPanel.tsx`, `TopToolbar.tsx` |
+| Chart | `CandlestickChart.tsx`, `chart/*`, `ChartOverlay.tsx` |
+| Drawing tools | `DrawingToolbar.tsx`, `DrawingContextToolbar.tsx`, `ToolSettingsPopup.tsx`, `chartStorageService.ts` |
+| Market/news | `MarketOverviewPage.tsx`, `NewsPageRedesigned.tsx`, `MarketNews.tsx`, `marketOverviewService.ts` |
+| Replay | `ReplayButton.tsx`, `ReplayControls.tsx`, `useReplayMode.ts` |
+| Data access | `marketDataService.ts`, `symbolMetaService.ts`, `useApiCall.ts`, `useSymbolMeta.ts` |
+| i18n | `i18n/index.tsx`, `i18n/translations.ts` |
+
+### 10.2 Data Mode
+
+Frontend data source is selected by:
+
+```text
+VITE_DATA_SOURCE=mock | api
+VITE_API_BASE_URL=/api
+```
+
+Behavior:
+
+- `mock`: `frontend/src/mock/mockDataGenerator.ts` simulates candles, order books, trades, tickers, and news.
+- `api`: services call FastAPI through `/api` by default.
+
+All new frontend API access should live in service files, not directly inside components.
+
+### 10.3 Chart and Time Conventions
+
+Timeframes supported:
+
+```text
+1s, 1m, 5m, 15m, 1h, 4h, 1d, 1w
+```
+
+Important rules:
+
+- Backend timestamps are epoch milliseconds.
+- lightweight-charts uses epoch seconds.
+- Convert at service boundary: `openTime / 1000`.
+- UI may display uppercase labels (`1H`, `4H`, `1D`, `1W`), but API calls must use lowercase interval keys.
+- Live chart uses `/api/stream/all` through `subscribeAllTimeframes`.
+- The older `subscribeCandle()` service builds `/api/stream`, but backend currently only exposes `/api/stream/all`.
+
+### 10.4 Drawing and Replay Features
+
+Drawing toolbar currently includes 12 analysis drawing tools:
+
+```text
+trendline, ray, extendedLine, horizontal, vertical, rectangle,
+arrow, fibRetracement, text, ruler, elliottWave, harmonicABCD
+```
+
+It also includes cursor/crosshair and utility controls such as magnet, lock/hide all, eraser, delete selected, and clear all.
+
+Drawings are persisted by symbol/timeframe through `chartStorageService.ts`.
+
+Replay mode:
+
+- Lets user choose a starting candle.
+- Pauses live WebSocket/poll updates while replay is active.
+- Advances candles based on selected playback speed.
+
+---
+
+## 11. Schemas and Data Contracts
+
+Canonical Avro files:
+
+| File | Record | Notes |
+|---|---|---|
+| `ticker.avsc` | `Ticker` | Has `exchange`, close, bid, ask, 24h fields |
+| `kline.avsc` | `Kline` | Has `exchange`, interval, OHLCV, close flag |
+| `trade.avsc` | `AggTrade` | Has `exchange`, aggregate trade fields |
+| `depth.avsc` | `Depth` | Has `exchange`, bids/asks as strings |
+| `news.avsc` | `NewsSentiment` | News title/source/sentiment/symbols/url |
+
+Rules:
+
+- Treat schemas as cross-service contracts.
+- Changing schemas requires producer, Flink, Spark, and tests to be coordinated.
+- Do not modify `schemas/*.avsc` casually.
+
+---
+
+## 12. Observability
+
+Monitoring stack:
+
+- Prometheus `v2.45.0`
+- Grafana `10.2.0`
+- Loki `2.9.0`
+- Promtail `2.9.0`
+- Redis exporter `v1.83.0`
+- Kafka exporter `v1.7.0`
+- Node exporter `v1.6.1`
+- JMX agents for Kafka and Trino
+
+Prometheus scrape jobs include:
+
+- FastAPI `/metrics`
+- Kafka exporter
+- Kafka JVM JMX
+- Flink JobManager/TaskManager
+- Node exporter
+- MinIO
+- Trino JMX
+- Redis exporter
+- Spark master/worker Prometheus endpoints
+
+Grafana dashboards in `config/grafana/dashboards`: **11** JSON dashboards.
+
+Alerting rules in `config/grafana/provisioning/alerting/rules.yml`: 8 rules across Flink, Kafka, API, and system health.
+
+Nginx routes:
+
+| Route | Backend | Auth |
+|---|---|---|
+| `/grafana/` | Grafana | Grafana auth |
+| `/prometheus/` | Prometheus | Basic Auth via `MONITORING_USER`/`MONITORING_PASSWORD` |
+| `/loki/` | Loki | Basic Auth via `MONITORING_USER`/`MONITORING_PASSWORD` |
+| `/api/*` | FastAPI | App/API auth only |
+
+---
+
+## 13. Setup and Operations
+
+Prerequisites:
+
+- Docker Engine 24+ or Docker Desktop 4+.
+- 32GB RAM recommended; 24GB minimum for full local stack.
+- 100GB+ free disk recommended.
+- 8 CPU cores recommended.
+
+First-time setup:
 
 ```bash
-git clone https://github.com/StupidDuck64/Lambda-Architecture-for-TradingView-Style-Platform.git
-cd Lambda-Architecture-for-TradingView-Style-Platform
+git clone https://github.com/DoLong3304/LMView.git
+cd LMView
 cp .env.example .env
-# Edit .env: set INFLUX_TOKEN, passwords, API keys
-
-# Start core services
-make core                # or: docker compose --profile dev up -d
-
-# Wait for healthy (~3-5 min)
-docker compose ps
-
-# Backfill historical data (30-60 min for 400 symbols × 90 days)
-docker compose run --rm influx-backfill python /app/src/batch/backfill.py --mode populate --days 90
-
-# Submit Flink job
-make submit-jobs         # or: bash scripts/auto_submit_jobs.sh
-
-# Verify: http://localhost → chart should show real-time data
+# Edit .env: set INFLUX_TOKEN, passwords, API keys, monitoring credentials.
+make dev
 ```
 
-### 13.3 Makefile Commands
+Nginx dev mode creates a temporary self-signed cert if no cert exists. Browser access may redirect from `http://localhost` to `https://localhost`.
 
-| Command | Description |
+Useful commands:
+
+| Command | Purpose |
 |---|---|
-| `make core` | Start core services (17GB) |
-| `make monitoring` | Core + monitoring (18GB) |
-| `make full` | All services (18.8GB) |
-| `make stop-all` | Stop everything |
-| `make submit-jobs` | Submit Flink + Spark jobs |
-| `make dev` | Start dev mode |
-| `make prod` | Start production mode |
-| `make test` | Run unit + integration tests |
-| `make test-all` | Run all tests |
-| `make test-cov` | Tests with coverage |
-| `make status` | Container status + RAM usage |
-| `make clean` | Remove all containers + volumes (DANGEROUS) |
+| `make dev` | Start dev profile |
+| `make dev-build` | Rebuild and start dev profile |
+| `make dev-logs` | Tail logs |
+| `make dev-down` | Stop dev services |
+| `make monitoring` | Start dev + monitoring |
+| `make logging` | Start dev + monitoring + logging |
+| `make prod` | Start prod + monitoring + logging |
+| `make stop-all` | Stop all profiles |
+| `make submit-jobs` | Run `scripts/auto_submit_jobs.sh` |
+| `make status` | Show compose status and container memory |
+| `make clean` | Destructive: remove containers, volumes, networks |
 
-### 13.4 Rebuild After Code Changes
+Backfill examples:
 
-| Changed | Command |
+```bash
+docker compose run --rm influx-backfill python /app/src/batch/backfill.py --mode populate --days 90
+docker compose run --rm influx-backfill python /app/src/batch/backfill.py --mode influx
+docker compose run --rm influx-backfill python /app/src/batch/backfill.py --mode iceberg --iceberg-mode incremental
+```
+
+Rebuild guide:
+
+| Changed area | Typical action |
 |---|---|
-| `backend/` | `docker compose up -d --build fastapi` |
-| `frontend/` | `docker compose up -d --build nginx` |
-| `src/` (Flink) | Cancel job → re-submit via `make submit-jobs` |
-| `src/` (Spark) | Re-submit via `spark-submit` |
-| `docker/` | `docker compose up -d --build <service>` |
+| `backend/` | `docker compose up -d --build fastapi-dev` or `fastapi-prod` |
+| `frontend/` | `docker compose up -d --build nginx-dev` or `nginx-prod` |
+| `src/producer/` | Rebuild `producer` |
+| `src/processing/` | Rebuild Flink image if dependencies changed, then resubmit job |
+| `src/batch/`, `src/lakehouse/` | Re-run relevant Spark/Dagster job |
+| `docker-compose.yml` | Re-run `docker compose config` and affected profile |
 
 ---
 
 ## 14. Testing
 
-**Framework:** pytest + pytest-asyncio
+Pytest config: `pyproject.toml`.
 
-**Structure:**
-- `tests/unit/` — 80 tests (constants, mappers, models, services)
-- `tests/integration/` — 39 tests (all API endpoints)
-- `tests/security/` — 17 tests (injection, XSS, traversal)
-- `tests/performance/` — 9 benchmarks (aggregation, merging)
-- `tests/e2e/` — 6 tests (routes, OpenAPI schema)
-- **Total: 161 tests**
+Test directories:
 
-**Commands:**
+| Directory | Role |
+|---|---|
+| `tests/unit/` | Constants, models, mappers, candle service |
+| `tests/integration/` | FastAPI endpoints with mocked dependencies |
+| `tests/e2e/` | App route registration and docs/OpenAPI checks |
+| `tests/security/` | Injection, validation, CORS/path checks |
+| `tests/performance/` | Aggregation, merge, conversion benchmarks |
+
+Commands:
+
 ```bash
-PYTHONPATH=. python -m pytest tests/unit/ -v          # Unit only
-PYTHONPATH=. python -m pytest tests/ -v               # All tests
-PYTHONPATH=. python -m pytest tests/ --cov=backend    # With coverage
-make test                                              # Unit + integration
-make test-all                                          # Everything
+PYTHONPATH=. python -m pytest tests/ -v
+PYTHONPATH=. python -m pytest tests/ -m "unit or integration" -v
+PYTHONPATH=. python -m pytest tests/ --cov=backend --cov-report=term-missing
+make test
+make test-all
+make test-cov
 ```
 
----
+Frontend:
 
-## 15. Known Issues & Gotchas
+```bash
+cd frontend
+npm run typecheck
+npm run build
+```
 
-1. **Time units:** lightweight-charts = seconds, backend = milliseconds. Always convert.
-2. **Timeframe casing:** Frontend `1H`/`4H`/`1D`/`1W` → `.toLowerCase()` before API calls.
-3. **Redis sorted set dedup:** Must `ZREMRANGEBYSCORE` before `ZADD` (same score + different member = duplicate).
-4. **Ticker staleness:** `!ticker@arr` has 14-30s delay. Only enrich candle if ticker is fresher than last sub-candle.
-5. **WS vs Poll coordination:** WS authoritative for live bar (1m+). Poll skips last candle to prevent flicker.
-6. **InfluxDB scroll-left:** Must use absolute `range(start: RFC3339, stop: RFC3339)` for historical queries.
-7. **Flink safety timer:** Must cancel old timer before registering new one in KlineWindowAggregator.
-8. **Frontend chart updates:** `.update()` for single bar, `.setData()` only for bulk operations.
-9. **Producer WS limit:** Max 200 symbols per WebSocket connection (Binance 502).
-10. **Python compatibility:** Flink 1.18 needs Python 3.10 (`distutils`). Producer/FastAPI = 3.11. Do NOT use 3.12+.
-11. **PyFlink writers:** Still named `keydb_*` prefix but use Redis Sentinel under the hood.
-12. **Pydantic compatibility:** Use `Optional[X]` not `X | None` for Pydantic models (Python 3.9 compat).
+Current frontend test files exist under `frontend/src/hooks/__tests__`, but `frontend/package.json` currently has no `test` script and no explicit Jest/Vitest dependency listed.
 
 ---
 
-> **Document version:** 3.1
-> **Last updated:** 2026-05-19
-> **Maintained by:** AI agents + human contributors (see `docs/CHANGELOG.md`)
+## 15. AI/ML Extension Points
+
+No production ML inference service is currently wired. The project has strong foundations for future AI features:
+
+| Layer | AI use |
+|---|---|
+| Kafka raw topics | Online feature extraction and event replay |
+| Redis hot cache | Low-latency inference inputs and model outputs |
+| InfluxDB | Recent time-series windows |
+| Iceberg Bronze/Silver/Gold | Offline feature generation, training data, backtests |
+| Trino | Feature queries and analytics |
+| FastAPI | Future inference and explanation endpoints |
+| Frontend | Model signal overlays, explanations, confidence bands, alerts |
+
+Recommended AI feature pattern:
+
+1. Define data contract first: input features, target, prediction horizon, latency target.
+2. Store durable training data in Iceberg, not in Redis-only structures.
+3. Keep online features reproducible from offline feature code when possible.
+4. Add model outputs under clear names such as `prediction:{model}:{symbol}:{timeframe}` or Gold tables.
+5. Add monitoring: inference latency, data freshness, drift, null rate, model version.
+6. Make model-serving code an explicit boundary (`backend/services` for API logic, future `src/ml` or separate service for training/inference).
+
+---
+
+## 16. Current Caveats and Gotchas
+
+High-impact implementation caveats:
+
+1. **Exchange qualification is partial.** Ticker paths are exchange-aware, but kline aggregation, depth API, trade API, and lakehouse table DDLs still have places that default to or omit `exchange`.
+2. **OKX is experimental.** Code exists and producer starts it, but WebSocket subscription handling should be validated before treating OKX as production active-active.
+3. **Order book API key mismatch.** Writer uses `orderbook:{exchange}:{symbol}`; API reads `orderbook:{symbol}`.
+4. **Trades API key mismatch.** Writer uses `ticker:history:{exchange}:{symbol}`; API reads `ticker:history:{symbol}` and returns ticker-level movements, not real aggregate trades.
+5. **Market overview placeholder.** `/api/market/overview` currently returns zero/default data; heatmap/rankings paths query Trino helpers.
+6. **Dagster loading should be verified.** Assets/schedules exist, but no explicit `Definitions` object is present in `orchestration/assets.py`.
+7. **Single WebSocket endpoint.** Backend exposes `/api/stream/all`; older frontend helper `subscribeCandle()` points to `/api/stream`.
+
+General gotchas:
+
+1. **Time units:** Backend API uses milliseconds; lightweight-charts uses seconds.
+2. **Timeframe casing:** UI labels may be uppercase; backend interval keys must be lowercase.
+3. **Redis sorted set dedup:** For candles, remove old score with `ZREMRANGEBYSCORE` before `ZADD`.
+4. **Ticker freshness:** Only use ticker to enrich live aggregated candles when ticker is newer than source candles.
+5. **Influx scroll-left:** Use absolute `range(start: RFC3339, stop: RFC3339)`.
+6. **Flink writer env vars:** Read env vars inside `open()` for functions shipped to workers.
+7. **Schema changes:** Avro changes require producer, Flink, Spark, and tests to change together.
+8. **Nginx dev TLS:** Port 80 redirects to HTTPS; self-signed cert is expected in dev.
+9. **Python versions:** Backend/producer/backfill Dockerfiles use Python 3.11. Spark and Flink images install `python3` inside their containers. Do not force Python 3.12+ without validating PyFlink/Spark compatibility.
+10. **Do not delete state manually:** Flink checkpoints, InfluxDB data, MinIO/Iceberg objects, Redis volumes, and Kafka volumes need explicit operator approval before destructive changes.
+
+---
+
+## 17. Safe Change Checklist
+
+For backend changes:
+
+- Keep route handlers thin.
+- Put business logic in `backend/services/`.
+- Use `backend/core/config.py`, `backend/core/constants.py`, and connection singletons.
+- Add or update tests for endpoint behavior and service logic.
+
+For frontend changes:
+
+- Keep API calls in `frontend/src/services/*`.
+- Keep shared types in `frontend/src/types/index.ts`.
+- Use `useI18n()` for user-facing strings.
+- Preserve ms-to-seconds conversion at service boundary.
+- Run `npm run typecheck` and `npm run build` when touching TypeScript.
+
+For data pipeline changes:
+
+- Keep Avro schemas synchronized end-to-end.
+- Preserve `exchange` and `symbol` through keys, state, tables, and APIs.
+- Validate Flink serialization behavior.
+- Test dedup and out-of-order candle aggregation.
+
+For infrastructure changes:
+
+- Every service must have a `profiles` key or be an extension/template service with `dont-start`.
+- Add memory limits and health checks to services that accept connections.
+- Validate with `docker compose --profile <profile> config`.
+
+---
+
+## 18. Reference Files
+
+| File | Purpose |
+|---|---|
+| `docs/SYSTEM.md` | Current system map and technical reference |
+| `docs/CHANGELOG.md` | Project history |
+| `AGENTS.md` | AI agent workflow and coding rules |
+| `README.md` | User-facing overview and setup |
+| `docker-compose.yml` | Runtime service graph |
+| `.env.example` | Environment variable template |
+| `Makefile` | Common operational commands |
+| `schemas/*.avsc` | Kafka data contracts |
+
+---
+
+Document version: **4.0**
+Maintained by: human contributors and AI coding agents.
