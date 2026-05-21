@@ -71,6 +71,54 @@ export interface NewsItem {
   symbols: string[];
 }
 
+export interface NewsArticle {
+  id: string;
+  source: string;
+  title: string;
+  summary: string;
+  url: string;
+  author?: string;
+  published_at: number | string;
+  image_url?: string;
+  tags: string[];
+  symbols: string[];
+  sentiment_score: number;
+  sentiment_label: string;
+  language?: string;
+  region?: string;
+}
+
+export interface TrendingSymbol {
+  symbol: string;
+  mention_count: number;
+  avg_sentiment: number;
+}
+
+export interface NewsFilters {
+  limit?: number;
+  hours?: number;
+  source?: string;
+  symbol?: string;
+  query?: string;
+}
+
+export interface MarketMetrics {
+  total_symbols: number;
+  total_market_cap: number;
+  total_volume_24h: number;
+  btc_dominance: number;
+  eth_dominance?: number;
+  btc_price: number;
+}
+
+export interface TopMover {
+  symbol: string;
+  price: number;
+  change_24h_pct: number;
+  volume_24h: number;
+  rank?: number;
+}
+
 /** Symbol info from /api/symbols */
 export interface SymbolInfo {
   symbol: string;
@@ -182,8 +230,11 @@ export interface AuthResult {
   error?: string;
 }
 
-/** Supported timeframe string literals */
-export type Timeframe = "1s" | "1m" | "5m" | "15m" | "1H" | "4H" | "1D" | "1W";
+/** Supported timeframe keys: lowercase for API calls, labels live in constants/timeframes.ts. */
+export type TimeframeKey = "1s" | "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "1w";
+export type Timeframe = TimeframeKey;
+
+export type ChartType = "candles" | "line" | "area" | "bars";
 
 /** Watchlist filter mode */
 export type WatchlistFilter = "all" | "starred";

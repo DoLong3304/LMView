@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
-import type { Drawing, DataPoint } from '../types';
+import type { Drawing, DataPoint } from "@/types";
 
 interface ToolbarPosition {
   x: number;

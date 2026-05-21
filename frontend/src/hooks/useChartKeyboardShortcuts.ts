@@ -1,5 +1,5 @@
 import { useEffect, useCallback, useRef } from 'react';
-import type { Drawing, DataPoint, Command } from '../types';
+import type { Drawing, DataPoint, Command } from "@/types";
 
 interface UseChartKeyboardShortcutsProps {
   drawings: Drawing[];

@@ -5,7 +5,7 @@
  * with localStorage caching (24h TTL) and a bundled fallback map.
  */
 
-import fallbackSymbolMeta, { type SymbolMetaEntry } from "../data/fallbackSymbolMeta";
+import fallbackSymbolMeta, { type SymbolMetaEntry } from "@/data/fallbackSymbolMeta";
 
 const CACHE_KEY = "symbol_meta_cache";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours

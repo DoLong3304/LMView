@@ -5,7 +5,7 @@
  * Designed to support user accounts in the future while working with anonymous users now.
  */
 
-import type { Drawing } from '../types';
+import type { Drawing } from "@/types";
 
 export interface ChartStorageScope {
   userId?: string;

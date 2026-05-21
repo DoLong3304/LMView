@@ -3,7 +3,7 @@ import {
   getSymbolMetadata,
   lookupSymbol,
   type SymbolMetaEntry,
-} from "../services/symbolMetaService";
+} from "@/services/symbolMetaService";
 
 interface UseSymbolMetaResult {
   /** Look up metadata for a Binance pair like "BTCUSDT" */

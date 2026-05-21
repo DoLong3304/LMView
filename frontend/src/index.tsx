@@ -3,8 +3,8 @@ import ReactDOM from "react-dom/client";
 import "./index.css";
 import App from "./App";
 import { I18nProvider } from "./i18n";
-import { ToastProvider } from "./components/ToastProvider";
-import ErrorBoundary from "./components/ErrorBoundary";
+import { ToastProvider } from "@/components/ui/ToastProvider";
+import ErrorBoundary from "@/components/ui/ErrorBoundary";
 
 const root = ReactDOM.createRoot(
   document.getElementById("root") as HTMLElement,

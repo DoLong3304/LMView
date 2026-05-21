@@ -1,45 +1,55 @@
-import { 
-  generateMockMarketOverview, 
-  generateMockGainers, 
-  generateMockLosers, 
-  generateMockNews 
-} from "../mock/mockDataGenerator";
+import { DATA_SOURCE } from "@/constants/env";
+import { apiGet, buildQuery } from "@/services/apiClient";
+import {
+  generateMockGainers,
+  generateMockLosers,
+  generateMockMarketOverview,
+} from "@/data/mockDataGenerator";
+import type { MarketMetrics, TopMover } from "@/types";
 
-const DATA_SOURCE = import.meta.env.VITE_DATA_SOURCE === "mock" ? "mock" : "api";
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
-
-export async function fetchMarketOverview() {
-  if (DATA_SOURCE === "mock") {
-    return { data: generateMockMarketOverview() };
+function unwrapData<T>(payload: T | { data: T }): T {
+  if (payload && typeof payload === "object" && "data" in payload) {
+    return (payload as { data: T }).data;
   }
-  const res = await fetch(`${API_BASE_URL}/market/overview`);
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  return res.json();
+  return payload as T;
 }
 
-export async function fetchTopGainers(limit: number = 5) {
-  if (DATA_SOURCE === "mock") {
-    return { data: generateMockGainers().slice(0, limit) };
-  }
-  const res = await fetch(`${API_BASE_URL}/market/gainers?limit=${limit}`);
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  return res.json();
+function normalizeMover(item: Partial<TopMover>): TopMover {
+  return {
+    symbol: item.symbol || "",
+    price: Number(item.price || 0),
+    change_24h_pct: Number(item.change_24h_pct || 0),
+    volume_24h: Number(item.volume_24h || 0),
+    rank: item.rank,
+  };
 }
 
-export async function fetchTopLosers(limit: number = 5) {
+export async function fetchMarketOverview(): Promise<MarketMetrics> {
   if (DATA_SOURCE === "mock") {
-    return { data: generateMockLosers().slice(0, limit) };
+    return generateMockMarketOverview();
   }
-  const res = await fetch(`${API_BASE_URL}/market/losers?limit=${limit}`);
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  return res.json();
+  const payload = await apiGet<MarketMetrics | { data: MarketMetrics }>("/market/overview");
+  return unwrapData(payload);
 }
 
-export async function fetchLatestMarketNews(limit: number = 100, hours: number = 24) {
+export async function fetchTopGainers(limit: number = 5): Promise<TopMover[]> {
   if (DATA_SOURCE === "mock") {
-    return { data: generateMockNews(limit) };
+    return generateMockGainers().slice(0, limit);
   }
-  const res = await fetch(`${API_BASE_URL}/news/latest?limit=${limit}&hours=${hours}`);
-  if (!res.ok) throw new Error(`API error ${res.status}`);
-  return res.json();
+  const payload = await apiGet<TopMover[] | { data?: TopMover[]; gainers?: TopMover[] }>(
+    `/market/gainers?${buildQuery({ limit })}`,
+  );
+  const items = Array.isArray(payload) ? payload : payload.gainers || payload.data || [];
+  return items.map(normalizeMover);
+}
+
+export async function fetchTopLosers(limit: number = 5): Promise<TopMover[]> {
+  if (DATA_SOURCE === "mock") {
+    return generateMockLosers().slice(0, limit);
+  }
+  const payload = await apiGet<TopMover[] | { data?: TopMover[]; losers?: TopMover[] }>(
+    `/market/losers?${buildQuery({ limit })}`,
+  );
+  const items = Array.isArray(payload) ? payload : payload.losers || payload.data || [];
+  return items.map(normalizeMover);
 }

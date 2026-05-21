@@ -1,6 +1,6 @@
 import { renderHook } from '@testing-library/react';
 import { useChartKeyboardShortcuts } from '../useChartKeyboardShortcuts';
-import type { Drawing } from '../../types';
+import type { Drawing } from "@/types";
 
 const mockDrawings: Drawing[] = [
   {

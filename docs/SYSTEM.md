@@ -1,7 +1,7 @@
 # LMView System Documentation
 
 > Complete project map for humans and coding agents.
-> Last reviewed from code: 2026-05-21.
+> Last reviewed from code: 2026-05-22.
 
 ---
 
@@ -14,7 +14,7 @@
 - A serving layer for REST/WebSocket APIs.
 - A React TradingView-style frontend.
 
-Current project version from `docs/CHANGELOG.md`: **0.12.3**.
+Current project version from `docs/CHANGELOG.md`: **0.14.0**.
 
 Current repo state at this audit:
 
@@ -25,7 +25,7 @@ Current repo state at this audit:
 - Production + monitoring + logging count: **36** services.
 - Backend tests in source: **193 pytest test functions** across **24 Python test files**.
 - Frontend hook tests in source: **35 Jest-style specs** across **2 files**.
-- Existing uncommitted user change observed: `frontend/tsconfig.json`.
+- Frontend source layout follows the `0.14.0` structure refactor described in this document.
 
 This document describes the code as it exists now, including caveats where implementation and intended architecture differ.
 
@@ -82,13 +82,20 @@ src/
   news/                     News scraping and sentiment analysis
 
 frontend/
-  src/App.tsx               Main dashboard shell
-  src/components/           Chart, toolbars, panels, market/news UI
-  src/services/             API, market overview, symbol metadata, drawing storage
-  src/hooks/                API, symbol metadata, replay, zoom, keyboard shortcuts
+  src/App.tsx               Main dashboard state orchestration
+  src/@types/               Vite and global TypeScript declarations
+  src/components/layout/    Shared app shell components such as Header and LeftSidebar
+  src/components/ui/        Shared UI providers/widgets such as ToastProvider and SystemHealthCard
+  src/constants/            Env, timeframe, and market/news constants
+  src/data/                 Static and mock data such as mockDataGenerator and symbol metadata fallback
+  src/features/             Feature modules: auth, chart, drawing, market, replay, watchlist
+  src/hooks/                Reusable hooks: API calls, symbol metadata, replay, zoom, shortcuts
   src/i18n/                 English/Vietnamese translation system
-  src/mock/                 Mock market/news data generator
+  src/pages/                Route-level market overview and news pages
+  src/routes/               Local route/view definitions
+  src/services/             API clients and service functions
   src/types/                Shared TypeScript types
+  src/utils/                Storage and error helpers
 
 orchestration/
   assets.py                 Dagster assets and schedules
@@ -505,16 +512,33 @@ Build scripts from `frontend/package.json`:
 
 `frontend/tsconfig.json` uses strict TypeScript, `moduleResolution: bundler`, `@/*` alias, and excludes `src/**/__tests__`.
 
+Frontend source organization:
+
+| Folder | Role |
+|---|---|
+| `@types/` | Global TypeScript/Vite declarations |
+| `components/layout/` | Cross-feature app shell layout |
+| `components/ui/` | Shared UI widgets/providers |
+| `constants/` | Env, timeframe, market/news constants |
+| `data/` | Static/mock data only |
+| `features/` | Feature-owned UI and logic slices |
+| `pages/` | Route-level screens |
+| `routes/` | Local route/view definitions |
+| `services/` | API clients and service functions |
+| `types/` | Shared app types |
+| `utils/` | Generic helpers |
+
 ### 10.1 Main UI Areas
 
 | Area | Files |
 |---|---|
-| App shell | `App.tsx`, `Header.tsx`, `LeftSidebar.tsx`, `RightPanel.tsx`, `TopToolbar.tsx` |
-| Chart | `CandlestickChart.tsx`, `chart/*`, `ChartOverlay.tsx` |
-| Drawing tools | `DrawingToolbar.tsx`, `DrawingContextToolbar.tsx`, `ToolSettingsPopup.tsx`, `chartStorageService.ts` |
-| Market/news | `MarketOverviewPage.tsx`, `NewsPageRedesigned.tsx`, `MarketNews.tsx`, `marketOverviewService.ts` |
-| Replay | `ReplayButton.tsx`, `ReplayControls.tsx`, `useReplayMode.ts` |
-| Data access | `marketDataService.ts`, `symbolMetaService.ts`, `useApiCall.ts`, `useSymbolMeta.ts` |
+| App shell | `App.tsx`, `components/layout/Header.tsx`, `components/layout/LeftSidebar.tsx`, `features/watchlist/components/RightPanel.tsx` |
+| Chart | `features/chart/CandlestickChart.tsx`, `DateRangePicker.tsx`, `MarketSelector.tsx`, `IndicatorPanel.tsx`, `OHLCVBar.tsx`, `OscillatorPane.tsx`, `chartConstants.ts`, `indicatorUtils.ts` |
+| Drawing tools | `features/drawing/components/*`, `services/chartStorageService.ts` |
+| Market/news | `pages/MarketOverviewPage.tsx`, `pages/NewsPage.tsx`, `features/market/components/*`, `services/marketOverviewService.ts`, `services/newsService.ts` |
+| Replay | `features/replay/components/ReplayControls.tsx`, `hooks/useReplayMode.ts` |
+| Auth placeholder | `features/auth/AuthContext.tsx`, `features/auth/AuthModal.tsx` |
+| Data access | `services/apiClient.ts`, `marketDataService.ts`, `healthService.ts`, `symbolMetaService.ts`, `useApiCall.ts`, `useSymbolMeta.ts` |
 | i18n | `i18n/index.tsx`, `i18n/translations.ts` |
 
 ### 10.2 Data Mode
@@ -528,7 +552,7 @@ VITE_API_BASE_URL=/api
 
 Behavior:
 
-- `mock`: `frontend/src/mock/mockDataGenerator.ts` simulates candles, order books, trades, tickers, and news.
+- `mock`: `frontend/src/data/mockDataGenerator.ts` simulates candles, order books, trades, tickers, and news.
 - `api`: services call FastAPI through `/api` by default.
 
 All new frontend API access should live in service files, not directly inside components.
@@ -793,6 +817,10 @@ For frontend changes:
 
 - Keep API calls in `frontend/src/services/*`.
 - Keep shared types in `frontend/src/types/index.ts`.
+- Keep shared shell/UI components in `frontend/src/components/layout` or `frontend/src/components/ui`.
+- Keep feature-specific UI under `frontend/src/features/<feature>/`.
+- Keep mock/static frontend data in `frontend/src/data/`.
+- Keep env/timeframe/market constants in `frontend/src/constants/`.
 - Use `useI18n()` for user-facing strings.
 - Preserve ms-to-seconds conversion at service boundary.
 - Run `npm run typecheck` and `npm run build` when touching TypeScript.
@@ -827,5 +855,5 @@ For infrastructure changes:
 
 ---
 
-Document version: **4.0**
+Document version: **4.1**
 Maintained by: human contributors and AI coding agents.

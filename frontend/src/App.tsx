@@ -1,24 +1,20 @@
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import CandlestickChart from "./components/CandlestickChart";
-import TopToolbar from "./components/TopToolbar";
-import LeftSidebar from "./components/LeftSidebar";
-import RightPanel from "./components/RightPanel";
-import ChartOverlay from "./components/ChartOverlay";
-import DrawingContextToolbar from "./components/DrawingContextToolbar";
-import { ReplayControls } from "./components/ReplayControls";
-import { fetchTickers, fetchSymbols } from "./services/marketDataService";
-import { loadFromStorage, saveToStorage } from "./utils/storageHelpers";
-import { loadDrawings, saveDrawings, deleteDrawings } from "./services/chartStorageService";
-import { useChartKeyboardShortcuts } from "./hooks/useChartKeyboardShortcuts";
-import { useDrawingToolbarPosition } from "./hooks/useDrawingToolbarPosition";
-import { useReplayMode } from "./hooks/useReplayMode";
-import { useI18n } from "./i18n";
-import type { Candle, Drawing, SymbolInfo, Ticker } from "./types";
-
-const FALLBACK_SYMBOLS = [
-  "BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT",
-  "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT",
-];
+import Header from "@/components/layout/Header";
+import LeftSidebar from "@/components/layout/LeftSidebar";
+import { CandlestickChart } from "@/features/chart";
+import ChartOverlay from "@/features/drawing/components/ChartOverlay";
+import DrawingContextToolbar from "@/features/drawing/components/DrawingContextToolbar";
+import { ReplayControls } from "@/features/replay/components/ReplayControls";
+import RightPanel from "@/features/watchlist/components/RightPanel";
+import { FALLBACK_SYMBOLS } from "@/constants/market";
+import { fetchTickers, fetchSymbols } from "@/services/marketDataService";
+import { loadFromStorage, saveToStorage } from "@/utils/storageHelpers";
+import { loadDrawings, saveDrawings, deleteDrawings } from "@/services/chartStorageService";
+import { useChartKeyboardShortcuts } from "@/hooks/useChartKeyboardShortcuts";
+import { useDrawingToolbarPosition } from "@/hooks/useDrawingToolbarPosition";
+import { useReplayMode } from "@/hooks/useReplayMode";
+import { useI18n } from "@/i18n";
+import type { Candle, ChartType, Drawing, SymbolInfo, Ticker, TimeframeKey } from "@/types";
 
 interface WatchlistItemData {
   symbol: string;
@@ -43,8 +39,8 @@ const TradingDashboard: React.FC = () => {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [selectedDrawingIds, setSelectedDrawingIds] = useState<(string | number)[]>([]);
   const [magnetEnabled, setMagnetEnabled] = useState(false);
-  const [currentTimeframe, setCurrentTimeframe] = useState("1m");
-  const [chartType, setChartType] = useState<"candles" | "line" | "area" | "bars">("candles");
+  const [currentTimeframe, setCurrentTimeframe] = useState<TimeframeKey>("1m");
+  const [chartType, setChartType] = useState<ChartType>("candles");
   const [isDrawing, setIsDrawing] = useState(false);
   const [selectedSymbol, setSelectedSymbol] = useState<string>(() => {
     const stored = loadFromStorage("app_selectedSymbol", "BTCUSDT");
@@ -54,9 +50,9 @@ const TradingDashboard: React.FC = () => {
   const [starredSymbols, setStarredSymbols] = useState<string[]>(() =>
     loadFromStorage("app_starred", []),
   );
-  const [symbols, setSymbols] = useState<string[]>(FALLBACK_SYMBOLS);
+  const [symbols, setSymbols] = useState<string[]>([...FALLBACK_SYMBOLS]);
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItemData[]>(() =>
-    buildWatchlist(FALLBACK_SYMBOLS),
+    buildWatchlist([...FALLBACK_SYMBOLS]),
   );
   const [connError, setConnError] = useState(false);
 
@@ -298,7 +294,7 @@ const TradingDashboard: React.FC = () => {
     // Drawings will be loaded by useEffect
   }, []);
 
-  const handleTimeframeChange = useCallback((timeframe: string) => {
+  const handleTimeframeChange = useCallback((timeframe: TimeframeKey) => {
     setCurrentTimeframe(timeframe);
     // Drawings will be loaded by useEffect
   }, []);
@@ -408,8 +404,8 @@ const TradingDashboard: React.FC = () => {
   const handleAddAlert = useCallback(() => {
     // TODO: Implement alert dialog in next session
     console.log('[App] Add alert for drawing:', selectedDrawing?.id);
-    alert('Alert feature will be implemented in Step 5');
-  }, [selectedDrawing]);
+    alert(t("alertFeatureSoon"));
+  }, [selectedDrawing, t]);
 
   // Resizable right sidebar
   const SIDEBAR_MIN = 280;
@@ -439,8 +435,7 @@ const TradingDashboard: React.FC = () => {
 
   return (
     <div className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
-      {/* Top Toolbar */}
-      <TopToolbar
+      <Header
         selectedSymbol={selectedSymbol}
         symbols={symbols}
         onSymbolChange={handleSymbolSelect}

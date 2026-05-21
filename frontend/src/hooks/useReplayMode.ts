@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import type { Candle } from '../types';
+import type { Candle } from "@/types";
 
 export interface ReplayState {
   isReplayActive: boolean;

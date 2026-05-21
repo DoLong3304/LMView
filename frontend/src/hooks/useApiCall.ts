@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { categorizeError, type AppError } from "../utils/errors";
+import { categorizeError, type AppError } from "@/utils/errors";
 
 interface UseApiCallOptions {
   /** Number of automatic retry attempts for retryable errors (default: 2) */

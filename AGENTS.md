@@ -94,13 +94,20 @@ Applies to `frontend/`.
 - Components: PascalCase `.tsx`.
 - Services/utils: camelCase `.ts`.
 - Shared types live in `frontend/src/types/index.ts`.
+- Global TypeScript declarations live in `frontend/src/@types/`.
+- Shared shell components live in `frontend/src/components/layout/`.
+- Shared reusable UI/providers live in `frontend/src/components/ui/`.
+- Feature-specific UI lives in `frontend/src/features/<feature>/`.
+- Route-level screens live in `frontend/src/pages/`.
+- Static/mock data lives in `frontend/src/data/`.
+- Env, timeframe, and market constants live in `frontend/src/constants/`.
 - User-facing strings use `useI18n()`.
 - API calls belong in `frontend/src/services/*`, not components.
 - Use `useApiCall` for fetch flows that need retry/toast/error states.
 - Use `useSymbolMeta` for logos/names.
 - Convert backend milliseconds to lightweight-charts seconds at service boundary.
 - UI may show `1H`, `4H`, `1D`, `1W`; API interval params must be lowercase.
-- `VITE_DATA_SOURCE=mock` uses `frontend/src/mock/mockDataGenerator.ts`; default is API mode.
+- `VITE_DATA_SOURCE=mock` uses `frontend/src/data/mockDataGenerator.ts`; default is API mode.
 
 Frontend verification:
 
@@ -169,7 +176,7 @@ Read `docs/SYSTEM.md` before changing these:
 - `src/producer/main.py`
 - `src/exchanges/*`
 - `src/lakehouse/pipeline.py`
-- `frontend/src/components/CandlestickChart.tsx`
+- `frontend/src/features/chart/CandlestickChart.tsx`
 - `frontend/src/services/marketDataService.ts`
 
 Current caveats to keep in mind:
