@@ -128,6 +128,7 @@ export interface SymbolInfo {
 
 /** Symbol metadata (icon, name, category) */
 export interface SymbolMeta {
+  symbol: string;
   icon: string;
   category: string;
   name: string;
@@ -261,4 +262,3 @@ export interface HistoryState {
   commands: Command[];
   currentIndex: number;
 }
-

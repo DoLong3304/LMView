@@ -5,7 +5,10 @@
  * with localStorage caching (24h TTL) and a bundled fallback map.
  */
 
-import fallbackSymbolMeta, { type SymbolMetaEntry } from "@/data/fallbackSymbolMeta";
+import fallbackSymbolMeta, {
+  DEFAULT_SYMBOL_ICON,
+  type SymbolMetaEntry,
+} from "@/data/fallbackSymbolMeta";
 
 const CACHE_KEY = "symbol_meta_cache";
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -20,21 +23,61 @@ interface CoinGeckoMarketItem {
 
 interface CachedMeta {
   timestamp: number;
-  data: Record<string, SymbolMetaEntry>;
+  data: Record<string, StoredSymbolMetaEntry>;
 }
+
+type StoredSymbolMetaEntry = Omit<SymbolMetaEntry, "icon"> & {
+  icon?: string;
+  logoUrl?: string;
+};
 
 /**
  * Extract the base coin symbol from a Binance trading pair.
  * e.g. "BTCUSDT" → "BTC", "1INCHUSDT" → "1INCH"
  */
 function extractBaseSymbol(pair: string): string {
+  const normalizedPair = pair.toUpperCase().replace(/[^A-Z0-9]/g, "");
   const suffixes = ["USDT", "BUSD", "USDC", "BTC", "ETH", "BNB"];
   for (const suffix of suffixes) {
-    if (pair.endsWith(suffix) && pair.length > suffix.length) {
-      return pair.slice(0, -suffix.length);
+    if (normalizedPair.endsWith(suffix) && normalizedPair.length > suffix.length) {
+      return normalizedPair.slice(0, -suffix.length);
     }
   }
-  return pair;
+  return normalizedPair;
+}
+
+function normalizeEntry(entry: StoredSymbolMetaEntry): SymbolMetaEntry {
+  const symbol = entry.symbol.toUpperCase();
+  const icon = entry.icon || entry.logoUrl || DEFAULT_SYMBOL_ICON;
+  return {
+    ...entry,
+    id: entry.id || symbol.toLowerCase(),
+    name: entry.name || symbol,
+    symbol,
+    icon,
+    logoUrl: entry.logoUrl || icon,
+    category: entry.category || "crypto",
+  };
+}
+
+function normalizeMetadataMap(
+  data: Record<string, StoredSymbolMetaEntry>,
+): Record<string, SymbolMetaEntry> {
+  return Object.fromEntries(
+    Object.entries(data).map(([key, entry]) => [key.toUpperCase(), normalizeEntry(entry)]),
+  );
+}
+
+function createFallbackMeta(pair: string): SymbolMetaEntry {
+  const base = extractBaseSymbol(pair);
+  return {
+    id: base.toLowerCase(),
+    name: base,
+    symbol: base,
+    icon: DEFAULT_SYMBOL_ICON,
+    logoUrl: DEFAULT_SYMBOL_ICON,
+    category: "crypto",
+  };
 }
 
 /**
@@ -56,6 +99,7 @@ async function fetchFromCoinGecko(): Promise<Record<string, SymbolMetaEntry>> {
         id: item.id,
         name: item.name,
         symbol: key,
+        icon: item.image || DEFAULT_SYMBOL_ICON,
         logoUrl: item.image,
         category: "crypto",
       };
@@ -74,7 +118,7 @@ function readCache(): Record<string, SymbolMetaEntry> | null {
     if (!raw) return null;
     const cached: CachedMeta = JSON.parse(raw);
     if (Date.now() - cached.timestamp > CACHE_TTL_MS) return null;
-    return cached.data;
+    return normalizeMetadataMap(cached.data);
   } catch {
     return null;
   }
@@ -104,12 +148,12 @@ export async function getSymbolMetadata(): Promise<Record<string, SymbolMetaEntr
   try {
     const fresh = await fetchFromCoinGecko();
     // Merge with fallback to ensure we have everything
-    const merged = { ...fallbackSymbolMeta, ...fresh };
+    const merged = normalizeMetadataMap({ ...fallbackSymbolMeta, ...fresh });
     writeCache(merged);
     return merged;
   } catch {
     // 3. Fall back to bundled static data
-    return { ...fallbackSymbolMeta };
+    return normalizeMetadataMap({ ...fallbackSymbolMeta });
   }
 }
 
@@ -119,9 +163,10 @@ export async function getSymbolMetadata(): Promise<Record<string, SymbolMetaEntr
 export function lookupSymbol(
   meta: Record<string, SymbolMetaEntry>,
   pair: string,
-): SymbolMetaEntry | null {
+): SymbolMetaEntry {
   const base = extractBaseSymbol(pair);
-  return meta[base] || null;
+  return meta[base] || fallbackSymbolMeta[base] || createFallbackMeta(pair);
 }
 
+export { DEFAULT_SYMBOL_ICON };
 export type { SymbolMetaEntry };

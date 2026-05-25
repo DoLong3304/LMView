@@ -1,8 +1,25 @@
 import React, { useState, useMemo } from "react";
-import { Star, Search, TrendingUp, TrendingDown } from "lucide-react";
+import { ArrowLeftRight, BookOpen, Star, Search, TrendingUp, TrendingDown } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { useSymbolMeta } from "@/hooks/useSymbolMeta";
+import { DEFAULT_SYMBOL_ICON } from "@/services/symbolMetaService";
+import OrderBook from "@/features/market/components/OrderBook";
+import RecentTrades from "@/features/market/components/RecentTrades";
 import type { WatchlistItem, Candle } from "@/types";
+import type { TranslationKey } from "@/i18n/translations";
+
+type RightPanelTab = "watchlist" | "orderBook" | "recentTrades";
+
+const PANEL_TABS: Array<{
+  id: RightPanelTab;
+  labelKey: TranslationKey;
+  icon: LucideIcon;
+}> = [
+  { id: "watchlist", labelKey: "watchlist", icon: Star },
+  { id: "orderBook", labelKey: "orderBook", icon: BookOpen },
+  { id: "recentTrades", labelKey: "recentTrades", icon: ArrowLeftRight },
+];
 
 interface RightPanelProps {
   items: WatchlistItem[];
@@ -27,6 +44,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
   const { getMeta } = useSymbolMeta();
   const [filter, setFilter] = useState<"all" | "starred">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [activeTab, setActiveTab] = useState<RightPanelTab>("watchlist");
 
   // Sort: starred first, then by % change (gainers → losers)
   const sortedItems = useMemo(() => {
@@ -111,25 +129,25 @@ const RightPanel: React.FC<RightPanelProps> = ({
   const positionPct = lastCandle ? ((lastCandle.close - low24) / rangeSpan) * 100 : 50;
 
   return (
-    <div className="bg-gray-900 border-l border-gray-700 flex flex-col overflow-hidden" style={{ width }}>
+    <div className="bg-gray-900 border-l border-gray-700 flex h-full flex-col overflow-hidden" style={{ width }}>
+      <div className="px-3 py-2 border-b border-gray-800 bg-gray-900">
+        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+          {t("overview")}
+        </div>
+      </div>
+
       {/* Coin Summary - Fixed at top */}
       <div className="px-3 py-3 border-b border-gray-800 bg-gray-850">
         {/* Symbol header */}
         <div className="flex items-center gap-2 mb-2">
-          {meta?.logoUrl ? (
-            <img
-              src={meta.logoUrl}
-              alt={meta.name}
-              className="w-6 h-6 rounded-full"
-              onError={(e) => {
-                (e.target as HTMLImageElement).style.display = "none";
-              }}
-            />
-          ) : (
-            <div className="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center text-xs text-gray-300">
-              {selectedSymbol.charAt(0)}
-            </div>
-          )}
+          <img
+            src={meta.icon}
+            alt={meta.name}
+            className="w-6 h-6 rounded-full"
+            onError={(e) => {
+              e.currentTarget.src = DEFAULT_SYMBOL_ICON;
+            }}
+          />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
               <span className="text-sm font-semibold text-white">{selectedSymbol}</span>
@@ -234,6 +252,26 @@ const RightPanel: React.FC<RightPanelProps> = ({
         </div>
       )}
 
+      <div className="grid grid-cols-3 gap-1 border-b border-gray-800 bg-gray-900 px-2 py-2">
+        {PANEL_TABS.map(({ id, labelKey, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setActiveTab(id)}
+            className={`flex min-w-0 items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-medium transition-colors ${
+              activeTab === id
+                ? "bg-blue-600 text-white"
+                : "text-gray-400 hover:bg-gray-800 hover:text-white"
+            }`}
+            title={t(labelKey)}
+          >
+            <Icon size={12} className={id === "watchlist" && activeTab === id ? "fill-white" : ""} />
+            <span className="truncate">{t(labelKey)}</span>
+          </button>
+        ))}
+      </div>
+
+      {activeTab === "watchlist" && (
+        <>
       {/* Filter tabs */}
       <div className="px-3 py-2 border-b border-gray-800 flex-shrink-0">
         <div className="flex items-center gap-2">
@@ -329,6 +367,20 @@ const RightPanel: React.FC<RightPanelProps> = ({
           })
         )}
       </div>
+        </>
+      )}
+
+      {activeTab === "orderBook" && (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <OrderBook symbol={selectedSymbol} />
+        </div>
+      )}
+
+      {activeTab === "recentTrades" && (
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <RecentTrades symbol={selectedSymbol} />
+        </div>
+      )}
     </div>
   );
 };

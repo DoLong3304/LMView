@@ -9,14 +9,20 @@ export interface SymbolMetaEntry {
   id: string;
   name: string;
   symbol: string;
-  logoUrl: string;
+  icon: string;
+  logoUrl?: string;
   category: string;
 }
 
+type RawSymbolMetaEntry = Omit<SymbolMetaEntry, "icon"> & { icon?: string };
+
 const CG = "https://assets.coingecko.com/coins/images";
 
+export const DEFAULT_SYMBOL_ICON =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='32' fill='%231f2937'/%3E%3Cpath d='M32 10a22 22 0 1 1 0 44 22 22 0 0 1 0-44Zm0 6a16 16 0 1 0 0 32 16 16 0 0 0 0-32Z' fill='%239ca3af'/%3E%3Cpath d='M22 34h20v5H22v-5Zm4-9h12v5H26v-5Z' fill='%23e5e7eb'/%3E%3C/svg%3E";
+
 // Map: Binance symbol (without USDT) → metadata
-const fallbackSymbolMeta: Record<string, SymbolMetaEntry> = {
+const rawFallbackSymbolMeta: Record<string, RawSymbolMetaEntry> = {
   BTC: { id: "bitcoin", name: "Bitcoin", symbol: "BTC", logoUrl: `${CG}/1/small/bitcoin.png`, category: "crypto" },
   ETH: { id: "ethereum", name: "Ethereum", symbol: "ETH", logoUrl: `${CG}/279/small/ethereum.png`, category: "crypto" },
   BNB: { id: "binancecoin", name: "BNB", symbol: "BNB", logoUrl: `${CG}/825/small/bnb.png`, category: "crypto" },
@@ -110,5 +116,19 @@ const fallbackSymbolMeta: Record<string, SymbolMetaEntry> = {
   SUPER: { id: "superfarm", name: "SuperVerse", symbol: "SUPER", logoUrl: `${CG}/14040/small/SuperVerse_Logo_256x256.png`, category: "crypto" },
   BLUR: { id: "blur", name: "Blur", symbol: "BLUR", logoUrl: `${CG}/28453/small/blur.png`, category: "crypto" },
 };
+
+const fallbackSymbolMeta: Record<string, SymbolMetaEntry> = Object.fromEntries(
+  Object.entries(rawFallbackSymbolMeta).map(([key, entry]) => {
+    const icon = entry.icon || entry.logoUrl || DEFAULT_SYMBOL_ICON;
+    return [
+      key,
+      {
+        ...entry,
+        icon,
+        logoUrl: entry.logoUrl || icon,
+      },
+    ];
+  }),
+) as Record<string, SymbolMetaEntry>;
 
 export default fallbackSymbolMeta;

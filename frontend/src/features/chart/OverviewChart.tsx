@@ -1,6 +1,7 @@
 import React from "react";
 import { useI18n } from "@/i18n";
 import { useSymbolMeta } from "@/hooks/useSymbolMeta";
+import { DEFAULT_SYMBOL_ICON } from "@/services/symbolMetaService";
 import { TrendingUp, TrendingDown } from "lucide-react";
 import type { Candle } from "@/types";
 
@@ -68,20 +69,14 @@ const OverviewChart: React.FC<OverviewChartProps> = ({ symbol, candles }) => {
     <div className="h-full flex flex-col p-3 overflow-y-auto">
       {/* Header: symbol + live price */}
       <div className="flex items-center gap-2 mb-2">
-        {meta?.logoUrl ? (
-          <img
-            src={meta.logoUrl}
-            alt={meta.name}
-            className="w-6 h-6 rounded-full"
-            onError={(e) => {
-              (e.target as HTMLImageElement).style.display = "none";
-            }}
-          />
-        ) : (
-          <span className="w-6 h-6 rounded-full bg-gray-600 flex items-center justify-center text-xs text-gray-300">
-            {symbol.charAt(0)}
-          </span>
-        )}
+        <img
+          src={meta.icon}
+          alt={meta.name}
+          className="w-6 h-6 rounded-full"
+          onError={(e) => {
+            e.currentTarget.src = DEFAULT_SYMBOL_ICON;
+          }}
+        />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-sm font-bold text-white truncate">

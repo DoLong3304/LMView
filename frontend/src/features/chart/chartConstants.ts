@@ -1,11 +1,29 @@
-import type { LucideIcon } from "lucide-react";
-import { BarChart3, BookOpen, ArrowLeftRight, Newspaper } from "lucide-react";
 import { TIMEFRAME_KEYS } from "@/constants/timeframes";
 import type { IndicatorSettings } from "@/types";
 
 function cssToken(name: string, fallback: string): string {
   if (typeof document === "undefined") return fallback;
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+export function getChartTheme() {
+  return {
+    background: cssToken("--lm-bg-primary", "#000000"),
+    textColor: cssToken("--lm-text-secondary", "#b0b0b0"),
+    gridColor: cssToken("--lm-grid", "#1a1a1a"),
+    borderColor: cssToken("--lm-border", "#222222"),
+    upColor: cssToken("--lm-green", "#00c853"),
+    downColor: cssToken("--lm-red", "#ff1744"),
+    crosshair: cssToken("--lm-crosshair", "#555555"),
+    crosshairLabelBg: cssToken("--lm-bg-elevated", "#1a1a1a"),
+    volumeUp: cssToken("--lm-volume-up", "rgba(0, 200, 83, 0.5)"),
+    volumeDown: cssToken("--lm-volume-down", "rgba(255, 23, 68, 0.5)"),
+    sma20: cssToken("--lm-indicator-sma20", "#fbbf24"),
+    sma50: cssToken("--lm-indicator-sma50", "#f97316"),
+    ema: cssToken("--lm-indicator-ema", "#8b5cf6"),
+    rsi: cssToken("--lm-indicator-rsi", "#06b6d4"),
+    mfi: cssToken("--lm-indicator-mfi", "#ec4899"),
+  } as const;
 }
 
 export const THEME = {
@@ -72,16 +90,6 @@ export function localTimeFormatter(time: number): string {
 }
 
 export const REALTIME_POLL_MS = 2000;
-
-export const CHART_TABS = ["chart", "orderBook", "recentTrades", "marketNews"] as const;
-export type ChartTab = (typeof CHART_TABS)[number];
-
-export const TAB_ICONS: Record<ChartTab, LucideIcon> = {
-  chart: BarChart3,
-  orderBook: BookOpen,
-  recentTrades: ArrowLeftRight,
-  marketNews: Newspaper,
-};
 
 export const DEFAULT_INDICATOR_SETTINGS: Record<string, IndicatorSettings> = {
   sma20: { period: 20, color: THEME.sma20, lineWidth: 1, visible: true, type: "SMA" },

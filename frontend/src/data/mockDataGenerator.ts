@@ -96,6 +96,10 @@ export function generateMockTickers(): Ticker[] {
     { symbol: "DOGEUSDT", price: +(0.158 + t * 0.002).toFixed(4), change24h: +(-0.6 + t * 0.1).toFixed(2) },
     { symbol: "ADAUSDT", price: +(0.72 + t * 0.01).toFixed(4), change24h: +(-0.83 + t * 0.1).toFixed(2) },
     { symbol: "AVAXUSDT", price: +(35.2 + t * 0.2).toFixed(2), change24h: +(0.33 + t * 0.1).toFixed(2) },
+    { symbol: "DOTUSDT", price: +(7.5 + t * 0.08).toFixed(3), change24h: +(-0.21 + t * 0.1).toFixed(2) },
+    { symbol: "LINKUSDT", price: +(18.5 + t * 0.12).toFixed(3), change24h: +(0.72 + t * 0.1).toFixed(2) },
+    { symbol: "MATICUSDT", price: +(0.72 + t * 0.008).toFixed(4), change24h: +(-0.44 + t * 0.1).toFixed(2) },
+    { symbol: "LTCUSDT", price: +(95 + t * 0.75).toFixed(2), change24h: +(0.18 + t * 0.1).toFixed(2) },
   ];
 }
 

@@ -3,6 +3,8 @@ import {
   Clock,
   ExternalLink,
   Flame,
+  LayoutGrid,
+  List,
   Newspaper,
   RefreshCw,
   Search,
@@ -18,10 +20,13 @@ import {
 import { useI18n } from "@/i18n";
 import type { NewsArticle, TrendingSymbol } from "@/types";
 
-const ARTICLES_PER_PAGE = 20;
+const ARTICLES_PER_PAGE = 10;
+const GRID_MODE_QUERY = "(min-width: 640px)";
+type NewsViewMode = "list" | "grid";
 
 const NewsPage: React.FC = () => {
   const { t } = useI18n();
+  const listRef = React.useRef<HTMLElement | null>(null);
   const [allArticles, setAllArticles] = useState<NewsArticle[]>([]);
   const [trendingSymbols, setTrendingSymbols] = useState<TrendingSymbol[]>([]);
   const [loading, setLoading] = useState(true);
@@ -31,6 +36,11 @@ const NewsPage: React.FC = () => {
   const [timeRange, setTimeRange] = useState(24);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
   const [currentPage, setCurrentPage] = useState(1);
+  const [viewMode, setViewMode] = useState<NewsViewMode>("list");
+  const [canUseGrid, setCanUseGrid] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.matchMedia(GRID_MODE_QUERY).matches;
+  });
 
   const filters = useMemo(
     () => ({
@@ -78,16 +88,33 @@ const NewsPage: React.FC = () => {
     return () => clearInterval(interval);
   }, [fetchNewsData, fetchTrending]);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(GRID_MODE_QUERY);
+    const syncGridAvailability = () => {
+      const available = mediaQuery.matches;
+      setCanUseGrid(available);
+      if (!available) setViewMode("list");
+    };
+
+    syncGridAvailability();
+    mediaQuery.addEventListener("change", syncGridAvailability);
+    return () => mediaQuery.removeEventListener("change", syncGridAvailability);
+  }, []);
+
   const articles = useMemo(() => {
     const startIndex = (currentPage - 1) * ARTICLES_PER_PAGE;
     return allArticles.slice(startIndex, startIndex + ARTICLES_PER_PAGE);
   }, [allArticles, currentPage]);
 
   const totalPages = Math.ceil(allArticles.length / ARTICLES_PER_PAGE);
+  const isGridView = viewMode === "grid" && canUseGrid;
+  const articleLayoutClass = isGridView
+    ? "grid grid-cols-2 xl:grid-cols-3 gap-4 pb-6"
+    : "space-y-4 pb-6";
 
   const handlePageChange = (page: number) => {
     setCurrentPage(page);
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    listRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const handleRefresh = () => {
@@ -125,7 +152,7 @@ const NewsPage: React.FC = () => {
   };
 
   return (
-    <div className="h-screen bg-gray-900 text-gray-100 flex flex-col">
+    <div className="h-full min-h-0 bg-gray-900 text-gray-100 flex flex-col">
       <div className="flex-shrink-0 p-4 md:p-6">
         <div className="mb-4">
           <h1 className="text-2xl md:text-3xl font-bold mb-2 flex items-center gap-3">
@@ -205,32 +232,62 @@ const NewsPage: React.FC = () => {
                 {t("refresh")}
               </button>
             </div>
+
+            <div className="md:col-span-2 flex items-center gap-1 rounded border border-gray-700 bg-gray-800 p-1">
+              <button
+                onClick={() => setViewMode("list")}
+                className={`flex flex-1 items-center justify-center rounded px-2 py-1.5 transition-colors ${
+                  viewMode === "list"
+                    ? "bg-blue-600 text-white"
+                    : "text-gray-400 hover:bg-gray-700 hover:text-white"
+                }`}
+                title={t("listView")}
+              >
+                <List size={16} />
+              </button>
+              {canUseGrid && (
+                <button
+                  onClick={() => setViewMode("grid")}
+                  className={`flex flex-1 items-center justify-center rounded px-2 py-1.5 transition-colors ${
+                    viewMode === "grid"
+                      ? "bg-blue-600 text-white"
+                      : "text-gray-400 hover:bg-gray-700 hover:text-white"
+                  }`}
+                  title={t("gridView")}
+                >
+                  <LayoutGrid size={16} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden px-4 md:px-6 pb-4 md:pb-6">
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 h-full">
-          <main className="lg:col-span-3 h-full overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
+      <div className="flex-1 min-h-0 overflow-hidden px-4 md:px-6 pb-4 md:pb-6">
+        <div className="grid h-full min-h-0 grid-cols-1 gap-6 lg:grid-cols-4">
+          <main ref={listRef} className="lg:col-span-3 min-h-0 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
             {loading ? (
               <div className="flex justify-center items-center py-20">
                 <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
               </div>
             ) : (
               <>
-                <div className="space-y-4 pb-6">
+                <div className={articleLayoutClass}>
                   {articles.map((article) => (
-                    <article
+                    <a
                       key={article.id}
-                      className="bg-gray-850 border border-gray-800 rounded overflow-hidden hover:border-gray-700 transition-all group"
+                      href={article.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="block bg-gray-850 border border-gray-800 rounded overflow-hidden hover:border-gray-700 transition-all group"
                     >
-                      <div className="flex flex-col md:flex-row">
+                      <div className={isGridView ? "flex h-full flex-col" : "flex flex-col md:flex-row"}>
                         {article.image_url && (
-                          <div className="md:w-64 relative overflow-hidden bg-gray-900">
+                          <div className={isGridView ? "relative h-40 overflow-hidden bg-gray-900" : "md:w-64 relative overflow-hidden bg-gray-900"}>
                             <img
                               src={article.image_url}
                               alt={article.title}
-                              className="w-full h-48 md:h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                              className={isGridView ? "h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" : "w-full h-48 md:h-full object-cover transition-transform duration-500 group-hover:scale-105"}
                               onError={(e) => {
                                 e.currentTarget.style.display = "none";
                               }}
@@ -239,7 +296,7 @@ const NewsPage: React.FC = () => {
                         )}
 
                         <div className="p-5 flex-1">
-                          <div className="flex items-center gap-3 mb-3 text-xs">
+                          <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
                             <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-1 rounded font-medium">
                               {article.source}
                             </span>
@@ -258,12 +315,10 @@ const NewsPage: React.FC = () => {
                             </span>
                           </div>
 
-                          <a href={article.url} target="_blank" rel="noopener noreferrer" className="group/link">
-                            <h3 className="text-base md:text-lg font-bold mb-2 text-white group-hover/link:text-blue-400 transition-colors flex items-start">
-                              {article.title}
-                              <ExternalLink size={14} className="ml-2 mt-1 opacity-0 group-hover/link:opacity-100 transition-opacity flex-shrink-0" />
-                            </h3>
-                          </a>
+                          <h3 className="text-base md:text-lg font-bold mb-2 text-white group-hover:text-blue-400 transition-colors flex items-start">
+                            {article.title}
+                            <ExternalLink size={14} className="ml-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                          </h3>
 
                           <p className="text-sm text-gray-400 mb-3 line-clamp-2">
                             {stripHtmlTags(article.summary)}
@@ -281,7 +336,7 @@ const NewsPage: React.FC = () => {
                           </div>
                         </div>
                       </div>
-                    </article>
+                    </a>
                   ))}
 
                   {articles.length === 0 && !loading && (
@@ -304,7 +359,7 @@ const NewsPage: React.FC = () => {
             )}
           </main>
 
-          <aside className="lg:col-span-1 h-full overflow-y-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
+          <aside className="lg:col-span-1 min-h-0 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
             <TrendingPanel
               items={trendingSymbols}
               onSelectSymbol={(symbol) => {

@@ -3,6 +3,8 @@ import {
   createChart,
   CrosshairMode,
   LineStyle,
+  AreaSeries,
+  BarSeries,
   CandlestickSeries,
   HistogramSeries,
   LineSeries,
@@ -19,22 +21,16 @@ import {
 } from "@/services/marketDataService";
 import MarketSelector from "./MarketSelector";
 import DateRangePicker from "./DateRangePicker";
-import OrderBook from "@/features/market/components/OrderBook";
-import RecentTrades from "@/features/market/components/RecentTrades";
-import MarketNews from "@/features/market/components/MarketNews";
 import {
-  THEME,
-  CHART_TABS,
-  TAB_ICONS,
+  getChartTheme,
   DEFAULT_INDICATOR_SETTINGS,
   localTickMarkFormatter,
   localTimeFormatter,
-  type ChartTab,
 } from "./chartConstants";
 import { calcSMA, calcEMA, calcRSI, calcMFI } from "./indicatorUtils";
 import IndicatorPanel from "./IndicatorPanel";
 import OHLCVBar from "./OHLCVBar";
-import type { Candle, IndicatorSettings, HistoricalRange, TimeframeKey } from "@/types";
+import type { Candle, ChartType, IndicatorSettings, HistoricalRange, TimeframeKey } from "@/types";
 
 interface CandlestickChartProps {
   defaultSymbol?: string;
@@ -45,9 +41,10 @@ interface CandlestickChartProps {
   starredSymbols?: string[];
   onToggleStar?: (symbol: string) => void;
   onSymbolChange?: (symbol: string) => void;
-  onActiveTabChange?: (tab: string) => void;
   onCandlesChange?: (candles: Candle[]) => void;
   onTimeframeChange?: (timeframe: TimeframeKey) => void;
+  themeMode?: "dark" | "light";
+  chartType?: ChartType;
   // Replay mode props
   isReplayActive?: boolean;
 }
@@ -70,15 +67,20 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   starredSymbols = [],
   onToggleStar,
   onSymbolChange,
-  onActiveTabChange,
   onCandlesChange,
   onTimeframeChange,
+  themeMode = "dark",
+  chartType = "candles",
   isReplayActive = false,
 }) => {
   const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement>(null);
+  const chartStageRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
   const candleRef = useRef<any>(null);
+  const barRef = useRef<any>(null);
+  const lineRef = useRef<any>(null);
+  const areaRef = useRef<any>(null);
   const volumeRef = useRef<any>(null);
   const sma20Ref = useRef<any>(null);
   const sma50Ref = useRef<any>(null);
@@ -86,8 +88,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const rsiSeriesRef = useRef<any>(null);
   const mfiSeriesRef = useRef<any>(null);
   const candlesRef = useRef<Candle[]>([]);
+  const themeRef = useRef(getChartTheme());
   const symbolRef = useRef(defaultSymbol);
   const timeframeRef = useRef(timeframeProp || "1m");
+  const chartTypeRef = useRef<ChartType>(chartType);
 
   const [symbol, setSymbol] = useState(symbolProp || defaultSymbol);
   const [timeframe, setTimeframe] = useState(timeframeProp || "1m");
@@ -111,7 +115,6 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const [indSettings, setIndSettings] = useState<Record<string, IndicatorSettings>>(() =>
     JSON.parse(JSON.stringify(DEFAULT_INDICATOR_SETTINGS)),
   );
-  const [activeTab, setActiveTab] = useState<ChartTab>("chart");
   const [candles, setCandles] = useState<Candle[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
@@ -126,6 +129,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const unsubscribeRef = useRef<(() => void) | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const historicalRequestIdRef = useRef(0);
+  const seriesControllerRef = useRef<any>(null);
 
   // Initialize zoom control hook
   const { zoomIn, zoomOut, resetZoom, canZoomIn, canZoomOut } = useChartZoom({
@@ -155,6 +159,37 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     MAX_BARS_MEMORY: 10000,   // All timeframes keep 10000 bars in memory
     SHOW_SECONDS: true,       // All timeframes show seconds (consistent display)
   };
+
+  const toCloseSeriesData = useCallback(
+    (data: Candle[]) => data.map((c) => ({ time: c.time, value: c.close })),
+    [],
+  );
+
+  const getActivePriceSeries = useCallback(() => {
+    if (chartTypeRef.current === "bars") return barRef.current || candleRef.current;
+    if (chartTypeRef.current === "line") return lineRef.current || candleRef.current;
+    if (chartTypeRef.current === "area") return areaRef.current || candleRef.current;
+    return candleRef.current;
+  }, []);
+
+  const setAllPriceSeriesData = useCallback(
+    (data: Candle[]) => {
+      candleRef.current?.setData(data);
+      barRef.current?.setData(data);
+      const closeData = toCloseSeriesData(data);
+      lineRef.current?.setData(closeData);
+      areaRef.current?.setData(closeData);
+    },
+    [toCloseSeriesData],
+  );
+
+  const updateAllPriceSeries = useCallback((candle: Candle) => {
+    candleRef.current?.update(candle);
+    barRef.current?.update(candle);
+    const closePoint = { time: candle.time, value: candle.close };
+    lineRef.current?.update(closePoint);
+    areaRef.current?.update(closePoint);
+  }, []);
 
   const setInitialVisibleRange = useCallback(
     (data: Candle[]) => {
@@ -257,10 +292,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   // Init chart once
   useEffect(() => {
     if (!containerRef.current) return;
+    const chartTheme = getChartTheme();
+    themeRef.current = chartTheme;
     const chart = createChart(containerRef.current, {
       layout: {
-        background: { color: THEME.background },
-        textColor: THEME.textColor,
+        background: { color: chartTheme.background },
+        textColor: chartTheme.textColor,
         fontFamily: "'Inter','Segoe UI',sans-serif",
         fontSize: 12,
       },
@@ -269,21 +306,21 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         timeFormatter: localTimeFormatter,
       },
       grid: {
-        vertLines: { color: THEME.gridColor, style: LineStyle.Solid },
-        horzLines: { color: THEME.gridColor, style: LineStyle.Solid },
+        vertLines: { color: chartTheme.gridColor, style: LineStyle.Solid },
+        horzLines: { color: chartTheme.gridColor, style: LineStyle.Solid },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: THEME.crosshair, labelBackgroundColor: THEME.crosshairLabelBg },
-        horzLine: { color: THEME.crosshair, labelBackgroundColor: THEME.crosshairLabelBg },
+        vertLine: { color: chartTheme.crosshair, labelBackgroundColor: chartTheme.crosshairLabelBg },
+        horzLine: { color: chartTheme.crosshair, labelBackgroundColor: chartTheme.crosshairLabelBg },
       },
       rightPriceScale: {
-        borderColor: THEME.borderColor,
+        borderColor: chartTheme.borderColor,
         scaleMargins: { top: 0.05, bottom: 0.25 },
         minimumWidth: 80,
       },
       timeScale: {
-        borderColor: THEME.borderColor,
+        borderColor: chartTheme.borderColor,
         timeVisible: true,
         secondsVisible: false,
         barSpacing: 4,
@@ -302,12 +339,37 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       },
     });
     const cs = chart.addSeries(CandlestickSeries, {
-      upColor: THEME.upColor,
-      downColor: THEME.downColor,
-      borderUpColor: THEME.upColor,
-      borderDownColor: THEME.downColor,
-      wickUpColor: THEME.upColor,
-      wickDownColor: THEME.downColor,
+      upColor: chartTheme.upColor,
+      downColor: chartTheme.downColor,
+      borderUpColor: chartTheme.upColor,
+      borderDownColor: chartTheme.downColor,
+      wickUpColor: chartTheme.upColor,
+      wickDownColor: chartTheme.downColor,
+      visible: chartType === "candles",
+    });
+    const bs = chart.addSeries(BarSeries, {
+      upColor: chartTheme.upColor,
+      downColor: chartTheme.downColor,
+      thinBars: false,
+      visible: chartType === "bars",
+    });
+    const ls = chart.addSeries(LineSeries, {
+      color: chartTheme.textColor,
+      lineWidth: 2 as 1 | 2 | 3 | 4,
+      priceLineVisible: true,
+      lastValueVisible: true,
+      crosshairMarkerVisible: true,
+      visible: chartType === "line",
+    });
+    const ar = chart.addSeries(AreaSeries, {
+      lineColor: chartTheme.upColor,
+      topColor: `${chartTheme.upColor}50`,
+      bottomColor: `${chartTheme.background}00`,
+      lineWidth: 2 as 1 | 2 | 3 | 4,
+      priceLineVisible: true,
+      lastValueVisible: true,
+      crosshairMarkerVisible: true,
+      visible: chartType === "area",
     });
     const vs = chart.addSeries(HistogramSeries, {
       priceFormat: { type: "volume" },
@@ -317,21 +379,21 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       .priceScale("volume")
       .applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
     const s20 = chart.addSeries(LineSeries, {
-      color: THEME.sma20,
+      color: chartTheme.sma20,
       lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: true,
       crosshairMarkerVisible: false,
     });
     const s50 = chart.addSeries(LineSeries, {
-      color: THEME.sma50,
+      color: chartTheme.sma50,
       lineWidth: 1,
       priceLineVisible: false,
       lastValueVisible: true,
       crosshairMarkerVisible: false,
     });
     const ema = chart.addSeries(LineSeries, {
-      color: THEME.ema,
+      color: chartTheme.ema,
       lineWidth: 2 as 1 | 2 | 3 | 4,
       priceLineVisible: false,
       lastValueVisible: true,
@@ -340,7 +402,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     });
     // RSI & MFI on a separate left-side oscillator scale (bottom 20%)
     const rsiSeries = chart.addSeries(LineSeries, {
-      color: THEME.rsi,
+      color: chartTheme.rsi,
       lineWidth: 2 as 1 | 2 | 3 | 4,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -349,7 +411,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       priceScaleId: "oscillator",
     });
     const mfiSeries = chart.addSeries(LineSeries, {
-      color: THEME.mfi,
+      color: chartTheme.mfi,
       lineWidth: 2 as 1 | 2 | 3 | 4,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -363,6 +425,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     });
     chartRef.current = chart;
     candleRef.current = cs;
+    barRef.current = bs;
+    lineRef.current = ls;
+    areaRef.current = ar;
     volumeRef.current = vs;
     sma20Ref.current = s20;
     sma50Ref.current = s50;
@@ -396,6 +461,80 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const chartTheme = getChartTheme();
+    themeRef.current = chartTheme;
+
+    if (!chartRef.current) return;
+
+    chartRef.current.applyOptions({
+      layout: {
+        background: { color: chartTheme.background },
+        textColor: chartTheme.textColor,
+      },
+      grid: {
+        vertLines: { color: chartTheme.gridColor, style: LineStyle.Solid },
+        horzLines: { color: chartTheme.gridColor, style: LineStyle.Solid },
+      },
+      crosshair: {
+        vertLine: {
+          color: chartTheme.crosshair,
+          labelBackgroundColor: chartTheme.crosshairLabelBg,
+        },
+        horzLine: {
+          color: chartTheme.crosshair,
+          labelBackgroundColor: chartTheme.crosshairLabelBg,
+        },
+      },
+      rightPriceScale: {
+        borderColor: chartTheme.borderColor,
+      },
+      timeScale: {
+        borderColor: chartTheme.borderColor,
+      },
+    });
+
+    candleRef.current?.applyOptions({
+      upColor: chartTheme.upColor,
+      downColor: chartTheme.downColor,
+      borderUpColor: chartTheme.upColor,
+      borderDownColor: chartTheme.downColor,
+      wickUpColor: chartTheme.upColor,
+      wickDownColor: chartTheme.downColor,
+    });
+
+    barRef.current?.applyOptions({
+      upColor: chartTheme.upColor,
+      downColor: chartTheme.downColor,
+    });
+
+    lineRef.current?.applyOptions({
+      color: chartTheme.textColor,
+    });
+
+    areaRef.current?.applyOptions({
+      lineColor: chartTheme.upColor,
+      topColor: `${chartTheme.upColor}50`,
+      bottomColor: `${chartTheme.background}00`,
+    });
+
+    volumeRef.current?.setData(
+      candlesRef.current.map((c) => ({
+        time: c.time,
+        value: c.volume,
+        color: c.close >= c.open ? chartTheme.volumeUp : chartTheme.volumeDown,
+      })),
+    );
+  }, [themeMode]);
+
+  useEffect(() => {
+    chartTypeRef.current = chartType;
+    candleRef.current?.applyOptions({ visible: chartType === "candles" });
+    barRef.current?.applyOptions({ visible: chartType === "bars" });
+    lineRef.current?.applyOptions({ visible: chartType === "line" });
+    areaRef.current?.applyOptions({ visible: chartType === "area" });
+  }, [chartType]);
 
   // Helper: load more historical data when scrolling left
   const loadMoreHistoricalData = useCallback(async () => {
@@ -447,7 +586,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       const visibleRange = ts ? ts.getVisibleLogicalRange() : null;
 
       // Apply to chart series
-      candleRef.current.setData(merged);
+      setAllPriceSeriesData(merged);
       if (onCandlesChange) onCandlesChange(merged);
 
       // Restore visible range offset (older data shifts indices)
@@ -466,7 +605,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           merged.map((c) => ({
             time: c.time,
             value: c.volume,
-            color: c.close >= c.open ? THEME.volumeUp : THEME.volumeDown,
+            color: c.close >= c.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
           })),
         );
       }
@@ -489,7 +628,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       console.error('Failed to load more historical data:', error);
       isLoadingMoreRef.current = false;
     }
-  }, [symbol, timeframe, historicalRange, indSettings, onCandlesChange]);
+  }, [symbol, timeframe, historicalRange, indSettings, onCandlesChange, setAllPriceSeriesData]);
 
   // Subscribe to scroll/zoom events to load more historical data
   useEffect(() => {
@@ -526,14 +665,14 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       }
       if (onCandlesChange) onCandlesChange(data);
       setNoData(data.length === 0);
-      candleRef.current.setData(data);
+      setAllPriceSeriesData(data);
       const vs = volumeRef.current;
       if (vs)
         vs.setData(
           data.map((c) => ({
             time: c.time,
             value: c.volume,
-            color: c.close >= c.open ? THEME.volumeUp : THEME.volumeDown,
+            color: c.close >= c.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
           })),
         );
       if (sma20Ref.current)
@@ -550,7 +689,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       if (data.length > 0)
         setTooltip({ ...data[data.length - 1], timeLabel: "" });
     },
-    [indSettings, onCandlesChange, setInitialVisibleRange],
+    [indSettings, onCandlesChange, setAllPriceSeriesData, setInitialVisibleRange],
   );
 
   // Historical mode handlers
@@ -690,19 +829,18 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       }
     };
 
-    setIsLoading(true);
-    setFetchError(null);
-    setNoData(false);
-    loadData();
-
     // ⚠️ CRITICAL: Block WebSocket subscription when replay mode is active
-    // to prevent live data from interfering with replay playback
+    // to prevent live fetches or WebSocket updates from interfering with playback.
     if (isReplayActive) {
-      // In replay mode, do NOT subscribe to WebSocket or polling
       return () => {
         cancelled = true;
       };
     }
+
+    setIsLoading(true);
+    setFetchError(null);
+    setNoData(false);
+    loadData();
 
     // Subscribe to ALL timeframes simultaneously via a single WebSocket.
     // This ensures all timeframes update at the same time when price changes.
@@ -729,12 +867,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
           if (candle.time === lastTime) {
             // Same second → update existing candle
-            candleRef.current.update(candle);
+            updateAllPriceSeries(candle);
             if (volumeRef.current) {
               volumeRef.current.update({
                 time: candle.time,
                 value: candle.volume,
-                color: candle.close >= candle.open ? THEME.volumeUp : THEME.volumeDown,
+                color: candle.close >= candle.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
               });
             }
             // Update in-place
@@ -744,12 +882,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
             if (onCandlesChange) onCandlesChange(next);
           } else {
             // New second → add new candle
-            candleRef.current.update(candle);
+            updateAllPriceSeries(candle);
             if (volumeRef.current) {
               volumeRef.current.update({
                 time: candle.time,
                 value: candle.volume,
-                color: candle.close >= candle.open ? THEME.volumeUp : THEME.volumeDown,
+                color: candle.close >= candle.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
               });
             }
             const next = [...prev.slice(-(maxBars - 1)), candle];
@@ -765,15 +903,15 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           // Backend sends candles with correct openTime (already aggregated)
           if (candle.time === lastTime) {
             // Same period → update latest candle
-            candleRef.current.update(candle);
+            updateAllPriceSeries(candle);
             if (volumeRef.current) {
               volumeRef.current.update({
                 time: candle.time,
                 value: candle.volume,
                 color:
                   candle.close >= candle.open
-                    ? THEME.volumeUp
-                    : THEME.volumeDown,
+                    ? themeRef.current.volumeUp
+                    : themeRef.current.volumeDown,
               });
             }
             const next = [...prev];
@@ -786,15 +924,15 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
             );
           } else if (candle.time > lastTime) {
             // New period → append new candle
-            candleRef.current.update(candle);
+            updateAllPriceSeries(candle);
             if (volumeRef.current) {
               volumeRef.current.update({
                 time: candle.time,
                 value: candle.volume,
                 color:
                   candle.close >= candle.open
-                    ? THEME.volumeUp
-                    : THEME.volumeDown,
+                    ? themeRef.current.volumeUp
+                    : themeRef.current.volumeDown,
               });
             }
             const next = [...prev.slice(-(maxBars - 1)), candle];
@@ -835,6 +973,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     retryCount,
     applyDataToChart,
     preloadInitialCandles,
+    updateAllPriceSeries,
     isReplayActive, // ⚠️ Re-run when replay mode changes to block/unblock WebSocket
   ]);
 
@@ -865,18 +1004,22 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, timeframe]);
 
-  // Re-layout chart when chart tab becomes visible again
-  useEffect(() => {
-    if (onActiveTabChange) onActiveTabChange(activeTab);
-    if (activeTab === "chart" && chartRef.current && containerRef.current) {
-      const { width, height } = containerRef.current.getBoundingClientRect();
-      if (width > 0 && height > 0) {
-        chartRef.current.resize(width, height);
-        // Don't call fitContent() - it resets barSpacing and breaks zoom level
-        // The chart will maintain its current zoom when resizing
-      }
-    }
-  }, [activeTab]);
+  chartTypeRef.current = chartType;
+
+  if (!seriesControllerRef.current) {
+    seriesControllerRef.current = {
+      setData: (data: Candle[]) => setAllPriceSeriesData(data),
+      update: (candle: Candle) => updateAllPriceSeries(candle),
+      priceToCoordinate: (price: number) => {
+        const activeSeries = getActivePriceSeries();
+        return activeSeries?.priceToCoordinate(price) ?? null;
+      },
+      coordinateToPrice: (coordinate: number) => {
+        const activeSeries = getActivePriceSeries();
+        return activeSeries?.coordinateToPrice(coordinate) ?? null;
+      },
+    };
+  }
 
   // Apply indicator settings (visibility, color, period, lineWidth)
   useEffect(() => {
@@ -948,15 +1091,97 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     : null;
   const isUp = priceDiff >= 0;
 
-  const handleExportChart = useCallback(() => {
-    if (!containerRef.current) return;
-    const canvas = containerRef.current.querySelector("canvas");
-    if (!canvas) return;
+  const handleExportChart = useCallback(async () => {
+    const stage = chartStageRef.current;
+    if (!stage) return;
+
+    const stageRect = stage.getBoundingClientRect();
+    if (stageRect.width <= 0 || stageRect.height <= 0) return;
+
+    const headerHeight = 72;
+    const scale = Math.min(window.devicePixelRatio || 1, 2);
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = Math.round(stageRect.width * scale);
+    exportCanvas.height = Math.round((stageRect.height + headerHeight) * scale);
+
+    const ctx = exportCanvas.getContext("2d");
+    if (!ctx) return;
+
+    const chartTheme = themeRef.current;
+    ctx.scale(scale, scale);
+    ctx.fillStyle = chartTheme.background;
+    ctx.fillRect(0, 0, stageRect.width, stageRect.height + headerHeight);
+
+    ctx.fillStyle = chartTheme.textColor;
+    ctx.font = "600 18px Inter, Segoe UI, sans-serif";
+    ctx.fillText(`${symbol} ${timeframe.toUpperCase()} ${chartType.toUpperCase()}`, 16, 26);
+
+    const latest = candlesRef.current[candlesRef.current.length - 1];
+    if (latest) {
+      const directionColor = latest.close >= latest.open ? chartTheme.upColor : chartTheme.downColor;
+      ctx.font = "12px Inter, Segoe UI, sans-serif";
+      ctx.fillStyle = directionColor;
+      ctx.fillText(`O ${latest.open}  H ${latest.high}  L ${latest.low}  C ${latest.close}`, 16, 48);
+      ctx.fillStyle = chartTheme.textColor;
+      ctx.fillText(`Vol ${latest.volume.toLocaleString()}  ${new Date(latest.time * 1000).toLocaleString()}`, 16, 64);
+    }
+
+    const stageOffsetY = headerHeight;
+    const canvases = Array.from(stage.querySelectorAll("canvas"));
+    canvases.forEach((canvas) => {
+      const rect = canvas.getBoundingClientRect();
+      const dx = rect.left - stageRect.left;
+      const dy = rect.top - stageRect.top + stageOffsetY;
+      ctx.drawImage(canvas, dx, dy, rect.width, rect.height);
+    });
+
+    const overlaySvgs = Array.from(stage.querySelectorAll("svg")).filter((svg) => {
+      const rect = svg.getBoundingClientRect();
+      return rect.width >= stageRect.width * 0.9 && rect.height >= stageRect.height * 0.9;
+    });
+
+    for (const svg of overlaySvgs) {
+      const rect = svg.getBoundingClientRect();
+      const clone = svg.cloneNode(true) as SVGSVGElement;
+      clone.setAttribute("width", String(rect.width));
+      clone.setAttribute("height", String(rect.height));
+      clone.setAttribute("viewBox", `0 0 ${rect.width} ${rect.height}`);
+
+      const svgMarkup = new XMLSerializer().serializeToString(clone);
+      const blob = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+
+      try {
+        const image = new Image();
+        const loaded = new Promise<void>((resolve, reject) => {
+          image.onload = () => resolve();
+          image.onerror = () => reject(new Error("Failed to load drawing overlay"));
+        });
+        image.src = url;
+        await loaded;
+        ctx.drawImage(
+          image,
+          rect.left - stageRect.left,
+          rect.top - stageRect.top + stageOffsetY,
+          rect.width,
+          rect.height,
+        );
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+
     const link = document.createElement("a");
     link.download = `${symbol}_${timeframe}_chart.png`;
-    link.href = canvas.toDataURL("image/png");
+    link.href = exportCanvas.toDataURL("image/png");
     link.click();
-  }, [symbol, timeframe]);
+  }, [chartType, symbol, timeframe]);
+
+  const handleResetView = useCallback(() => {
+    resetZoom();
+    setInitialVisibleRange(candlesRef.current);
+    chartRef.current?.priceScale("right").applyOptions({ autoScale: true });
+  }, [resetZoom, setInitialVisibleRange]);
 
   return (
     <div className="flex flex-col h-full bg-gray-900 rounded-lg overflow-hidden">
@@ -1050,7 +1275,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
               <ZoomOut size={12} />
             </button>
             <button
-              onClick={resetZoom}
+              onClick={handleResetView}
               className="px-2 py-1 text-xs font-medium border-l border-gray-600 text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
               title={t("resetZoom")}
             >
@@ -1076,36 +1301,15 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         </div>
       )}
 
-      {/* Chart tabs */}
-      <div className="flex items-center gap-0.5 px-3 py-1 bg-gray-800 border-b border-gray-700">
-        {CHART_TABS.map((tab) => {
-          const Icon = TAB_ICONS[tab];
-          return (
-            <button
-              key={tab}
-              onClick={() => setActiveTab(tab)}
-              className={`flex items-center gap-1 px-3 py-1 rounded text-xs font-medium transition-colors ${
-                activeTab === tab
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-400 hover:text-white hover:bg-gray-700"
-              }`}
-            >
-              {Icon && <Icon size={12} />}
-              {t(tab)}
-            </button>
-          );
-        })}
-      </div>
-
       {/* Tab content — candlestick chart is always mounted to preserve the
            lightweight-charts instance; visibility is toggled via CSS. */}
-      <div style={{ display: activeTab === "chart" ? "contents" : "none" }}>
+      <div className="contents">
         {/* OHLCV bar */}
         <div className="px-3 py-1 bg-gray-900 border-b border-gray-800 min-h-[28px]">
           <OHLCVBar data={tooltip} />
         </div>
         {/* Chart canvas + overlay slot */}
-        <div className="relative flex-1 min-h-0">
+        <div ref={chartStageRef} className="relative flex-1 min-h-0">
           <div ref={containerRef} className="w-full h-full" />
           {isLoading && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-60 z-10">
@@ -1138,28 +1342,11 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
             </div>
           )}
           {typeof children === 'function'
-            ? children(chartRef.current, candleRef.current)
+            ? children(chartRef.current, seriesControllerRef.current)
             : children}
         </div>
       </div>
 
-      {activeTab === "orderBook" && (
-        <div className="flex-1 min-h-0">
-          <OrderBook symbol={symbol} />
-        </div>
-      )}
-
-      {activeTab === "recentTrades" && (
-        <div className="flex-1 min-h-0">
-          <RecentTrades symbol={symbol} />
-        </div>
-      )}
-
-      {activeTab === "marketNews" && (
-        <div className="flex-1 min-h-0">
-          <MarketNews />
-        </div>
-      )}
     </div>
   );
 };

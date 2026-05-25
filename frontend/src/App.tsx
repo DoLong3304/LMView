@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import Header from "@/components/layout/Header";
 import LeftSidebar from "@/components/layout/LeftSidebar";
 import { CandlestickChart } from "@/features/chart";
@@ -6,6 +6,7 @@ import ChartOverlay from "@/features/drawing/components/ChartOverlay";
 import DrawingContextToolbar from "@/features/drawing/components/DrawingContextToolbar";
 import { ReplayControls } from "@/features/replay/components/ReplayControls";
 import RightPanel from "@/features/watchlist/components/RightPanel";
+import NewsPage from "@/pages/NewsPage";
 import { FALLBACK_SYMBOLS } from "@/constants/market";
 import { fetchTickers, fetchSymbols } from "@/services/marketDataService";
 import { loadFromStorage, saveToStorage } from "@/utils/storageHelpers";
@@ -23,6 +24,23 @@ interface WatchlistItemData {
   color: "green" | "red" | "gray";
 }
 
+type ThemeMode = "dark" | "light";
+type AppView = "charts" | "marketsNews";
+
+const DESKTOP_LAYOUT_QUERY = "(min-width: 1024px)";
+
+function getInitialTheme(): ThemeMode {
+  if (typeof window === "undefined") return "dark";
+  const stored = window.localStorage.getItem("app_theme");
+  if (stored === "dark" || stored === "light") return stored;
+  return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function isDesktopLayout(): boolean {
+  if (typeof window === "undefined") return true;
+  return window.matchMedia(DESKTOP_LAYOUT_QUERY).matches;
+}
+
 function buildWatchlist(symbolNames: string[]): WatchlistItemData[] {
   return symbolNames.map((s) => ({
     symbol: s,
@@ -35,6 +53,11 @@ function buildWatchlist(symbolNames: string[]): WatchlistItemData[] {
 const TradingDashboard: React.FC = () => {
   const { t } = useI18n();
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme);
+  const [isDesktop, setIsDesktop] = useState(isDesktopLayout);
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(isDesktopLayout);
+  const [isDrawingToolbarOpen, setIsDrawingToolbarOpen] = useState(isDesktopLayout);
+  const [appView, setAppView] = useState<AppView>("charts");
   const [activeTool, setActiveTool] = useState("cursor");
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [selectedDrawingIds, setSelectedDrawingIds] = useState<(string | number)[]>([]);
@@ -55,6 +78,26 @@ const TradingDashboard: React.FC = () => {
     buildWatchlist([...FALLBACK_SYMBOLS]),
   );
   const [connError, setConnError] = useState(false);
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = themeMode;
+    document.documentElement.style.colorScheme = themeMode;
+    saveToStorage("app_theme", themeMode);
+  }, [themeMode]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(DESKTOP_LAYOUT_QUERY);
+    const syncLayout = () => {
+      const desktop = mediaQuery.matches;
+      setIsDesktop(desktop);
+      setIsRightPanelOpen(desktop);
+      setIsDrawingToolbarOpen(desktop);
+    };
+
+    syncLayout();
+    mediaQuery.addEventListener("change", syncLayout);
+    return () => mediaQuery.removeEventListener("change", syncLayout);
+  }, []);
 
   // Load available symbols from backend on mount
   useEffect(() => {
@@ -261,7 +304,21 @@ const TradingDashboard: React.FC = () => {
     [addCommand]
   );
 
-  const handleDeleteDrawings = handleDeleteDrawingsInternal;
+  const handleDeleteDrawings = useCallback(
+    (ids: (string | number)[]) => {
+      if (ids.length === 0) return;
+      const deletedDrawings = drawings.filter((d) => ids.includes(d.id));
+      addCommand({
+        type: 'delete',
+        timestamp: Date.now(),
+        drawingIds: ids,
+        before: deletedDrawings,
+        description: `Delete ${ids.length} drawing(s)`,
+      });
+      handleDeleteDrawingsInternal(ids);
+    },
+    [addCommand, drawings, handleDeleteDrawingsInternal],
+  );
 
   const handleClearAll = useCallback(async () => {
     setDrawings([]);
@@ -307,8 +364,11 @@ const TradingDashboard: React.FC = () => {
     );
   }, []);
 
-  // State lifted from CandlestickChart for Overview + DrawingToolbar gating
-  const [chartActiveTab, setChartActiveTab] = useState("chart");
+  const handleToggleTheme = useCallback(() => {
+    setThemeMode((current) => (current === "dark" ? "light" : "dark"));
+  }, []);
+
+  // State lifted from CandlestickChart for Overview + DrawingToolbar data.
   const [chartCandles, setChartCandles] = useState<Candle[]>([]);
 
   // Chart API refs for floating toolbar positioning
@@ -341,7 +401,9 @@ const TradingDashboard: React.FC = () => {
 
   // Handle replay button click - enter selection mode
   const handleReplayButtonClick = useCallback(() => {
-    if (isReplayActive) {
+    if (isReplaySelectionMode) {
+      setIsReplaySelectionMode(false);
+    } else if (isReplayActive) {
       // Already in replay mode, exit it
       exitReplay();
     } else {
@@ -349,24 +411,27 @@ const TradingDashboard: React.FC = () => {
       setIsReplaySelectionMode(true);
       setActiveTool('cursor'); // Switch to cursor for selection
     }
-  }, [isReplayActive, exitReplay]);
+  }, [isReplayActive, isReplaySelectionMode, exitReplay]);
 
   // Handle candle click in selection mode
   const handleReplayStartSelect = useCallback((timestamp: number) => {
     if (isReplaySelectionMode && chartCandles.length > 0) {
-      // Find the index of the clicked candle
-      const clickedIndex = chartCandles.findIndex(c => c.time === timestamp);
+      // Find the nearest candle to the clicked chart coordinate.
+      const clickedIndex = chartCandles.reduce((bestIndex, candle, index) => {
+        const bestDistance = Math.abs(chartCandles[bestIndex].time - timestamp);
+        const currentDistance = Math.abs(candle.time - timestamp);
+        return currentDistance < bestDistance ? index : bestIndex;
+      }, 0);
       if (clickedIndex >= 0) {
-        // Get candles from clicked point to current
-        const replayBuffer = chartCandles.slice(clickedIndex);
+        const visibleHistory = chartCandles.slice(0, clickedIndex + 1);
 
-        // Clear chart and set initial candle
+        // Hide future candles; replay will append them back one by one.
         if (candleSeries) {
-          candleSeries.setData([replayBuffer[0]]);
+          candleSeries.setData(visibleHistory);
         }
 
         // Start replay from this point
-        startReplay(replayBuffer, 0);
+        startReplay(chartCandles, clickedIndex);
         setIsReplaySelectionMode(false);
       }
     }
@@ -431,7 +496,12 @@ const TradingDashboard: React.FC = () => {
     document.addEventListener("mouseup", onUp);
   }, []);
 
-  const isChartTab = chartActiveTab === "chart";
+  const isChartsView = appView === "charts";
+  const showDrawingToolbar = isChartsView && (isDesktop || isDrawingToolbarOpen);
+  const showRightPanel = isChartsView && isRightPanelOpen;
+  const compactRightPanelWidth = typeof window === "undefined"
+    ? 340
+    : Math.min(360, Math.floor(window.innerWidth * 0.92));
 
   return (
     <div className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
@@ -443,6 +513,15 @@ const TradingDashboard: React.FC = () => {
         onTimeframeChange={handleTimeframeChange}
         chartType={chartType}
         onChartTypeChange={setChartType}
+        themeMode={themeMode}
+        onThemeToggle={handleToggleTheme}
+        isCompactLayout={!isDesktop}
+        isDrawingToolbarOpen={isDrawingToolbarOpen}
+        onToggleDrawingToolbar={() => setIsDrawingToolbarOpen((open) => !open)}
+        isRightPanelOpen={isRightPanelOpen}
+        onToggleRightPanel={() => setIsRightPanelOpen((open) => !open)}
+        activeView={appView}
+        onViewChange={setAppView}
       />
 
       {connError && (
@@ -471,27 +550,15 @@ const TradingDashboard: React.FC = () => {
       )}
 
       {/* Main content area */}
-      <main className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar */}
-        {isChartTab && (
-          <LeftSidebar
-            activeTool={activeTool as any}
-            onToolChange={setActiveTool as any}
-            onClearAll={handleClearAll}
-            onDeleteSelected={() => handleDeleteDrawings(selectedDrawingIds)}
-            selectedDrawingIds={selectedDrawingIds.map(String)}
-            onLockAll={handleLockAll}
-            onHideAll={handleHideAll}
-            magnetEnabled={magnetEnabled}
-            onMagnetToggle={() => setMagnetEnabled((prev) => !prev)}
-            onReplayClick={handleReplayButtonClick}
-            isReplayActive={isReplayActive}
-            isReplaySelectionMode={isReplaySelectionMode}
-          />
-        )}
-
+      <main className="relative flex-1 flex overflow-hidden min-h-0">
+        {!isChartsView ? (
+          <div className="flex-1 min-w-0 overflow-hidden">
+            <NewsPage />
+          </div>
+        ) : (
+          <>
         {/* Chart area */}
-        <div className="flex-1 flex flex-col overflow-hidden" ref={chartContainerRef}>
+        <div className="flex-1 flex flex-col overflow-hidden min-w-0" ref={chartContainerRef}>
           <div className="flex-1 bg-gray-900">
             <CandlestickChart
               symbol={selectedSymbol}
@@ -500,9 +567,10 @@ const TradingDashboard: React.FC = () => {
               starredSymbols={starredSymbols}
               onToggleStar={handleToggleStar}
               onSymbolChange={handleSymbolSelect}
-              onActiveTabChange={setChartActiveTab}
               onCandlesChange={setChartCandles}
               onTimeframeChange={handleTimeframeChange}
+              themeMode={themeMode}
+              chartType={chartType}
               isReplayActive={isReplayActive}
             >
               {(chartApiRef, candleSeriesRef) => {
@@ -511,8 +579,26 @@ const TradingDashboard: React.FC = () => {
 
                 return (
                   <>
+                    {showDrawingToolbar && (
+                      <div className="absolute left-2 top-2 z-[120] max-h-[calc(100%-1rem)] rounded-lg overflow-hidden border border-gray-700 shadow-2xl">
+                        <LeftSidebar
+                          activeTool={activeTool as any}
+                          onToolChange={setActiveTool as any}
+                          onClearAll={handleClearAll}
+                          onDeleteSelected={() => handleDeleteDrawings(selectedDrawingIds)}
+                          selectedDrawingIds={selectedDrawingIds.map(String)}
+                          onLockAll={handleLockAll}
+                          onHideAll={handleHideAll}
+                          magnetEnabled={magnetEnabled}
+                          onMagnetToggle={() => setMagnetEnabled((prev) => !prev)}
+                          onReplayClick={handleReplayButtonClick}
+                          isReplayActive={isReplayActive}
+                          isReplaySelectionMode={isReplaySelectionMode}
+                        />
+                      </div>
+                    )}
                     <ChartOverlay
-                      activeTool={isChartTab ? activeTool : "cursor"}
+                      activeTool={activeTool}
                       drawings={drawings}
                       onAddDrawing={handleAddDrawing}
                       onUpdateDrawing={handleUpdateDrawing}
@@ -525,7 +611,7 @@ const TradingDashboard: React.FC = () => {
                       isReplaySelectionMode={isReplaySelectionMode}
                       onReplayStartSelect={handleReplayStartSelect}
                     />
-                    {selectedDrawing && isChartTab && (
+                    {selectedDrawing && (
                       <DrawingContextToolbar
                         drawing={selectedDrawing}
                         position={toolbarPosition}
@@ -555,24 +641,50 @@ const TradingDashboard: React.FC = () => {
         </div>
 
         {/* Drag handle */}
-        <div
-          onMouseDown={onDragStart}
-          className="flex-shrink-0 cursor-col-resize flex items-center justify-center group"
-          style={{ width: 6, margin: "0 2px" }}
-        >
-          <div className="w-[3px] h-10 rounded-full bg-gray-700 group-hover:bg-blue-500 transition-colors" />
-        </div>
+        {isDesktop && showRightPanel && (
+          <div
+            onMouseDown={onDragStart}
+            className="flex-shrink-0 cursor-col-resize flex items-center justify-center group"
+            style={{ width: 6, margin: "0 2px" }}
+          >
+            <div className="w-[3px] h-10 rounded-full bg-gray-700 group-hover:bg-blue-500 transition-colors" />
+          </div>
+        )}
 
         {/* Right Panel */}
-        <RightPanel
-          items={watchlistItems}
-          selectedSymbol={selectedSymbol}
-          starredSymbols={starredSymbols}
-          onSymbolSelect={handleSymbolSelect}
-          onToggleStar={handleToggleStar}
-          width={sidebarWidth}
-          candles={chartCandles}
-        />
+        {showRightPanel && (
+          <>
+            {!isDesktop && (
+              <button
+                className="fixed inset-0 z-[180] bg-black bg-opacity-40"
+                aria-label={t("closePanel")}
+                onClick={() => setIsRightPanelOpen(false)}
+              />
+            )}
+            <div
+              className={
+                isDesktop
+                  ? "flex-shrink-0"
+                  : "fixed right-0 top-0 z-[190] h-screen max-w-[92vw] shadow-2xl"
+              }
+            >
+              <RightPanel
+                items={watchlistItems}
+                selectedSymbol={selectedSymbol}
+                starredSymbols={starredSymbols}
+                onSymbolSelect={(symbol) => {
+                  handleSymbolSelect(symbol);
+                  if (!isDesktop) setIsRightPanelOpen(false);
+                }}
+                onToggleStar={handleToggleStar}
+                width={isDesktop ? sidebarWidth : compactRightPanelWidth}
+                candles={chartCandles}
+              />
+            </div>
+          </>
+        )}
+          </>
+        )}
       </main>
     </div>
   );

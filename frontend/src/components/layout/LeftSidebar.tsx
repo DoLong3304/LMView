@@ -61,17 +61,16 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const { t } = useI18n();
 
   return (
-    <div className="bg-gray-900 border-r border-gray-700 flex flex-col" style={{ width: 56 }}>
+    <div className="bg-gray-900 border-r border-gray-700 flex h-full max-h-full flex-col" style={{ width: 56 }}>
       {/* Replay button */}
       <button
         onClick={onReplayClick}
-        disabled={isReplaySelectionMode}
         className={`w-full p-3 flex items-center justify-center border-b border-gray-700 transition-colors ${
-          isReplayActive
+          isReplayActive || isReplaySelectionMode
             ? "bg-blue-600 text-white"
             : "text-gray-400 hover:text-white hover:bg-gray-800"
-        } ${isReplaySelectionMode ? "opacity-50 cursor-not-allowed" : ""}`}
-        title={t("replay")}
+        }`}
+        title={isReplaySelectionMode ? t("selectReplayStart") : t("replay")}
       >
         <Play size={20} />
       </button>

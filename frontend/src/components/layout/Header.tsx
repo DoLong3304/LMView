@@ -1,13 +1,18 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
 import {
   AreaChart,
   BarChart3,
   CandlestickChart as CandleIcon,
   LineChart,
-  Menu,
+  Moon,
+  Newspaper,
+  PanelLeft,
+  PanelRight,
   Search,
+  Settings,
+  Sun,
   TrendingUp,
-  X,
+  UserRound,
 } from "lucide-react";
 import { getDataSourceLabel, DATA_SOURCE } from "@/constants/env";
 import { TIMEFRAME_KEYS, TIMEFRAMES } from "@/constants/timeframes";
@@ -16,14 +21,6 @@ import SystemHealthCard from "@/components/ui/SystemHealthCard";
 import { useI18n } from "@/i18n";
 import type { ChartType, TimeframeKey } from "@/types";
 import type { TranslationKey } from "@/i18n/translations";
-
-const NAV_ITEMS_KEYS: TranslationKey[] = [
-  "products",
-  "community",
-  "markets",
-  "news",
-  "brokers",
-];
 
 const CHART_TYPE_ICONS: Record<ChartType, typeof CandleIcon> = {
   candles: CandleIcon,
@@ -39,6 +36,10 @@ const CHART_TYPE_LABELS: Record<ChartType, TranslationKey> = {
   area: "area",
 };
 
+const SHOW_DEVELOPER_TOOLS = false;
+
+type AppView = "charts" | "marketsNews";
+
 interface HeaderProps {
   selectedSymbol: string;
   symbols: string[];
@@ -47,6 +48,15 @@ interface HeaderProps {
   onTimeframeChange: (timeframe: TimeframeKey) => void;
   chartType: ChartType;
   onChartTypeChange: (type: ChartType) => void;
+  themeMode: "dark" | "light";
+  onThemeToggle: () => void;
+  isCompactLayout: boolean;
+  isDrawingToolbarOpen: boolean;
+  onToggleDrawingToolbar: () => void;
+  isRightPanelOpen: boolean;
+  onToggleRightPanel: () => void;
+  activeView: AppView;
+  onViewChange: (view: AppView) => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -57,22 +67,19 @@ const Header: React.FC<HeaderProps> = ({
   onTimeframeChange,
   chartType,
   onChartTypeChange,
+  themeMode,
+  onThemeToggle,
+  isCompactLayout,
+  isDrawingToolbarOpen,
+  onToggleDrawingToolbar,
+  isRightPanelOpen,
+  onToggleRightPanel,
+  activeView,
+  onViewChange,
 }) => {
   const { t } = useI18n();
-  const [showNavDrawer, setShowNavDrawer] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const drawerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (drawerRef.current && !drawerRef.current.contains(e.target as Node)) {
-        setShowNavDrawer(false);
-      }
-    };
-    if (showNavDrawer) document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [showNavDrawer]);
 
   const filteredSymbols = symbols.filter((symbol) =>
     symbol.toLowerCase().includes(searchQuery.toLowerCase()),
@@ -80,21 +87,40 @@ const Header: React.FC<HeaderProps> = ({
 
   return (
     <>
-      <header className="bg-gray-900 border-b border-gray-700 px-3 py-2 flex items-center gap-3">
-        <div className="flex items-center gap-3 min-w-0">
-          <span className="text-xl font-bold text-blue-500">LMView</span>
-          <SystemHealthCard />
+      <header className="bg-gray-900 border-b border-gray-700 px-2 sm:px-3 py-2 flex flex-wrap lg:flex-nowrap items-center gap-2 lg:gap-3">
+        <div className="flex items-center gap-2 min-w-0 flex-shrink-0">
+          <span className="text-lg sm:text-xl font-bold text-blue-500 leading-none">LMView</span>
+          <span className="hidden xl:block max-w-72 truncate text-xs text-gray-500">
+            {t("appTagline")}
+          </span>
+          {SHOW_DEVELOPER_TOOLS && <SystemHealthCard />}
         </div>
 
-        <div className="w-px h-6 bg-gray-700" />
+        <div className="hidden lg:block w-px h-6 bg-gray-700" />
 
-        <div className="relative">
+        {isCompactLayout && activeView === "charts" && (
+          <button
+            onClick={onToggleDrawingToolbar}
+            className={`p-1.5 rounded border border-gray-700 transition-colors ${
+              isDrawingToolbarOpen
+                ? "bg-blue-600 text-white"
+                : "text-gray-400 hover:text-white hover:bg-gray-800"
+            }`}
+            title={t("toggleDrawingTools")}
+          >
+            <PanelLeft size={16} />
+          </button>
+        )}
+
+        {activeView === "charts" && (
+          <>
+        <div className="relative min-w-0">
           <button
             onClick={() => setSearchOpen((open) => !open)}
-            className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded text-sm font-semibold transition-colors"
+            className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded text-sm font-semibold transition-colors max-w-[150px] sm:max-w-none"
           >
             <TrendingUp size={14} className="text-blue-400" />
-            <span>{selectedSymbol}</span>
+            <span className="truncate">{selectedSymbol}</span>
           </button>
           {searchOpen && (
             <div className="absolute top-full left-0 mt-1 w-64 bg-gray-850 border border-gray-700 rounded shadow-lg z-50 max-h-80 overflow-y-auto">
@@ -132,9 +158,9 @@ const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        <div className="w-px h-6 bg-gray-700" />
+        <div className="hidden lg:block w-px h-6 bg-gray-700" />
 
-        <div className="flex items-center gap-1">
+        <div className="order-last flex w-full items-center gap-1 overflow-x-auto pb-0.5 lg:order-none lg:w-auto lg:pb-0">
           {TIMEFRAME_KEYS.map((key) => (
             <button
               key={key}
@@ -150,7 +176,7 @@ const Header: React.FC<HeaderProps> = ({
           ))}
         </div>
 
-        <div className="w-px h-6 bg-gray-700" />
+        <div className="hidden sm:block w-px h-6 bg-gray-700" />
 
         <div className="flex items-center gap-1">
           {(Object.keys(CHART_TYPE_ICONS) as ChartType[]).map((type) => {
@@ -171,60 +197,86 @@ const Header: React.FC<HeaderProps> = ({
             );
           })}
         </div>
+          </>
+        )}
 
-        <div className="ml-auto flex items-center gap-3">
-          <div
-            className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-              DATA_SOURCE === "mock"
-                ? "bg-amber-500/20 text-amber-500 border border-amber-500/30"
-                : "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
-            }`}
-            title={t("dataSource")}
-          >
-            {getDataSourceLabel()}
+        <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1 rounded border border-gray-700 bg-gray-800 p-0.5">
+            <button
+              onClick={() => onViewChange("charts")}
+              className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                activeView === "charts"
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-400 hover:bg-gray-700 hover:text-white"
+              }`}
+              title={t("charts")}
+            >
+              <CandleIcon size={14} />
+              <span className="hidden sm:inline">{t("charts")}</span>
+            </button>
+            <button
+              onClick={() => onViewChange("marketsNews")}
+              className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                activeView === "marketsNews"
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-400 hover:bg-gray-700 hover:text-white"
+              }`}
+              title={t("marketsAndNews")}
+            >
+              <Newspaper size={14} />
+              <span className="hidden sm:inline">{t("marketsAndNews")}</span>
+            </button>
           </div>
+          {SHOW_DEVELOPER_TOOLS && (
+            <div
+              className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                DATA_SOURCE === "mock"
+                  ? "bg-amber-500/20 text-amber-500 border border-amber-500/30"
+                  : "bg-emerald-500/20 text-emerald-500 border border-emerald-500/30"
+              }`}
+              title={t("dataSource")}
+            >
+              {getDataSourceLabel()}
+            </div>
+          )}
+          <button
+            onClick={onThemeToggle}
+            className="text-gray-400 hover:text-white p-1.5 rounded hover:bg-gray-800 transition-colors"
+            title={themeMode === "dark" ? t("switchToLightMode") : t("switchToDarkMode")}
+          >
+            {themeMode === "dark" ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+          {activeView === "charts" && (
+            <button
+              onClick={onToggleRightPanel}
+              className={`p-1.5 rounded transition-colors ${
+                isRightPanelOpen
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-400 hover:text-white hover:bg-gray-800"
+              }`}
+              title={t("toggleOverviewPanel")}
+            >
+              <PanelRight className="w-5 h-5" />
+            </button>
+          )}
           <LanguageSwitcher />
           <button
-            onClick={() => setShowNavDrawer(true)}
+            type="button"
             className="text-gray-400 hover:text-white p-1.5 rounded hover:bg-gray-800 transition-colors"
-            title={t("menu")}
+            title={t("settings")}
           >
-            <Menu className="w-5 h-5" />
+            <Settings className="w-5 h-5" />
+          </button>
+          <button
+            type="button"
+            className="flex items-center gap-1.5 rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
+            title={t("login")}
+          >
+            <UserRound className="w-4 h-4" />
+            <span className="hidden md:inline">{t("login")}</span>
           </button>
         </div>
       </header>
-
-      {showNavDrawer && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 z-[300]">
-          <div
-            ref={drawerRef}
-            className="absolute right-0 top-0 h-full w-64 bg-gray-800 shadow-2xl flex flex-col"
-          >
-            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-700">
-              <span className="text-lg font-bold text-blue-500">LMView</span>
-              <button
-                onClick={() => setShowNavDrawer(false)}
-                className="text-gray-400 hover:text-white transition-colors"
-                title={t("closeMenu")}
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <nav className="flex flex-col p-4 space-y-1">
-              {NAV_ITEMS_KEYS.map((key) => (
-                <a
-                  key={key}
-                  href="#"
-                  onClick={() => setShowNavDrawer(false)}
-                  className="px-4 py-2.5 rounded-lg text-gray-300 hover:text-white hover:bg-gray-700 transition-colors duration-150 font-medium"
-                >
-                  {t(key)}
-                </a>
-              ))}
-            </nav>
-          </div>
-        </div>
-      )}
     </>
   );
 };

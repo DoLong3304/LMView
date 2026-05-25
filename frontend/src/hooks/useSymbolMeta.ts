@@ -7,7 +7,7 @@ import {
 
 interface UseSymbolMetaResult {
   /** Look up metadata for a Binance pair like "BTCUSDT" */
-  getMeta: (symbol: string) => SymbolMetaEntry | null;
+  getMeta: (symbol: string) => SymbolMetaEntry;
   /** Whether the initial load is in progress */
   isLoading: boolean;
 }
@@ -36,7 +36,7 @@ export function useSymbolMeta(): UseSymbolMetaResult {
   }, []);
 
   const getMeta = useCallback(
-    (symbol: string): SymbolMetaEntry | null => {
+    (symbol: string): SymbolMetaEntry => {
       return lookupSymbol(meta, symbol);
     },
     [meta],

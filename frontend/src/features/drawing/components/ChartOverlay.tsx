@@ -57,6 +57,10 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
   const [textInput, setTextInput] = useState<PixelPoint | null>(null);
   const [hoveredDrawingId, setHoveredDrawingId] = useState<string | number | null>(null);
   const [, setRedrawCounter] = useState(0);
+  const [panState, setPanState] = useState<{
+    startX: number;
+    range: { from: number; to: number };
+  } | null>(null);
 
   // Anchor dragging state
   const [draggingAnchor, setDraggingAnchor] = useState<{
@@ -107,6 +111,16 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
 
     return { time: time as number, price };
   }, [chartApi, candleSeries]);
+
+  const priceToY = useCallback((price: number): number | null => {
+    if (!candleSeries) return null;
+    return candleSeries.priceToCoordinate(price);
+  }, [candleSeries]);
+
+  const timeToX = useCallback((time: number): number | null => {
+    if (!chartApi) return null;
+    return chartApi.timeScale().timeToCoordinate(time as any);
+  }, [chartApi]);
 
   // ══════════════════════════════════════════════════════════════
   // HIT TESTING FOR ERASER
@@ -183,6 +197,30 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         return nearLeft || nearRight || nearTop || nearBottom;
       }
 
+      case 'circle': {
+        if (pixels.length < 2 || !pixels[0] || !pixels[1]) return false;
+        const [p1, p2] = pixels;
+        const cx = (p1.x + p2.x) / 2;
+        const cy = (p1.y + p2.y) / 2;
+        const rx = Math.abs(p2.x - p1.x) / 2 || 1;
+        const ry = Math.abs(p2.y - p1.y) / 2 || 1;
+        const normalized = ((mousePixel.x - cx) ** 2) / (rx ** 2) + ((mousePixel.y - cy) ** 2) / (ry ** 2);
+        return normalized <= 1.15;
+      }
+
+      case 'triangle': {
+        if (pixels.length < 2 || !pixels[0] || !pixels[1]) return false;
+        const [p1, p2] = pixels;
+        const left = Math.min(p1.x, p2.x);
+        const right = Math.max(p1.x, p2.x);
+        const top = Math.min(p1.y, p2.y);
+        const bottom = Math.max(p1.y, p2.y);
+        return mousePixel.x >= left - DRAWING_HIT_TOLERANCE &&
+          mousePixel.x <= right + DRAWING_HIT_TOLERANCE &&
+          mousePixel.y >= top - DRAWING_HIT_TOLERANCE &&
+          mousePixel.y <= bottom + DRAWING_HIT_TOLERANCE;
+      }
+
       case 'text': {
         // Text: check bounding box
         if (!pixels[0]) return false;
@@ -230,6 +268,68 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   }, []);
 
+  const beginOverlayPan = useCallback((pixel: PixelPoint) => {
+    if (!chartApi) return false;
+    const range = chartApi.timeScale().getVisibleLogicalRange();
+    if (!range) return false;
+
+    setPanState({
+      startX: pixel.x,
+      range: { from: range.from, to: range.to },
+    });
+    return true;
+  }, [chartApi]);
+
+  const handleOverlayPan = useCallback((e: React.MouseEvent) => {
+    if (!panState || !chartApi || !svgRef.current) return;
+
+    const pixel = getSVGPoint(e);
+    const width = Math.max(svgRef.current.clientWidth, 1);
+    const visibleBars = panState.range.to - panState.range.from;
+    const logicalShift = -((pixel.x - panState.startX) / width) * visibleBars;
+
+    chartApi.timeScale().setVisibleLogicalRange({
+      from: panState.range.from + logicalShift,
+      to: panState.range.to + logicalShift,
+    });
+  }, [chartApi, getSVGPoint, panState]);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    if (!chartApi || !svgRef.current) return;
+
+    const timeScale = chartApi.timeScale();
+    const range = timeScale.getVisibleLogicalRange();
+    if (!range) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const width = Math.max(svgRef.current.clientWidth, 1);
+    const span = Math.max(range.to - range.from, 1);
+
+    if (e.ctrlKey || e.metaKey) {
+      const rect = svgRef.current.getBoundingClientRect();
+      const anchorRatio = Math.max(0, Math.min(1, (e.clientX - rect.left) / width));
+      const anchor = range.from + span * anchorRatio;
+      const scale = e.deltaY > 0 ? 1.15 : 0.85;
+
+      timeScale.setVisibleLogicalRange({
+        from: anchor - (anchor - range.from) * scale,
+        to: anchor + (range.to - anchor) * scale,
+      });
+      return;
+    }
+
+    const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+    if (delta === 0) return;
+
+    const logicalShift = (delta / width) * span;
+    timeScale.setVisibleLogicalRange({
+      from: range.from + logicalShift,
+      to: range.to + logicalShift,
+    });
+  }, [chartApi]);
+
   const handleMultiClick = useCallback((e: React.MouseEvent) => {
     const pixel = getSVGPoint(e);
     const dataPoint = pixelToData(pixel);
@@ -255,6 +355,12 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const pixel = getSVGPoint(e);
 
+    if (e.button === 1 || e.button === 2 || e.shiftKey) {
+      e.preventDefault();
+      beginOverlayPan(pixel);
+      return;
+    }
+
     // Replay selection mode: click on candle to start replay from that point
     if (isReplaySelectionMode && onReplayStartSelect) {
       const dataPoint = pixelToData(pixel);
@@ -266,7 +372,8 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
 
     // Eraser mode: delete drawing on click
     if (activeTool === 'eraser') {
-      for (const d of drawings) {
+      for (const d of [...drawings].reverse()) {
+        if (d.hidden || d.locked) continue;
         if (hitTestDrawing(d, pixel)) {
           onDeleteDrawing(d.id);
           return;
@@ -279,7 +386,8 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
       // Check if clicking on a drawing for selection
       let clickedDrawingId: string | number | null = null;
 
-      for (const d of drawings) {
+      for (const d of [...drawings].reverse()) {
+        if (d.hidden) continue;
         if (hitTestDrawing(d, pixel)) {
           clickedDrawingId = d.id;
           break;
@@ -290,6 +398,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         onSetSelectedDrawingIds([clickedDrawingId]);
       } else if (onSetSelectedDrawingIds) {
         onSetSelectedDrawingIds([]);
+        beginOverlayPan(pixel);
       }
       return;
     }
@@ -311,7 +420,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     setStartDataPoint(snapped);
     setCurrentDataPoint(snapped);
     setIsDrawing(true);
-  }, [activeTool, getSVGPoint, pixelToData, magneticSnap, isMultiClick, handleMultiClick, drawings, hitTestDrawing, onDeleteDrawing, onSetSelectedDrawingIds, isReplaySelectionMode, onReplayStartSelect]);
+  }, [activeTool, getSVGPoint, pixelToData, magneticSnap, isMultiClick, handleMultiClick, drawings, hitTestDrawing, onDeleteDrawing, onSetSelectedDrawingIds, isReplaySelectionMode, onReplayStartSelect, beginOverlayPan]);
 
   // ══════════════════════════════════════════════════════════════
   // ANCHOR DRAGGING HANDLERS
@@ -346,6 +455,11 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     const pixel = getSVGPoint(e);
 
+    if (panState) {
+      handleOverlayPan(e);
+      return;
+    }
+
     // Handle anchor dragging
     if (draggingAnchor) {
       handleAnchorDrag(e);
@@ -355,7 +469,8 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     // Eraser mode: highlight drawing on hover
     if (activeTool === 'eraser') {
       let foundId: string | number | null = null;
-      for (const d of drawings) {
+      for (const d of [...drawings].reverse()) {
+        if (d.hidden) continue;
         if (hitTestDrawing(d, pixel)) {
           foundId = d.id;
           break;
@@ -377,9 +492,14 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
 
     if (!isDrawing) return;
     setCurrentDataPoint(snapped);
-  }, [isDrawing, isMultiClick, multiDataPoints.length, getSVGPoint, pixelToData, magneticSnap, activeTool, drawings, hitTestDrawing, draggingAnchor, handleAnchorDrag]);
+  }, [isDrawing, isMultiClick, multiDataPoints.length, getSVGPoint, pixelToData, magneticSnap, activeTool, drawings, hitTestDrawing, draggingAnchor, handleAnchorDrag, panState, handleOverlayPan]);
 
   const handleMouseUp = useCallback(() => {
+    if (panState) {
+      setPanState(null);
+      return;
+    }
+
     // Handle anchor drag end
     if (draggingAnchor) {
       handleAnchorMouseUp();
@@ -398,7 +518,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     setIsDrawing(false);
     setStartDataPoint(null);
     setCurrentDataPoint(null);
-  }, [isDrawing, startDataPoint, currentDataPoint, activeTool, onAddDrawing, activeSettings, draggingAnchor, handleAnchorMouseUp]);
+  }, [isDrawing, startDataPoint, currentDataPoint, activeTool, onAddDrawing, activeSettings, draggingAnchor, handleAnchorMouseUp, panState]);
 
   const handleTextSubmit = useCallback((text: string) => {
     if (!textInput || !text) {
@@ -481,8 +601,8 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     switch (d.tool) {
       case 'horizontal': {
         // Horizontal line: only needs price (y), can render even if time is off-screen
-        if (pixels.length < 1 || !pixels[0]) return null;
-        const y = pixels[0].y;
+        const y = priceToY(d.dataPoints[0].price);
+        if (y === null) return null;
         const price = d.dataPoints[0].price;
 
         return (
@@ -507,8 +627,8 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
 
       case 'vertical': {
         // Vertical line: only needs time (x), skip if off-screen
-        if (pixels.length < 1 || !pixels[0]) return null;
-        const x = pixels[0].x;
+        const x = timeToX(d.dataPoints[0].time);
+        if (x === null) return null;
         const time = d.dataPoints[0].time;
         const dateStr = new Date(time * 1000).toLocaleDateString();
 
@@ -532,6 +652,43 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         );
       }
 
+      case 'text': {
+        if (pixels.length < 1 || !pixels[0]) return null;
+        const p = pixels[0];
+        const text = d.text || '';
+        const width = Math.max(44, text.length * 7 + 12);
+
+        return (
+          <g key={key} opacity={opacity}>
+            <rect
+              x={p.x - 4}
+              y={p.y - 18}
+              width={width}
+              height={22}
+              rx={4}
+              fill={`${color}26`}
+              stroke={isSelected ? strokeColor : `${color}80`}
+              strokeWidth={isSelected ? 1.5 : 1}
+            />
+            <text x={p.x + 2} y={p.y - 3} fontSize="12" fill={strokeColor}>
+              {text}
+            </text>
+            {isSelected && !isPreview && !d.locked && (
+              <circle
+                cx={p.x}
+                cy={p.y}
+                r="6"
+                fill={strokeColor}
+                stroke="white"
+                strokeWidth="2"
+                style={{ cursor: 'move' }}
+                onMouseDown={(e) => handleAnchorMouseDown(e, d.id, 0)}
+              />
+            )}
+          </g>
+        );
+      }
+
       default: {
         // For other tools, skip if any point is off-screen
         const validPixels = pixels.filter(p => p !== null) as PixelPoint[];
@@ -539,8 +696,123 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
 
         if (validPixels.length < 2) return null;
 
-        // Render based on tool type (simplified for now)
         const [p1, p2] = validPixels;
+        const anchors = isSelected && !isPreview && !d.locked ? validPixels.map((p, index) => (
+          <circle
+            key={`${d.id}-anchor-${index}`}
+            cx={p.x}
+            cy={p.y}
+            r="6"
+            fill={strokeColor}
+            stroke="white"
+            strokeWidth="2"
+            style={{ cursor: 'move' }}
+            onMouseDown={(e) => handleAnchorMouseDown(e, d.id, index)}
+          />
+        )) : null;
+
+        if (d.tool === 'rectangle') {
+          const left = Math.min(p1.x, p2.x);
+          const top = Math.min(p1.y, p2.y);
+          const width = Math.abs(p2.x - p1.x);
+          const height = Math.abs(p2.y - p1.y);
+
+          return (
+            <g key={key} opacity={opacity}>
+              <rect
+                x={left}
+                y={top}
+                width={width}
+                height={height}
+                fill={`${color}20`}
+                stroke={strokeColor}
+                strokeWidth={strokeWidth}
+              />
+              {anchors}
+            </g>
+          );
+        }
+
+        if (d.tool === 'circle') {
+          const cx = (p1.x + p2.x) / 2;
+          const cy = (p1.y + p2.y) / 2;
+          const rx = Math.abs(p2.x - p1.x) / 2;
+          const ry = Math.abs(p2.y - p1.y) / 2;
+
+          return (
+            <g key={key} opacity={opacity}>
+              <ellipse
+                cx={cx}
+                cy={cy}
+                rx={rx}
+                ry={ry}
+                fill={`${color}16`}
+                stroke={strokeColor}
+                strokeWidth={strokeWidth}
+              />
+              {anchors}
+            </g>
+          );
+        }
+
+        if (d.tool === 'triangle') {
+          const left = Math.min(p1.x, p2.x);
+          const right = Math.max(p1.x, p2.x);
+          const top = Math.min(p1.y, p2.y);
+          const bottom = Math.max(p1.y, p2.y);
+          const points = `${(left + right) / 2},${top} ${right},${bottom} ${left},${bottom}`;
+
+          return (
+            <g key={key} opacity={opacity}>
+              <polygon
+                points={points}
+                fill={`${color}18`}
+                stroke={strokeColor}
+                strokeWidth={strokeWidth}
+              />
+              {anchors}
+            </g>
+          );
+        }
+
+        if (d.tool === 'ruler') {
+          const start = d.dataPoints[0];
+          const end = d.dataPoints[1];
+          const pct = start.price ? ((end.price - start.price) / start.price) * 100 : 0;
+          const seconds = Math.abs(end.time - start.time);
+          const duration = seconds >= 86400
+            ? `${(seconds / 86400).toFixed(1)}d`
+            : seconds >= 3600
+              ? `${(seconds / 3600).toFixed(1)}h`
+              : `${Math.round(seconds / 60)}m`;
+          const midX = (p1.x + p2.x) / 2;
+          const midY = (p1.y + p2.y) / 2;
+          const label = `${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% / ${duration}`;
+
+          return (
+            <g key={key} opacity={opacity}>
+              <line
+                x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+                stroke={strokeColor}
+                strokeWidth={strokeWidth}
+                strokeDasharray="6 4"
+              />
+              <rect
+                x={midX - 54}
+                y={midY - 26}
+                width={108}
+                height={20}
+                rx={4}
+                fill={`${color}30`}
+                stroke={`${color}80`}
+              />
+              <text x={midX} y={midY - 12} textAnchor="middle" fontSize="11" fill={strokeColor}>
+                {label}
+              </text>
+              {anchors}
+            </g>
+          );
+        }
 
         return (
           <g key={key} opacity={opacity}>
@@ -549,36 +821,12 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
               stroke={strokeColor}
               strokeWidth={strokeWidth}
             />
-            {/* Render anchors when selected */}
-            {isSelected && !isPreview && (
-              <>
-                <circle
-                  cx={p1.x}
-                  cy={p1.y}
-                  r="6"
-                  fill={strokeColor}
-                  stroke="white"
-                  strokeWidth="2"
-                  style={{ cursor: 'move' }}
-                  onMouseDown={(e) => handleAnchorMouseDown(e, d.id, 0)}
-                />
-                <circle
-                  cx={p2.x}
-                  cy={p2.y}
-                  r="6"
-                  fill={strokeColor}
-                  stroke="white"
-                  strokeWidth="2"
-                  style={{ cursor: 'move' }}
-                  onMouseDown={(e) => handleAnchorMouseDown(e, d.id, 1)}
-                />
-              </>
-            )}
+            {anchors}
           </g>
         );
       }
     }
-  }, [dataToPixel, selectedDrawingIds, hoveredDrawingId]);
+  }, [dataToPixel, handleAnchorMouseDown, hoveredDrawingId, priceToY, selectedDrawingIds, timeToX]);
 
   const renderPreview = useCallback(() => {
     if (!isDrawing || !startDataPoint || !currentDataPoint) return null;
@@ -595,10 +843,23 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
 
   const isInteractive = activeTool !== 'cursor';
   const isEraser = activeTool === 'eraser';
-  const cursor = isEraser ? 'not-allowed' : (!isInteractive ? 'default' : isMultiClick ? 'cell' : 'crosshair');
+  const shouldCapturePointer =
+    isInteractive ||
+    isReplaySelectionMode ||
+    draggingAnchor !== null ||
+    (activeTool === 'cursor' && drawings.length > 0);
+  const cursor = isReplaySelectionMode
+    ? 'crosshair'
+    : panState
+      ? 'grabbing'
+      : isEraser
+        ? 'not-allowed'
+        : activeTool === 'cursor'
+          ? 'grab'
+          : (!isInteractive ? 'default' : isMultiClick ? 'cell' : 'crosshair');
 
   return (
-    <div className="absolute inset-0 z-10" style={{ pointerEvents: isInteractive || isEraser ? 'auto' : 'none' }}>
+    <div className="absolute inset-0 z-10" style={{ pointerEvents: shouldCapturePointer ? 'auto' : 'none' }}>
       <svg
         ref={svgRef}
         className="w-full h-full"
@@ -606,7 +867,12 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
+        onWheel={handleWheel}
+        onContextMenu={(e) => {
+          if (panState) e.preventDefault();
+        }}
         onMouseLeave={() => {
+          setPanState(null);
           if (isDrawing) {
             setIsDrawing(false);
             setStartDataPoint(null);

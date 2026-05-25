@@ -1,6 +1,7 @@
 import { DATA_SOURCE } from "@/constants/env";
 import { TIMEFRAMES, normalizeTimeframe } from "@/constants/timeframes";
 import { apiGet, buildQuery, getWsBaseUrl } from "@/services/apiClient";
+import { makeClientCacheKey, withClientCache } from "@/services/clientCache";
 import {
   generateMockCandles,
   generateMockOrderBook,
@@ -10,6 +11,12 @@ import {
 import type { Candle, SymbolInfo, Ticker, Trade } from "@/types";
 
 export { TIMEFRAMES };
+
+const LIVE_TICK_CACHE_MS = 2_000;
+const ORDER_BOOK_CACHE_MS = 1_000;
+const CANDLE_LATEST_CACHE_MS = 3_000;
+const CANDLE_HISTORY_CACHE_MS = 5 * 60_000;
+const SYMBOLS_CACHE_MS = 10 * 60_000;
 
 interface RawKline {
   openTime: number;
@@ -31,6 +38,10 @@ function mapRawToCandle(k: RawKline): Candle {
   };
 }
 
+function getMockTickerPrice(symbol: string): number {
+  return generateMockTickers().find((ticker) => ticker.symbol === symbol)?.price || 100;
+}
+
 export async function fetchCandles(
   symbol: string,
   timeframe: string = "1h",
@@ -48,8 +59,24 @@ export async function fetchCandles(
       exchange,
       endTime: endTime ? endTime * 1000 : null,
     });
-    const raw = await apiGet<RawKline[]>(`/klines?${query}`);
-    return raw.map(mapRawToCandle);
+    const cacheKey = makeClientCacheKey([
+      "klines",
+      exchange,
+      symbol,
+      interval,
+      limit,
+      endTime ?? "latest",
+    ]);
+
+    return withClientCache(
+      cacheKey,
+      endTime ? CANDLE_HISTORY_CACHE_MS : CANDLE_LATEST_CACHE_MS,
+      async () => {
+        const raw = await apiGet<RawKline[]>(`/klines?${query}`);
+        return raw.map(mapRawToCandle);
+      },
+      { persist: Boolean(endTime), staleOnError: true },
+    );
   }
 
   return new Promise((resolve) => {
@@ -185,7 +212,12 @@ export function subscribeAllTimeframes(options: MultiTimeframeOptions): () => vo
 
 export async function fetchSymbols(): Promise<SymbolInfo[]> {
   if (DATA_SOURCE === "api") {
-    return apiGet<SymbolInfo[]>("/symbols");
+    return withClientCache(
+      "symbols",
+      SYMBOLS_CACHE_MS,
+      () => apiGet<SymbolInfo[]>("/symbols"),
+      { staleOnError: true },
+    );
   }
 
   return [
@@ -221,8 +253,15 @@ export async function fetchHistoricalCandles(
       endTime: endMs,
       limit,
     });
-    const raw = await apiGet<RawKline[]>(`/klines/historical?${query}`);
-    return raw.map(mapRawToCandle);
+    return withClientCache(
+      makeClientCacheKey(["klines-historical", symbol, normalizedInterval, startMs, endMs, limit]),
+      CANDLE_HISTORY_CACHE_MS,
+      async () => {
+        const raw = await apiGet<RawKline[]>(`/klines/historical?${query}`);
+        return raw.map(mapRawToCandle);
+      },
+      { staleOnError: true },
+    );
   }
 
   const hourMs = 3600 * 1000;
@@ -245,28 +284,45 @@ export interface RawOrderBookData {
 
 export async function fetchOrderBook(symbol: string): Promise<RawOrderBookData> {
   if (DATA_SOURCE === "api") {
-    return apiGet<RawOrderBookData>(`/orderbook/${encodeURIComponent(symbol)}`);
+    return withClientCache(
+      makeClientCacheKey(["orderbook", symbol]),
+      ORDER_BOOK_CACHE_MS,
+      () => apiGet<RawOrderBookData>(`/orderbook/${encodeURIComponent(symbol)}`),
+      { persist: false },
+    );
   }
-  return generateMockOrderBook(symbol === "BTCUSDT" ? 64000 : 100);
+  return generateMockOrderBook(getMockTickerPrice(symbol));
 }
 
 export async function fetchTrades(symbol: string, limit: number = 50): Promise<Trade[]> {
   if (DATA_SOURCE === "api") {
-    return apiGet<Trade[]>(`/trades/${encodeURIComponent(symbol)}?${buildQuery({ limit })}`);
+    return withClientCache(
+      makeClientCacheKey(["trades", symbol, limit]),
+      LIVE_TICK_CACHE_MS,
+      () => apiGet<Trade[]>(`/trades/${encodeURIComponent(symbol)}?${buildQuery({ limit })}`),
+      { persist: false },
+    );
   }
-  return generateMockTrades(symbol === "BTCUSDT" ? 64000 : 100, limit);
+  return generateMockTrades(getMockTickerPrice(symbol), limit);
 }
 
 export async function fetchTicker(symbol: string): Promise<Ticker> {
   if (DATA_SOURCE === "api") {
-    return apiGet<Ticker>(`/ticker/${encodeURIComponent(symbol)}`);
+    return withClientCache(
+      makeClientCacheKey(["ticker", symbol]),
+      LIVE_TICK_CACHE_MS,
+      () => apiGet<Ticker>(`/ticker/${encodeURIComponent(symbol)}`),
+      { persist: false },
+    );
   }
-  return { symbol, price: 0 };
+  return generateMockTickers().find((ticker) => ticker.symbol === symbol) || { symbol, price: 0 };
 }
 
 export async function fetchTickers(): Promise<Ticker[]> {
   if (DATA_SOURCE === "api") {
-    return apiGet<Ticker[]>("/ticker");
+    return withClientCache("tickers", LIVE_TICK_CACHE_MS, () => apiGet<Ticker[]>("/ticker"), {
+      persist: false,
+    });
   }
   return generateMockTickers();
 }

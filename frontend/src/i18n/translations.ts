@@ -11,6 +11,7 @@ const translations = {
     register: "Register",
     logout: "Logout",
     welcome: "Welcome",
+    appTagline: "Real-time crypto technical analysis",
 
     // Watchlist
     watchlist: "Watchlist",
@@ -21,15 +22,22 @@ const translations = {
     overview: "Overview",
     candlestick: "Candlestick",
     chart: "Chart",
+    charts: "Charts",
     orderBook: "Order Book",
     recentTrades: "Recent Trades",
     marketNews: "Market & News",
+    marketsAndNews: "Markets & News",
     bars: "Bars",
     line: "Line",
     area: "Area",
     menu: "Menu",
     closeMenu: "Close menu",
     dataSource: "Current data source",
+    switchToLightMode: "Switch to light mode",
+    switchToDarkMode: "Switch to dark mode",
+    toggleDrawingTools: "Toggle drawing tools",
+    toggleOverviewPanel: "Toggle overview panel",
+    closePanel: "Close panel",
 
     // Indicators
     indicators: "Indicators",
@@ -203,6 +211,8 @@ const translations = {
     articles: "articles",
     previous: "Previous",
     next: "Next",
+    listView: "List view",
+    gridView: "Grid view",
 
     // Language
     language: "Language",
@@ -282,6 +292,7 @@ const translations = {
   },
   vi: {
     // Header
+    appTagline: "Phân tích kỹ thuật crypto thời gian thực",
     products: "Sản phẩm",
     community: "Cộng đồng",
     markets: "Thị trường",
@@ -299,6 +310,8 @@ const translations = {
     all: "Tất cả",
 
     // Chart tabs
+    charts: "Biểu đồ",
+    marketsAndNews: "Thị trường & Tin tức",
     overview: "Tổng quan",
     candlestick: "Nến",
     chart: "Biểu đồ",
@@ -311,6 +324,11 @@ const translations = {
     menu: "Menu",
     closeMenu: "Đóng menu",
     dataSource: "Nguồn dữ liệu hiện tại",
+    switchToLightMode: "Chuyển sang giao diện sáng",
+    switchToDarkMode: "Chuyển sang giao diện tối",
+    toggleDrawingTools: "Bật/tắt công cụ vẽ",
+    toggleOverviewPanel: "Bật/tắt bảng tổng quan",
+    closePanel: "Đóng bảng",
 
     // Indicators
     indicators: "Chỉ báo",
@@ -484,6 +502,8 @@ const translations = {
     articles: "bài viết",
     previous: "Trước",
     next: "Tiếp",
+    listView: "Dạng danh sách",
+    gridView: "Dạng lưới",
 
     // Language
     language: "Ngôn ngữ",

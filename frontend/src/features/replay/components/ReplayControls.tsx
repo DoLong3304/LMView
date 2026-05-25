@@ -14,10 +14,10 @@ interface ReplayControlsProps {
 }
 
 const SPEED_OPTIONS = [
-  { value: 1000, label: '1/s' },
-  { value: 333, label: '3x' },
-  { value: 100, label: '10x' },
-  { value: 10, label: '100x' },
+  { value: 1, label: '1x' },
+  { value: 3, label: '3x' },
+  { value: 10, label: '10x' },
+  { value: 100, label: '100x' },
 ];
 
 export const ReplayControls: React.FC<ReplayControlsProps> = ({
@@ -32,7 +32,8 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
 }) => {
   const { t } = useI18n();
 
-  const progress = totalCandles > 0 ? (currentIndex / totalCandles) * 100 : 0;
+  const progress = totalCandles > 1 ? (currentIndex / (totalCandles - 1)) * 100 : 0;
+  const isAtEnd = totalCandles === 0 || currentIndex >= totalCandles - 1;
 
   return (
     <div className="replay-controls">
@@ -59,7 +60,7 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
           <button
             className="replay-btn"
             onClick={onStepForward}
-            disabled={isPlaying || currentIndex >= totalCandles}
+            disabled={isPlaying || isAtEnd}
             title={t('stepForward')}
           >
             <SkipForward size={18} />
@@ -69,7 +70,7 @@ export const ReplayControls: React.FC<ReplayControlsProps> = ({
         {/* Center: Progress Info */}
         <div className="replay-info">
           <span className="replay-counter">
-            {currentIndex} / {totalCandles}
+            {Math.min(currentIndex + 1, totalCandles)} / {totalCandles}
           </span>
           <span className="replay-label">{t('replayMode')}</span>
         </div>

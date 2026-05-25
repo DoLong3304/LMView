@@ -1,7 +1,11 @@
 import { DATA_SOURCE } from "@/constants/env";
 import { apiGet, buildQuery } from "@/services/apiClient";
+import { makeClientCacheKey, withClientCache } from "@/services/clientCache";
 import { generateMockNews } from "@/data/mockDataGenerator";
 import type { NewsArticle, NewsFilters, TrendingSymbol } from "@/types";
+
+const NEWS_CACHE_MS = 60_000;
+const TRENDING_SYMBOLS_CACHE_MS = 60_000;
 
 function normalizeNewsItem(item: Partial<NewsArticle>): NewsArticle {
   return {
@@ -38,7 +42,18 @@ export async function fetchLatestNews(filters: NewsFilters = {}): Promise<NewsAr
     source: filters.source === "all" ? undefined : filters.source,
     symbol: filters.symbol === "all" ? undefined : filters.symbol,
   });
-  const payload = await apiGet<{ articles?: NewsArticle[] } | NewsArticle[]>(`/news/latest?${query}`);
+  const payload = await withClientCache(
+    makeClientCacheKey([
+      "news-latest",
+      filters.limit || 100,
+      filters.hours || 24,
+      filters.source || "all",
+      filters.symbol || "all",
+    ]),
+    NEWS_CACHE_MS,
+    () => apiGet<{ articles?: NewsArticle[] } | NewsArticle[]>(`/news/latest?${query}`),
+    { staleOnError: true },
+  );
   const articles = Array.isArray(payload) ? payload : payload.articles || [];
   return articles.map(normalizeNewsItem);
 }
@@ -56,7 +71,12 @@ export async function searchNews(filters: NewsFilters): Promise<NewsArticle[]> {
   }
 
   const query = buildQuery({ q: filters.query, limit: filters.limit || 100 });
-  const payload = await apiGet<{ articles?: NewsArticle[] } | NewsArticle[]>(`/news/search?${query}`);
+  const payload = await withClientCache(
+    makeClientCacheKey(["news-search", filters.query, filters.limit || 100]),
+    NEWS_CACHE_MS,
+    () => apiGet<{ articles?: NewsArticle[] } | NewsArticle[]>(`/news/search?${query}`),
+    { staleOnError: true },
+  );
   const articles = Array.isArray(payload) ? payload : payload.articles || [];
   return articles.map(normalizeNewsItem);
 }
@@ -71,8 +91,14 @@ export async function fetchTrendingSymbols(limit: number = 10): Promise<Trending
     ].slice(0, limit);
   }
 
-  const payload = await apiGet<{ trending_symbols?: TrendingSymbol[] } | TrendingSymbol[]>(
-    `/news/trending?${buildQuery({ limit })}`,
+  const payload = await withClientCache(
+    makeClientCacheKey(["news-trending", limit]),
+    TRENDING_SYMBOLS_CACHE_MS,
+    () =>
+      apiGet<{ trending_symbols?: TrendingSymbol[] } | TrendingSymbol[]>(
+        `/news/trending?${buildQuery({ limit })}`,
+      ),
+    { staleOnError: true },
   );
   return Array.isArray(payload) ? payload : payload.trending_symbols || [];
 }
