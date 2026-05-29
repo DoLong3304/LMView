@@ -22,8 +22,6 @@ interface LeftSidebarProps {
   activeTool: DrawingTool;
   onToolChange: (tool: DrawingTool) => void;
   onClearAll: () => void;
-  onDeleteSelected: () => void;
-  selectedDrawingIds: string[];
   onLockAll: () => void;
   onHideAll: () => void;
   magnetEnabled: boolean;
@@ -48,8 +46,6 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   activeTool,
   onToolChange,
   onClearAll,
-  onDeleteSelected,
-  selectedDrawingIds,
   onLockAll,
   onHideAll,
   magnetEnabled,
@@ -61,27 +57,33 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const { t } = useI18n();
 
   return (
-    <div className="bg-gray-900 border-r border-gray-700 flex h-full max-h-full flex-col" style={{ width: 56 }}>
+    <div
+      className="flex h-full flex-shrink-0 flex-col justify-start border-r border-gray-700 bg-gray-900"
+      style={{ width: 56, minWidth: 56, maxWidth: 56 }}
+    >
       {/* Replay button */}
       <button
+        type="button"
         onClick={onReplayClick}
-        className={`w-full p-3 flex items-center justify-center border-b border-gray-700 transition-colors ${
-          isReplayActive || isReplaySelectionMode
+        disabled={isReplaySelectionMode}
+        className={`flex h-11 w-full flex-shrink-0 items-center justify-center border-b border-gray-700 transition-colors ${
+          isReplayActive
             ? "bg-blue-600 text-white"
             : "text-gray-400 hover:text-white hover:bg-gray-800"
-        }`}
-        title={isReplaySelectionMode ? t("selectReplayStart") : t("replay")}
+        } ${isReplaySelectionMode ? "opacity-50 cursor-not-allowed" : ""}`}
+        title={t("replay")}
       >
         <Play size={20} />
       </button>
 
       {/* Drawing tools */}
-      <div className="flex-1 overflow-y-auto py-2">
+      <div className="flex min-h-0 flex-1 flex-col justify-start overflow-y-auto py-2">
         {DRAWING_TOOLS.map(({ id, icon: Icon, labelKey }) => (
           <button
             key={id}
+            type="button"
             onClick={() => onToolChange(id)}
-            className={`w-full p-3 flex items-center justify-center transition-colors ${
+            className={`flex h-11 w-full flex-shrink-0 items-center justify-center transition-colors ${
               activeTool === id
                 ? "bg-blue-600 text-white"
                 : "text-gray-400 hover:text-white hover:bg-gray-800"
@@ -91,13 +93,11 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
             <Icon size={20} />
           </button>
         ))}
-      </div>
 
-      {/* Bottom actions */}
-      <div className="border-t border-gray-700">
         <button
+          type="button"
           onClick={onMagnetToggle}
-          className={`w-full p-3 flex items-center justify-center transition-colors ${
+          className={`flex h-11 w-full flex-shrink-0 items-center justify-center transition-colors ${
             magnetEnabled
               ? "bg-blue-600 text-white"
               : "text-gray-400 hover:text-white hover:bg-gray-800"
@@ -107,34 +107,25 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
           <Settings size={20} />
         </button>
         <button
+          type="button"
           onClick={onLockAll}
-          className="w-full p-3 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+          className="flex h-11 w-full flex-shrink-0 items-center justify-center text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
           title={t("lockAll")}
         >
           <Lock size={20} />
         </button>
         <button
+          type="button"
           onClick={onHideAll}
-          className="w-full p-3 flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+          className="flex h-11 w-full flex-shrink-0 items-center justify-center text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
           title={t("hideAll")}
         >
           <EyeOff size={20} />
         </button>
         <button
-          onClick={onDeleteSelected}
-          disabled={selectedDrawingIds.length === 0}
-          className={`w-full p-3 flex items-center justify-center transition-colors ${
-            selectedDrawingIds.length > 0
-              ? "text-red-400 hover:text-red-300 hover:bg-gray-800"
-              : "text-gray-600 cursor-not-allowed"
-          }`}
-          title={t("deleteSelected")}
-        >
-          <Trash2 size={20} />
-        </button>
-        <button
+          type="button"
           onClick={onClearAll}
-          className="w-full p-3 flex items-center justify-center text-gray-400 hover:text-red-400 hover:bg-gray-800 transition-colors"
+          className="flex h-11 w-full flex-shrink-0 items-center justify-center text-gray-400 transition-colors hover:bg-gray-800 hover:text-red-400"
           title={t("clearAll")}
         >
           <Trash2 size={20} />

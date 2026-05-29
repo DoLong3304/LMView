@@ -1,5 +1,5 @@
 import React, { useState, useRef, useCallback } from "react";
-import { Settings, Eraser, Trash2 } from "lucide-react";
+import { Settings, Eraser } from "lucide-react";
 import ToolSettingsPopup, { DEFAULT_TOOL_SETTINGS, type ToolSettings } from "./ToolSettingsPopup";
 import { useI18n } from "@/i18n";
 import type { TranslationKey } from "@/i18n/translations";
@@ -253,11 +253,6 @@ const TOOL_GROUPS: ToolGroup[] = [
         icon: <Eraser className="w-5 h-5" />,
       },
       {
-        id: "deleteSelected",
-        labelKey: "deleteSelected",
-        icon: <Trash2 className="w-5 h-5" />,
-      },
-      {
         id: "clearAll",
         labelKey: "clearAll",
         icon: (
@@ -278,8 +273,6 @@ interface DrawingToolbarProps {
   activeTool: string;
   onToolChange: (toolId: string) => void;
   onClearAll: () => void;
-  onDeleteSelected?: () => void;
-  selectedDrawingIds?: (string | number)[];
   onLockAll?: () => void;
   onHideAll?: () => void;
   magnetEnabled?: boolean;
@@ -292,8 +285,6 @@ const DrawingToolbar: React.FC<DrawingToolbarProps> = ({
   activeTool,
   onToolChange,
   onClearAll,
-  onDeleteSelected,
-  selectedDrawingIds = [],
   onLockAll,
   onHideAll,
   magnetEnabled = false,
@@ -314,13 +305,6 @@ const DrawingToolbar: React.FC<DrawingToolbarProps> = ({
         }
         return;
       }
-      if (toolId === "deleteSelected") {
-        // Delete selected drawings
-        if (selectedDrawingIds.length > 0) {
-          onDeleteSelected?.();
-        }
-        return;
-      }
       if (toolId === "magnet") {
         onMagnetToggle?.();
         return;
@@ -336,7 +320,7 @@ const DrawingToolbar: React.FC<DrawingToolbarProps> = ({
       // For eraser and other tools, set as active tool
       onToolChange(toolId);
     },
-    [onToolChange, onClearAll, onDeleteSelected, selectedDrawingIds, onLockAll, onHideAll, onMagnetToggle, t]
+    [onToolChange, onClearAll, onLockAll, onHideAll, onMagnetToggle, t]
   );
 
   const handleSettingsClick = useCallback((e: React.MouseEvent, toolId: string) => {
@@ -352,8 +336,6 @@ const DrawingToolbar: React.FC<DrawingToolbarProps> = ({
           {group.tools.map((tool) => {
             const isActive = activeTool === tool.id || (tool.id === "magnet" && magnetEnabled);
             const hasSettings = SETTINGS_TOOLS.has(tool.id);
-            const isDisabled = tool.id === "deleteSelected" && selectedDrawingIds.length === 0;
-            const selectedCount = tool.id === "deleteSelected" ? selectedDrawingIds.length : 0;
             return (
               <div
                 key={tool.id}
@@ -365,22 +347,14 @@ const DrawingToolbar: React.FC<DrawingToolbarProps> = ({
                 <button
                   title={t(tool.labelKey)}
                   onClick={() => handleToolClick(tool.id)}
-                  disabled={isDisabled}
                   className={`p-2 rounded-md transition-all duration-150 ${
                     isActive
                       ? "bg-blue-600 text-white shadow-md"
-                      : isDisabled
-                      ? "text-gray-600 cursor-not-allowed opacity-50"
                       : "text-gray-400 hover:text-white hover:bg-gray-700"
                   }`}
                 >
                   {tool.icon}
                 </button>
-                {selectedCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">
-                    {selectedCount}
-                  </span>
-                )}
                 {hasSettings && (
                   <button
                     onClick={(e) => handleSettingsClick(e, tool.id)}

@@ -50,17 +50,24 @@ function buildWatchlist(symbolNames: string[]): WatchlistItemData[] {
   }));
 }
 
+function isEditableTarget(target: EventTarget | null): boolean {
+  if (!target || !(target instanceof HTMLElement)) return false;
+
+  const tagName = target.tagName.toLowerCase();
+  return target.isContentEditable || ["input", "textarea", "select"].includes(tagName);
+}
+
 const TradingDashboard: React.FC = () => {
   const { t } = useI18n();
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme);
   const [isDesktop, setIsDesktop] = useState(isDesktopLayout);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(isDesktopLayout);
-  const [isDrawingToolbarOpen, setIsDrawingToolbarOpen] = useState(isDesktopLayout);
   const [appView, setAppView] = useState<AppView>("charts");
   const [activeTool, setActiveTool] = useState("cursor");
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [selectedDrawingIds, setSelectedDrawingIds] = useState<(string | number)[]>([]);
+  const [isClearDrawingsConfirmOpen, setIsClearDrawingsConfirmOpen] = useState(false);
   const [magnetEnabled, setMagnetEnabled] = useState(false);
   const [currentTimeframe, setCurrentTimeframe] = useState<TimeframeKey>("1m");
   const [chartType, setChartType] = useState<ChartType>("candles");
@@ -73,7 +80,7 @@ const TradingDashboard: React.FC = () => {
   const [starredSymbols, setStarredSymbols] = useState<string[]>(() =>
     loadFromStorage("app_starred", []),
   );
-  const [symbols, setSymbols] = useState<string[]>([...FALLBACK_SYMBOLS]);
+  const [symbols, setSymbols] = useState<string[]>(() => [...FALLBACK_SYMBOLS]);
   const [watchlistItems, setWatchlistItems] = useState<WatchlistItemData[]>(() =>
     buildWatchlist([...FALLBACK_SYMBOLS]),
   );
@@ -91,7 +98,6 @@ const TradingDashboard: React.FC = () => {
       const desktop = mediaQuery.matches;
       setIsDesktop(desktop);
       setIsRightPanelOpen(desktop);
-      setIsDrawingToolbarOpen(desktop);
     };
 
     syncLayout();
@@ -204,9 +210,14 @@ const TradingDashboard: React.FC = () => {
     setIsDrawing(false);
   }, []);
 
+  const handleToolChange = useCallback((tool: string) => {
+    setActiveTool((current) => (tool === "eraser" && current === "eraser" ? "cursor" : tool));
+    setSelectedDrawingIds([]);
+  }, []);
+
   const handleDeleteDrawingsInternal = useCallback(
     (ids: (string | number)[]) => {
-      setDrawings((prev) => prev.filter((d) => !ids.includes(d.id)));
+      setDrawings((prev) => prev.filter((d) => d.locked || !ids.includes(d.id)));
       setSelectedDrawingIds([]);
     },
     []
@@ -260,20 +271,19 @@ const TradingDashboard: React.FC = () => {
     (id: string | number, updates: Partial<Drawing>) => {
       setDrawings((prev) => {
         const oldDrawing = prev.find(d => d.id === id);
+        if (!oldDrawing || oldDrawing.locked) return prev;
         const newDrawings = prev.map((d) => (d.id === id ? { ...d, ...updates } : d));
 
         // Record update command
-        if (oldDrawing) {
-          const newDrawing = newDrawings.find(d => d.id === id);
-          addCommand({
-            type: 'update',
-            timestamp: Date.now(),
-            drawingId: id,
-            before: oldDrawing,
-            after: newDrawing,
-            description: `Update ${oldDrawing.tool}`,
-          });
-        }
+        const newDrawing = newDrawings.find(d => d.id === id);
+        addCommand({
+          type: 'update',
+          timestamp: Date.now(),
+          drawingId: id,
+          before: oldDrawing,
+          after: newDrawing,
+          description: `Update ${oldDrawing.tool}`,
+        });
 
         return newDrawings;
       });
@@ -285,44 +295,32 @@ const TradingDashboard: React.FC = () => {
     (id: string | number) => {
       setDrawings((prev) => {
         const deletedDrawing = prev.find(d => d.id === id);
+        if (!deletedDrawing || deletedDrawing.locked) return prev;
 
         // Record delete command
-        if (deletedDrawing) {
-          addCommand({
-            type: 'delete',
-            timestamp: Date.now(),
-            drawingId: id,
-            before: deletedDrawing,
-            description: `Delete ${deletedDrawing.tool}`,
-          });
-        }
+        addCommand({
+          type: 'delete',
+          timestamp: Date.now(),
+          drawingId: id,
+          before: deletedDrawing,
+          description: `Delete ${deletedDrawing.tool}`,
+        });
 
         return prev.filter((d) => d.id !== id);
       });
       setSelectedDrawingIds((prev) => prev.filter((sid) => sid !== id));
+      if (activeTool === "eraser") {
+        setActiveTool("cursor");
+      }
     },
-    [addCommand]
-  );
-
-  const handleDeleteDrawings = useCallback(
-    (ids: (string | number)[]) => {
-      if (ids.length === 0) return;
-      const deletedDrawings = drawings.filter((d) => ids.includes(d.id));
-      addCommand({
-        type: 'delete',
-        timestamp: Date.now(),
-        drawingIds: ids,
-        before: deletedDrawings,
-        description: `Delete ${ids.length} drawing(s)`,
-      });
-      handleDeleteDrawingsInternal(ids);
-    },
-    [addCommand, drawings, handleDeleteDrawingsInternal],
+    [activeTool, addCommand]
   );
 
   const handleClearAll = useCallback(async () => {
     setDrawings([]);
+    setSelectedDrawingIds([]);
     setActiveTool("cursor");
+    setIsClearDrawingsConfirmOpen(false);
     try {
       await deleteDrawings({
         symbol: selectedSymbol,
@@ -334,16 +332,26 @@ const TradingDashboard: React.FC = () => {
     }
   }, [selectedSymbol, currentTimeframe]);
 
+  const handleRequestClearAllDrawings = useCallback(() => {
+    setIsClearDrawingsConfirmOpen(true);
+  }, []);
+
   const handleLockAll = useCallback(() => {
-    setDrawings((prev) =>
-      prev.map((d) => ({ ...d, locked: !d.locked }))
-    );
+    setDrawings((prev) => {
+      const shouldLock = prev.some((d) => !d.locked);
+      return prev.map((d) => ({ ...d, locked: shouldLock }));
+    });
+    setSelectedDrawingIds([]);
+    setActiveTool("cursor");
   }, []);
 
   const handleHideAll = useCallback(() => {
-    setDrawings((prev) =>
-      prev.map((d) => ({ ...d, hidden: !d.hidden }))
-    );
+    setDrawings((prev) => {
+      const shouldHide = prev.some((d) => !d.hidden);
+      return prev.map((d) => ({ ...d, hidden: shouldHide }));
+    });
+    setSelectedDrawingIds([]);
+    setActiveTool("cursor");
   }, []);
 
   const handleSymbolSelect = useCallback((symbol: string) => {
@@ -366,6 +374,16 @@ const TradingDashboard: React.FC = () => {
 
   const handleToggleTheme = useCallback(() => {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
+  }, []);
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || isEditableTarget(event.target)) return;
+      setActiveTool((current) => (current === "cursor" ? current : "cursor"));
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
   }, []);
 
   // State lifted from CandlestickChart for Overview + DrawingToolbar data.
@@ -452,6 +470,13 @@ const TradingDashboard: React.FC = () => {
     }
   }, [isReplayActive, candleSeries, chartCandles]);
 
+  const drawingsLocked = drawings.length > 0 && drawings.every((drawing) => drawing.locked);
+  useEffect(() => {
+    if (activeTool === "eraser" && (drawings.length === 0 || drawingsLocked)) {
+      setActiveTool("cursor");
+    }
+  }, [activeTool, drawings.length, drawingsLocked]);
+
   // Get selected drawing for context toolbar
   const selectedDrawing = selectedDrawingIds.length === 1
     ? drawings.find(d => d.id === selectedDrawingIds[0]) || null
@@ -473,9 +498,9 @@ const TradingDashboard: React.FC = () => {
   }, [selectedDrawing, t]);
 
   // Resizable right sidebar
-  const SIDEBAR_MIN = 280;
-  const SIDEBAR_MAX = 520;
-  const SIDEBAR_DEFAULT = 340;
+  const SIDEBAR_MIN = 240;
+  const SIDEBAR_MAX = 380;
+  const SIDEBAR_DEFAULT = 286;
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
   const dragging = useRef(false);
 
@@ -497,27 +522,17 @@ const TradingDashboard: React.FC = () => {
   }, []);
 
   const isChartsView = appView === "charts";
-  const showDrawingToolbar = isChartsView && (isDesktop || isDrawingToolbarOpen);
+  const showDrawingToolbar = isChartsView;
   const showRightPanel = isChartsView && isRightPanelOpen;
   const compactRightPanelWidth = typeof window === "undefined"
-    ? 340
-    : Math.min(360, Math.floor(window.innerWidth * 0.92));
+    ? 300
+    : Math.min(300, Math.floor(window.innerWidth * 0.86));
 
   return (
     <div className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
       <Header
-        selectedSymbol={selectedSymbol}
-        symbols={symbols}
-        onSymbolChange={handleSymbolSelect}
-        timeframe={currentTimeframe}
-        onTimeframeChange={handleTimeframeChange}
-        chartType={chartType}
-        onChartTypeChange={setChartType}
         themeMode={themeMode}
         onThemeToggle={handleToggleTheme}
-        isCompactLayout={!isDesktop}
-        isDrawingToolbarOpen={isDrawingToolbarOpen}
-        onToggleDrawingToolbar={() => setIsDrawingToolbarOpen((open) => !open)}
         isRightPanelOpen={isRightPanelOpen}
         onToggleRightPanel={() => setIsRightPanelOpen((open) => !open)}
         activeView={appView}
@@ -557,20 +572,37 @@ const TradingDashboard: React.FC = () => {
           </div>
         ) : (
           <>
+        {/* Left Sidebar */}
+        {showDrawingToolbar && (
+          <LeftSidebar
+            activeTool={activeTool as any}
+            onToolChange={handleToolChange as any}
+            onClearAll={handleRequestClearAllDrawings}
+            onLockAll={handleLockAll}
+            onHideAll={handleHideAll}
+            magnetEnabled={magnetEnabled}
+            onMagnetToggle={() => setMagnetEnabled((prev) => !prev)}
+            onReplayClick={handleReplayButtonClick}
+            isReplayActive={isReplayActive}
+            isReplaySelectionMode={isReplaySelectionMode}
+          />
+        )}
+
         {/* Chart area */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0" ref={chartContainerRef}>
           <div className="flex-1 bg-gray-900">
             <CandlestickChart
               symbol={selectedSymbol}
-              timeframe={currentTimeframe}
               symbols={symbols}
               starredSymbols={starredSymbols}
-              onToggleStar={handleToggleStar}
-              onSymbolChange={handleSymbolSelect}
+              timeframe={currentTimeframe}
               onCandlesChange={setChartCandles}
               onTimeframeChange={handleTimeframeChange}
+              onSymbolChange={handleSymbolSelect}
+              onToggleStar={handleToggleStar}
               themeMode={themeMode}
               chartType={chartType}
+              onChartTypeChange={setChartType}
               isReplayActive={isReplayActive}
             >
               {(chartApiRef, candleSeriesRef) => {
@@ -579,24 +611,6 @@ const TradingDashboard: React.FC = () => {
 
                 return (
                   <>
-                    {showDrawingToolbar && (
-                      <div className="absolute left-2 top-2 z-[120] max-h-[calc(100%-1rem)] rounded-lg overflow-hidden border border-gray-700 shadow-2xl">
-                        <LeftSidebar
-                          activeTool={activeTool as any}
-                          onToolChange={setActiveTool as any}
-                          onClearAll={handleClearAll}
-                          onDeleteSelected={() => handleDeleteDrawings(selectedDrawingIds)}
-                          selectedDrawingIds={selectedDrawingIds.map(String)}
-                          onLockAll={handleLockAll}
-                          onHideAll={handleHideAll}
-                          magnetEnabled={magnetEnabled}
-                          onMagnetToggle={() => setMagnetEnabled((prev) => !prev)}
-                          onReplayClick={handleReplayButtonClick}
-                          isReplayActive={isReplayActive}
-                          isReplaySelectionMode={isReplaySelectionMode}
-                        />
-                      </div>
-                    )}
                     <ChartOverlay
                       activeTool={activeTool}
                       drawings={drawings}
@@ -611,7 +625,7 @@ const TradingDashboard: React.FC = () => {
                       isReplaySelectionMode={isReplaySelectionMode}
                       onReplayStartSelect={handleReplayStartSelect}
                     />
-                    {selectedDrawing && (
+                    {selectedDrawing && !selectedDrawing.locked && (
                       <DrawingContextToolbar
                         drawing={selectedDrawing}
                         position={toolbarPosition}
@@ -665,7 +679,7 @@ const TradingDashboard: React.FC = () => {
               className={
                 isDesktop
                   ? "flex-shrink-0"
-                  : "fixed right-0 top-0 z-[190] h-screen max-w-[92vw] shadow-2xl"
+                  : "fixed right-0 top-0 z-[190] h-screen max-w-[86vw] shadow-2xl"
               }
             >
               <RightPanel
@@ -679,6 +693,7 @@ const TradingDashboard: React.FC = () => {
                 onToggleStar={handleToggleStar}
                 width={isDesktop ? sidebarWidth : compactRightPanelWidth}
                 candles={chartCandles}
+                timeframe={currentTimeframe}
               />
             </div>
           </>
@@ -686,6 +701,43 @@ const TradingDashboard: React.FC = () => {
           </>
         )}
       </main>
+
+      {isClearDrawingsConfirmOpen && (
+        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/60 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="clear-drawings-title"
+            className="w-full max-w-sm rounded border border-gray-700 bg-gray-850 shadow-2xl"
+          >
+            <div className="border-b border-gray-700 px-4 py-3">
+              <h2 id="clear-drawings-title" className="text-sm font-semibold text-white">
+                {t("clearAllDrawings")}
+              </h2>
+            </div>
+            <div className="space-y-2 px-4 py-4">
+              <p className="text-sm text-gray-200">{t("confirmClearDrawings")}</p>
+              <p className="text-xs text-gray-500">{t("actionCannotBeUndone")}</p>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-gray-700 px-4 py-3">
+              <button
+                type="button"
+                onClick={() => setIsClearDrawingsConfirmOpen(false)}
+                className="rounded border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
+              >
+                {t("cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAll}
+                className="rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-red-500"
+              >
+                {t("deleteAll")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
