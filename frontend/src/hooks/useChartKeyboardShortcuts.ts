@@ -216,20 +216,25 @@ export function useChartKeyboardShortcuts({
   const cut = useCallback(() => {
     if (selectedDrawingIds.length === 0) return;
 
-    copy();
+    const editableIds = selectedDrawingIds.filter((id) =>
+      drawings.some((drawing) => drawing.id === id && !drawing.locked),
+    );
+    if (editableIds.length === 0) return;
+
+    const deletedDrawings = drawings.filter(d => editableIds.includes(d.id));
+    clipboardRef.current = JSON.parse(JSON.stringify(deletedDrawings));
 
     // Record delete command
-    const deletedDrawings = drawings.filter(d => selectedDrawingIds.includes(d.id));
     addCommand({
       type: 'delete',
       timestamp: Date.now(),
-      drawingIds: selectedDrawingIds,
+      drawingIds: editableIds,
       before: deletedDrawings,
-      description: `Cut ${selectedDrawingIds.length} drawing(s)`,
+      description: `Cut ${editableIds.length} drawing(s)`,
     });
 
-    onDeleteDrawings(selectedDrawingIds);
-  }, [copy, onDeleteDrawings, selectedDrawingIds, drawings, addCommand]);
+    onDeleteDrawings(editableIds);
+  }, [onDeleteDrawings, selectedDrawingIds, drawings, addCommand]);
 
   // Paste
   const paste = useCallback(() => {
@@ -272,24 +277,28 @@ export function useChartKeyboardShortcuts({
 
   // Select all
   const selectAll = useCallback(() => {
-    onSetSelectedDrawingIds(drawings.map(d => d.id));
+    onSetSelectedDrawingIds(drawings.filter((drawing) => !drawing.locked).map(d => d.id));
   }, [drawings, onSetSelectedDrawingIds]);
 
   // Delete
   const deleteSelected = useCallback(() => {
     if (selectedDrawingIds.length === 0) return;
+    const editableIds = selectedDrawingIds.filter((id) =>
+      drawings.some((drawing) => drawing.id === id && !drawing.locked),
+    );
+    if (editableIds.length === 0) return;
 
     // Record delete command
-    const deletedDrawings = drawings.filter(d => selectedDrawingIds.includes(d.id));
+    const deletedDrawings = drawings.filter(d => editableIds.includes(d.id));
     addCommand({
       type: 'delete',
       timestamp: Date.now(),
-      drawingIds: selectedDrawingIds,
+      drawingIds: editableIds,
       before: deletedDrawings,
-      description: `Delete ${selectedDrawingIds.length} drawing(s)`,
+      description: `Delete ${editableIds.length} drawing(s)`,
     });
 
-    onDeleteDrawings(selectedDrawingIds);
+    onDeleteDrawings(editableIds);
   }, [selectedDrawingIds, onDeleteDrawings, drawings, addCommand]);
 
   // Check if target is text input

@@ -66,8 +66,8 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors
-          ${active ? "bg-amber-600 border-amber-500 text-white" : "border-gray-600 text-gray-400 hover:text-white hover:border-gray-400"}`}
+        className={`flex h-7 items-center justify-center gap-1.5 rounded px-2 text-xs font-semibold transition-colors
+          ${active ? "bg-amber-600 text-white shadow-sm shadow-amber-950/40" : "text-gray-400 hover:bg-gray-700 hover:text-white"}`}
         title={
           active
             ? t("historicalModeTooltip")
@@ -79,7 +79,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-[110] bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-3 w-72">
+        <div className="absolute left-0 top-full mt-1 z-[110] w-[min(288px,calc(100vw-1rem))] rounded-lg border border-gray-600 bg-gray-800 p-3 shadow-xl">
           <div className="text-xs text-gray-400 mb-2 font-medium">
             {t("selectDateRange")}
           </div>

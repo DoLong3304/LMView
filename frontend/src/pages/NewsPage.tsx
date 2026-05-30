@@ -153,26 +153,26 @@ const NewsPage: React.FC = () => {
 
   return (
     <div className="h-full min-h-0 bg-gray-900 text-gray-100 flex flex-col">
-      <div className="flex-shrink-0 p-4 md:p-6">
-        <div className="mb-4">
-          <h1 className="text-2xl md:text-3xl font-bold mb-2 flex items-center gap-3">
-            <Newspaper className="text-blue-400" size={28} />
+      <div className="flex-shrink-0 p-3 md:p-4">
+        <div className="mb-3">
+          <h1 className="text-xl md:text-2xl font-bold mb-1.5 flex items-center gap-2">
+            <Newspaper className="text-blue-400" size={24} />
             {t("newsFeedTitle")}
           </h1>
-          <div className="flex items-center gap-3 text-sm text-gray-400">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
             <span>{t("newsFeedSubtitle")}</span>
             <span>|</span>
             <span className="flex items-center gap-1">
-              <Clock size={14} />
+              <Clock size={12} />
               {t("updatedAgo")} {formatTimeAgo(lastUpdate.getTime())}
             </span>
           </div>
         </div>
 
-        <div className="bg-gray-850 border border-gray-800 rounded p-4">
-          <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-            <div className="md:col-span-4 relative">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+        <div className="bg-gray-850 border border-gray-800 rounded p-2.5">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-12">
+            <div className="relative sm:col-span-2 lg:col-span-3">
+              <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-500" />
               <input
                 type="text"
                 placeholder={t("searchNews")}
@@ -182,11 +182,12 @@ const NewsPage: React.FC = () => {
                   setCurrentPage(1);
                 }}
                 onKeyDown={(e) => e.key === "Enter" && fetchNewsData()}
-                className="w-full bg-gray-800 border border-gray-700 text-sm rounded pl-10 pr-3 py-2.5 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none transition-colors"
+                className="w-full bg-gray-800 border border-gray-700 text-xs rounded pl-8 pr-2.5 py-1.5 text-white placeholder-gray-500 focus:border-blue-500 focus:outline-none transition-colors"
               />
             </div>
 
             <FilterSelect
+              className="lg:col-span-2"
               value={selectedSource}
               onChange={(value) => {
                 setSelectedSource(value);
@@ -197,6 +198,7 @@ const NewsPage: React.FC = () => {
             />
 
             <FilterSelect
+              className="lg:col-span-2"
               value={selectedSymbol}
               onChange={(value) => {
                 setSelectedSymbol(value);
@@ -206,14 +208,14 @@ const NewsPage: React.FC = () => {
               allLabel={t("allSymbols")}
             />
 
-            <div className="md:col-span-2">
+            <div className="lg:col-span-2">
               <select
                 value={timeRange}
                 onChange={(e) => {
                   setTimeRange(Number(e.target.value));
                   setCurrentPage(1);
                 }}
-                className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded px-3 py-2.5 focus:border-blue-500 focus:outline-none transition-colors"
+                className="w-full bg-gray-800 border border-gray-700 text-white text-xs rounded px-2.5 py-1.5 focus:border-blue-500 focus:outline-none transition-colors"
               >
                 <option value={1}>{t("lastHour")}</option>
                 <option value={6}>{t("last6Hours")}</option>
@@ -223,39 +225,40 @@ const NewsPage: React.FC = () => {
               </select>
             </div>
 
-            <div className="md:col-span-2">
+            <div className="lg:col-span-1">
               <button
                 onClick={handleRefresh}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm rounded px-3 py-2.5 flex items-center justify-center gap-2 transition-colors"
+                title={t("refresh")}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs rounded px-2 py-1.5 flex items-center justify-center gap-1.5 transition-colors"
               >
-                <RefreshCw size={16} />
-                {t("refresh")}
+                <RefreshCw size={14} />
+                <span className="lg:hidden xl:inline">{t("refresh")}</span>
               </button>
             </div>
 
-            <div className="md:col-span-2 flex items-center gap-1 rounded border border-gray-700 bg-gray-800 p-1">
+            <div className="flex items-center gap-0.5 rounded border border-gray-700 bg-gray-800 p-0.5 lg:col-span-2">
               <button
                 onClick={() => setViewMode("list")}
-                className={`flex flex-1 items-center justify-center rounded px-2 py-1.5 transition-colors ${
+                className={`flex flex-1 items-center justify-center rounded px-2 py-1 transition-colors ${
                   viewMode === "list"
                     ? "bg-blue-600 text-white"
                     : "text-gray-400 hover:bg-gray-700 hover:text-white"
                 }`}
                 title={t("listView")}
               >
-                <List size={16} />
+                <List size={14} />
               </button>
               {canUseGrid && (
                 <button
                   onClick={() => setViewMode("grid")}
-                  className={`flex flex-1 items-center justify-center rounded px-2 py-1.5 transition-colors ${
+                  className={`flex flex-1 items-center justify-center rounded px-2 py-1 transition-colors ${
                     viewMode === "grid"
                       ? "bg-blue-600 text-white"
                       : "text-gray-400 hover:bg-gray-700 hover:text-white"
                   }`}
                   title={t("gridView")}
                 >
-                  <LayoutGrid size={16} />
+                  <LayoutGrid size={14} />
                 </button>
               )}
             </div>
@@ -263,7 +266,7 @@ const NewsPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-hidden px-4 md:px-6 pb-4 md:pb-6">
+      <div className="flex-1 min-h-0 overflow-hidden px-3 md:px-4 pb-3 md:pb-4">
         <div className="grid h-full min-h-0 grid-cols-1 gap-6 lg:grid-cols-4">
           <main ref={listRef} className="lg:col-span-3 min-h-0 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-gray-700 scrollbar-track-gray-900">
             {loading ? (
@@ -379,15 +382,16 @@ interface FilterSelectProps {
   onChange: (value: string) => void;
   options: string[];
   allLabel: string;
+  className?: string;
 }
 
-function FilterSelect({ value, onChange, options, allLabel }: FilterSelectProps) {
+function FilterSelect({ value, onChange, options, allLabel, className = "" }: FilterSelectProps) {
   return (
-    <div className="md:col-span-2">
+    <div className={className}>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full bg-gray-800 border border-gray-700 text-white text-sm rounded px-3 py-2.5 focus:border-blue-500 focus:outline-none transition-colors"
+        className="w-full bg-gray-800 border border-gray-700 text-white text-xs rounded px-2.5 py-1.5 focus:border-blue-500 focus:outline-none transition-colors"
       >
         {options.map((option) => (
           <option key={option} value={option}>

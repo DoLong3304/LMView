@@ -71,17 +71,17 @@ const OrderBook: React.FC<OrderBookProps> = ({ symbol }) => {
     });
 
   return (
-    <div className="h-full flex flex-col text-xs font-mono overflow-hidden">
+    <div className="h-full flex flex-col text-[11px] font-mono overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700">
-        <span className="text-gray-400 font-sans font-medium text-sm">
+      <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-gray-800 border-b border-gray-700">
+        <span className="text-gray-400 font-sans font-medium text-xs">
           {t("orderBook")}
         </span>
-        <span className="text-gray-500">{symbol}</span>
+        <span className="truncate text-gray-500">{symbol}</span>
       </div>
 
       {/* Column headers */}
-      <div className="flex px-3 py-1 text-gray-500 border-b border-gray-700 bg-gray-850">
+      <div className="flex px-2 py-1 text-gray-500 border-b border-gray-700 bg-gray-850">
         <span className="flex-1">{t("price")}</span>
         <span className="flex-1 text-right">{t("amount")}</span>
         <span className="flex-1 text-right">{t("total")}</span>
@@ -97,7 +97,7 @@ const OrderBook: React.FC<OrderBookProps> = ({ symbol }) => {
         {/* Asks (reversed so lowest ask is at bottom) */}
         <div className="flex-1 overflow-y-auto flex flex-col-reverse">
           {asks.map((ask, i) => (
-            <div key={`ask-${i}`} className="flex px-3 py-0.5 relative">
+            <div key={`ask-${i}`} className="flex px-2 py-0.5 relative">
               <div
                 className="absolute right-0 top-0 bottom-0 bg-red-500 bg-opacity-10"
                 style={{ width: `${(ask.total / maxAskTotal) * 100}%` }}
@@ -116,7 +116,7 @@ const OrderBook: React.FC<OrderBookProps> = ({ symbol }) => {
         </div>
 
         {/* Spread */}
-        <div className="flex items-center justify-center gap-2 py-1.5 bg-gray-800 border-y border-gray-700">
+        <div className="flex items-center justify-center gap-1.5 py-1.5 bg-gray-800 border-y border-gray-700">
           <span className="text-gray-400">{t("spread")}:</span>
           <span className="text-white font-semibold">{spread}</span>
           <span className="text-gray-500">({spreadPct}%)</span>
@@ -125,7 +125,7 @@ const OrderBook: React.FC<OrderBookProps> = ({ symbol }) => {
         {/* Bids */}
         <div className="flex-1 overflow-y-auto">
           {bids.map((bid, i) => (
-            <div key={`bid-${i}`} className="flex px-3 py-0.5 relative">
+            <div key={`bid-${i}`} className="flex px-2 py-0.5 relative">
               <div
                 className="absolute right-0 top-0 bottom-0 bg-green-500 bg-opacity-10"
                 style={{ width: `${(bid.total / maxBidTotal) * 100}%` }}

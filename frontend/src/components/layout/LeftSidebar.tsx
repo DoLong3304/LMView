@@ -58,7 +58,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
 
   return (
     <div
-      className="flex h-full flex-shrink-0 flex-col justify-start border-r border-gray-700 bg-gray-900"
+      className="flex max-h-[calc(100vh-9rem)] flex-shrink-0 flex-col justify-start overflow-hidden rounded-lg border border-gray-700 bg-gray-900/95 shadow-2xl"
       style={{ width: 56, minWidth: 56, maxWidth: 56 }}
     >
       {/* Replay button */}
@@ -77,7 +77,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
       </button>
 
       {/* Drawing tools */}
-      <div className="flex min-h-0 flex-1 flex-col justify-start overflow-y-auto py-2">
+      <div className="flex min-h-0 flex-col justify-start overflow-y-auto py-2">
         {DRAWING_TOOLS.map(({ id, icon: Icon, labelKey }) => (
           <button
             key={id}
@@ -126,7 +126,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
           type="button"
           onClick={onClearAll}
           className="flex h-11 w-full flex-shrink-0 items-center justify-center text-gray-400 transition-colors hover:bg-gray-800 hover:text-red-400"
-          title={t("clearAll")}
+          title={t("deleteAllDrawings")}
         >
           <Trash2 size={20} />
         </button>

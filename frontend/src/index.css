@@ -28,6 +28,8 @@
   --lm-indicator-sma20: #fbbf24;
   --lm-indicator-sma50: #f97316;
   --lm-indicator-ema: #8b5cf6;
+  --lm-indicator-ema12: #a78bfa;
+  --lm-indicator-ema26: #c084fc;
   --lm-indicator-rsi: #06b6d4;
   --lm-indicator-mfi: #ec4899;
 }
@@ -57,6 +59,13 @@ html[data-theme="light"] {
   --lm-crosshair: #64748b;
   --lm-volume-up: rgba(4, 120, 87, 0.36);
   --lm-volume-down: rgba(220, 38, 38, 0.36);
+  --lm-indicator-sma20: #d97706;
+  --lm-indicator-sma50: #ea580c;
+  --lm-indicator-ema: #7c3aed;
+  --lm-indicator-ema12: #8b5cf6;
+  --lm-indicator-ema26: #a855f7;
+  --lm-indicator-rsi: #0891b2;
+  --lm-indicator-mfi: #db2777;
 }
 
 body {

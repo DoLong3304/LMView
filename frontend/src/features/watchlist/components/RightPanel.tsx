@@ -1,5 +1,20 @@
 import React, { useState, useMemo } from "react";
-import { ArrowLeftRight, BookOpen, Star, Search, TrendingUp, TrendingDown } from "lucide-react";
+import {
+  ArrowLeftRight,
+  Bot,
+  BookOpen,
+  CircleDot,
+  CornerDownLeft,
+  MoreHorizontal,
+  Plus,
+  Send,
+  Star,
+  Search,
+  Sparkles,
+  TrendingUp,
+  TrendingDown,
+  UserRound,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useI18n } from "@/i18n";
 import { useSymbolMeta } from "@/hooks/useSymbolMeta";
@@ -9,7 +24,17 @@ import RecentTrades from "@/features/market/components/RecentTrades";
 import type { WatchlistItem, Candle } from "@/types";
 import type { TranslationKey } from "@/i18n/translations";
 
+type RightPanelTopTab = "overview" | "aiHelper";
 type RightPanelTab = "watchlist" | "orderBook" | "recentTrades";
+
+const TOP_TABS: Array<{
+  id: RightPanelTopTab;
+  labelKey: TranslationKey;
+  icon: LucideIcon;
+}> = [
+  { id: "overview", labelKey: "overview", icon: TrendingUp },
+  { id: "aiHelper", labelKey: "aiHelper", icon: Bot },
+];
 
 const PANEL_TABS: Array<{
   id: RightPanelTab;
@@ -29,6 +54,7 @@ interface RightPanelProps {
   onToggleStar: (symbol: string) => void;
   width?: number;
   candles?: Candle[];
+  timeframe?: string;
 }
 
 const RightPanel: React.FC<RightPanelProps> = ({
@@ -37,14 +63,18 @@ const RightPanel: React.FC<RightPanelProps> = ({
   starredSymbols,
   onSymbolSelect,
   onToggleStar,
-  width = 280,
+  width = 286,
   candles = [],
+  timeframe = "1m",
 }) => {
   const { t } = useI18n();
   const { getMeta } = useSymbolMeta();
   const [filter, setFilter] = useState<"all" | "starred">("all");
   const [searchQuery, setSearchQuery] = useState("");
+  const [activeTopTab, setActiveTopTab] = useState<RightPanelTopTab>("overview");
   const [activeTab, setActiveTab] = useState<RightPanelTab>("watchlist");
+  const [aiQuestion, setAiQuestion] = useState("");
+  const [aiMessages, setAiMessages] = useState<Array<{ id: number; role: "user" | "assistant"; content: string }>>([]);
 
   // Sort: starred first, then by % change (gainers → losers)
   const sortedItems = useMemo(() => {
@@ -98,8 +128,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
     const minP = Math.min(...prices);
     const maxP = Math.max(...prices);
     const pRange = maxP - minP || 1;
-    const w = 240;
-    const h = 50;
+    const w = 220;
+    const h = 38;
 
     const points = prices
       .filter((_, i) => i % Math.max(1, Math.floor(prices.length / 100)) === 0)
@@ -127,37 +157,236 @@ const RightPanel: React.FC<RightPanelProps> = ({
   // Price position within range
   const rangeSpan = high24 - low24 || 1;
   const positionPct = lastCandle ? ((lastCandle.close - low24) / rangeSpan) * 100 : 50;
+  const aiPlaceholder = t("aiHelperPlaceholder").replace("{symbol}", selectedSymbol);
+  const assistantIntro = t("aiReadyMessage")
+    .replace("{symbol}", selectedSymbol)
+    .replace("{timeframe}", timeframe.toUpperCase());
+  const assistantMessages = [
+    { id: 0, role: "assistant" as const, content: assistantIntro },
+    ...aiMessages,
+  ];
+  const aiSuggestions = [
+    t("aiSuggestionTrend"),
+    t("aiSuggestionSupport"),
+    t("aiSuggestionIndicators"),
+  ];
+
+  const handleAskAi = () => {
+    const trimmed = aiQuestion.trim();
+    if (!trimmed) return;
+
+    setAiMessages((current) => [
+      ...current,
+      { id: Date.now(), role: "user", content: trimmed },
+      {
+        id: Date.now() + 1,
+        role: "assistant",
+        content: t("aiMockResponse")
+          .replace("{symbol}", selectedSymbol)
+          .replace("{timeframe}", timeframe.toUpperCase()),
+      },
+    ]);
+    setAiQuestion("");
+  };
+
+  const handleNewAiChat = () => {
+    setAiMessages([]);
+    setAiQuestion("");
+  };
 
   return (
-    <div className="bg-gray-900 border-l border-gray-700 flex h-full flex-col overflow-hidden" style={{ width }}>
-      <div className="px-3 py-2 border-b border-gray-800 bg-gray-900">
-        <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-          {t("overview")}
-        </div>
+    <div
+      className="bg-gray-900 border-l border-gray-700 flex h-full min-w-0 flex-col overflow-hidden"
+      style={{ width, minWidth: width, maxWidth: "100%" }}
+    >
+      <div className="grid grid-cols-2 gap-1 border-b border-gray-800 bg-gray-900 px-1.5 py-1.5">
+        {TOP_TABS.map(({ id, labelKey, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setActiveTopTab(id)}
+            className={`flex min-w-0 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-semibold transition-colors ${
+              activeTopTab === id
+                ? "bg-blue-600 text-white"
+                : "text-gray-400 hover:bg-gray-800 hover:text-white"
+            }`}
+            title={t(labelKey)}
+          >
+            <Icon size={13} />
+            <span className="truncate">{t(labelKey)}</span>
+          </button>
+        ))}
       </div>
 
+      {activeTopTab === "aiHelper" ? (
+        <div className="flex min-h-0 flex-1 flex-col bg-gray-900">
+          <div className="border-b border-gray-800 bg-gray-850 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-blue-500/10 text-blue-300">
+                  <Sparkles size={15} />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="truncate text-sm font-semibold text-white">{t("lmviewAi")}</h2>
+                  <p className="truncate text-[11px] text-gray-500">{t("assistantWorkspace")}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={handleNewAiChat}
+                  className="flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+                  title={t("newChat")}
+                >
+                  <Plus size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+                  title={t("assistantOptions")}
+                >
+                  <MoreHorizontal size={15} />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="border-b border-gray-800 bg-gray-900 px-3 py-2">
+            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+              <CircleDot size={10} /> {t("chartContext")}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              <span className="rounded border border-gray-700 bg-gray-850 px-2 py-1 text-[10px] font-medium text-gray-300">
+                {selectedSymbol}
+              </span>
+              <span className="rounded border border-gray-700 bg-gray-850 px-2 py-1 text-[10px] font-medium text-gray-300">
+                {timeframe.toUpperCase()}
+              </span>
+              <span className="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-medium text-blue-300">
+                {t("marketAnalysisMode")}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+              {assistantMessages.map((message) => {
+                const isUser = message.role === "user";
+                return (
+                  <div
+                    key={message.id}
+                    className={`flex gap-2 ${isUser ? "justify-end" : "justify-start"}`}
+                  >
+                    {!isUser && (
+                      <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-blue-500/10 text-blue-300">
+                        <Bot size={13} />
+                      </div>
+                    )}
+                    <div className={`max-w-[86%] ${isUser ? "items-end" : "items-start"}`}>
+                      <div className={`mb-1 flex items-center gap-1.5 text-[10px] text-gray-500 ${isUser ? "justify-end" : ""}`}>
+                        {isUser ? <UserRound size={10} /> : <Sparkles size={10} />}
+                        <span>{isUser ? t("you") : t("assistantName")}</span>
+                      </div>
+                      <div
+                        className={`rounded-lg px-3 py-2 text-xs leading-5 shadow-sm ${
+                          isUser
+                            ? "bg-blue-600 text-white"
+                            : "border border-gray-800 bg-gray-850 text-gray-200"
+                        }`}
+                      >
+                        {message.content}
+                      </div>
+                    </div>
+                    {isUser && (
+                      <div className="mt-5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-gray-800 text-gray-300">
+                        <UserRound size={13} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              <div className="rounded-lg border border-dashed border-gray-800 bg-gray-850/70 p-2">
+                <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                  {t("suggestedPrompts")}
+                </div>
+                <div className="space-y-1.5">
+                  {aiSuggestions.map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => setAiQuestion(suggestion)}
+                      className="w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-left text-[11px] text-gray-300 transition-colors hover:border-blue-500/50 hover:text-white"
+                    >
+                      {suggestion}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-800 bg-gray-850 p-2.5">
+              <div className="rounded-lg border border-gray-700 bg-gray-900 transition-colors focus-within:border-blue-500">
+                <textarea
+                  value={aiQuestion}
+                  onChange={(event) => setAiQuestion(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                      event.preventDefault();
+                      handleAskAi();
+                    }
+                  }}
+                  placeholder={aiPlaceholder}
+                  className="min-h-20 w-full resize-none rounded-t-lg bg-transparent px-3 py-2 text-xs text-white placeholder-gray-500 outline-none"
+                />
+                <div className="flex items-center justify-between gap-2 border-t border-gray-800 px-2 py-1.5">
+                  <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-gray-500">
+                    <CornerDownLeft size={11} />
+                    <span className="truncate">{t("sendHint")}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleAskAi}
+                    disabled={!aiQuestion.trim()}
+                    className={`flex h-7 items-center gap-1.5 rounded px-2 text-xs font-semibold transition-colors ${
+                      aiQuestion.trim()
+                        ? "bg-blue-600 text-white hover:bg-blue-500"
+                        : "cursor-not-allowed bg-gray-800 text-gray-600"
+                    }`}
+                    title={t("sendMessage")}
+                  >
+                    <Send size={12} />
+                    {t("send")}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <>
       {/* Coin Summary - Fixed at top */}
-      <div className="px-3 py-3 border-b border-gray-800 bg-gray-850">
+      <div className="px-2.5 py-2 border-b border-gray-800 bg-gray-850">
         {/* Symbol header */}
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex items-center gap-1.5 mb-1.5">
           <img
             src={meta.icon}
             alt={meta.name}
-            className="w-6 h-6 rounded-full"
+            className="w-5 h-5 rounded-full"
             onError={(e) => {
               e.currentTarget.src = DEFAULT_SYMBOL_ICON;
             }}
           />
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-1.5">
-              <span className="text-sm font-semibold text-white">{selectedSymbol}</span>
+              <span className="text-xs font-semibold text-white">{selectedSymbol}</span>
               {meta?.name && (
                 <span className="text-xs text-gray-500 truncate">{meta.name}</span>
               )}
             </div>
           </div>
           <div className={`flex items-center gap-1 ${isUp ? "text-green-400" : "text-red-400"}`}>
-            {isUp ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+            {isUp ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
             <span className="text-xs font-medium">
               {isUp ? "+" : ""}{(selectedItem?.change ?? 0).toFixed(2)}%
             </span>
@@ -166,7 +395,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
 
         {/* Price */}
         <div className="flex items-baseline gap-2">
-          <span className={`text-xl font-bold font-mono ${isUp ? "text-green-400" : "text-red-400"}`}>
+          <span className={`text-lg font-bold font-mono ${isUp ? "text-green-400" : "text-red-400"}`}>
             ${formatPrice(selectedItem?.price ?? 0)}
           </span>
         </div>
@@ -174,8 +403,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
 
       {/* Mini Sparkline */}
       {candles.length > 0 && (
-        <div className="px-3 py-2 border-b border-gray-800 bg-gray-850">
-          <svg viewBox={`0 0 240 50`} className="w-full" style={{ height: 50 }}>
+        <div className="px-2.5 py-1.5 border-b border-gray-800 bg-gray-850">
+          <svg viewBox="0 0 220 38" className="w-full" style={{ height: 38 }}>
             <defs>
               <linearGradient id="spark-grad" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%" stopColor={sparklineData.color} stopOpacity={0.25} />
@@ -185,7 +414,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
             {sparklineData.points && (
               <>
                 <polygon
-                  points={`0,50 ${sparklineData.points} 240,50`}
+                  points={`0,38 ${sparklineData.points} 220,38`}
                   fill="url(#spark-grad)"
                 />
                 <polyline
@@ -202,7 +431,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
 
       {/* 24h Range */}
       {candles.length > 0 && (
-        <div className="px-3 py-2 border-b border-gray-800 bg-gray-850">
+        <div className="px-2.5 py-1.5 border-b border-gray-800 bg-gray-850">
           <div className="flex justify-between text-xs text-gray-500 mb-1">
             <span>{t("low24h")}</span>
             <span>{t("high24h")}</span>
@@ -226,8 +455,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
 
       {/* OHLCV Stats */}
       {candles.length > 0 && lastCandle && (
-        <div className="px-3 py-2 border-b border-gray-800 bg-gray-850">
-          <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-xs">
+        <div className="px-2.5 py-1.5 border-b border-gray-800 bg-gray-850">
+          <div className="grid grid-cols-2 gap-x-1.5 gap-y-1 text-[11px]">
             <div className="flex justify-between">
               <span className="text-gray-500">{t("open")}</span>
               <span className="font-mono text-gray-300">{f(firstCandle.open)}</span>
@@ -252,29 +481,31 @@ const RightPanel: React.FC<RightPanelProps> = ({
         </div>
       )}
 
-      <div className="grid grid-cols-3 gap-1 border-b border-gray-800 bg-gray-900 px-2 py-2">
+      <div className="border-b border-gray-800 bg-gray-900 px-1 py-1">
+        <div className="grid grid-cols-3 overflow-hidden rounded border border-gray-800 bg-gray-850">
         {PANEL_TABS.map(({ id, labelKey, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setActiveTab(id)}
-            className={`flex min-w-0 items-center justify-center gap-1 rounded px-2 py-1.5 text-[11px] font-medium transition-colors ${
+            className={`flex min-w-0 items-center justify-center gap-0.5 border-r border-gray-800 px-0.5 py-1 text-[9px] font-medium leading-none transition-colors last:border-r-0 ${
               activeTab === id
                 ? "bg-blue-600 text-white"
                 : "text-gray-400 hover:bg-gray-800 hover:text-white"
             }`}
             title={t(labelKey)}
           >
-            <Icon size={12} className={id === "watchlist" && activeTab === id ? "fill-white" : ""} />
+            <Icon size={10} className={id === "watchlist" && activeTab === id ? "fill-white" : ""} />
             <span className="truncate">{t(labelKey)}</span>
           </button>
         ))}
+        </div>
       </div>
 
       {activeTab === "watchlist" && (
         <>
       {/* Filter tabs */}
-      <div className="px-3 py-2 border-b border-gray-800 flex-shrink-0">
-        <div className="flex items-center gap-2">
+      <div className="px-2 py-1.5 border-b border-gray-800 flex-shrink-0">
+        <div className="flex items-center gap-1.5">
           <div className="flex-1 relative">
             <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
             <input
@@ -288,7 +519,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
           <div className="flex gap-1">
             <button
               onClick={() => setFilter("all")}
-              className={`px-2 py-1 rounded text-xs transition-colors ${
+              className={`px-1.5 py-1 rounded text-xs transition-colors ${
                 filter === "all"
                   ? "bg-blue-600 text-white"
                   : "text-gray-400 hover:text-white hover:bg-gray-800"
@@ -298,7 +529,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
             </button>
             <button
               onClick={() => setFilter("starred")}
-              className={`px-2 py-1 rounded text-xs transition-colors ${
+              className={`px-1.5 py-1 rounded text-xs transition-colors ${
                 filter === "starred"
                   ? "bg-blue-600 text-white"
                   : "text-gray-400 hover:text-white hover:bg-gray-800"
@@ -328,12 +559,12 @@ const RightPanel: React.FC<RightPanelProps> = ({
               <div
                 key={item.symbol}
                 onClick={() => onSymbolSelect(item.symbol)}
-                className={`px-3 py-1.5 border-b border-gray-800 cursor-pointer transition-colors ${
+                className={`px-2.5 py-1.5 border-b border-gray-800 cursor-pointer transition-colors ${
                   isSelected ? "bg-gray-800" : "hover:bg-gray-800"
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
+                  <div className="flex min-w-0 items-center gap-1.5">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -346,9 +577,9 @@ const RightPanel: React.FC<RightPanelProps> = ({
                         className={isStarred ? "fill-yellow-400 text-yellow-400" : ""}
                       />
                     </button>
-                    <span className="text-xs font-medium text-white">{item.symbol}</span>
+                    <span className="truncate text-xs font-medium text-white">{item.symbol}</span>
                   </div>
-                  <div className={`flex items-center gap-1 text-xs ${itemUp ? "text-green-400" : "text-red-400"}`}>
+                  <div className={`flex flex-shrink-0 items-center gap-1 text-xs ${itemUp ? "text-green-400" : "text-red-400"}`}>
                     <span className="font-medium">
                       {itemUp ? "+" : ""}{priceChange.toFixed(2)}%
                     </span>
@@ -380,6 +611,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
         <div className="flex-1 min-h-0 overflow-hidden">
           <RecentTrades symbol={selectedSymbol} />
         </div>
+      )}
+        </>
       )}
     </div>
   );

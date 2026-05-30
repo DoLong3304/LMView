@@ -51,21 +51,21 @@ const RecentTrades: React.FC<RecentTradesProps> = ({ symbol }) => {
     });
 
   return (
-    <div className="h-full flex flex-col text-xs font-mono overflow-hidden">
+    <div className="h-full flex flex-col text-[11px] font-mono overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700">
-        <span className="text-gray-400 font-sans font-medium text-sm">
+      <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-gray-800 border-b border-gray-700">
+        <span className="text-gray-400 font-sans font-medium text-xs">
           {t("recentTrades")}
         </span>
-        <span className="text-gray-500">{symbol}</span>
+        <span className="truncate text-gray-500">{symbol}</span>
       </div>
 
       {/* Column headers */}
-      <div className="flex px-3 py-1 text-gray-500 border-b border-gray-700">
-        <span className="w-20">{t("time")}</span>
+      <div className="flex px-2 py-1 text-gray-500 border-b border-gray-700">
+        <span className="w-16">{t("time")}</span>
         <span className="flex-1">{t("price")}</span>
         <span className="flex-1 text-right">{t("amount")}</span>
-        <span className="w-12 text-right">{t("side")}</span>
+        <span className="w-10 text-right">{t("side")}</span>
       </div>
 
       {/* Trade list */}
@@ -78,21 +78,21 @@ const RecentTrades: React.FC<RecentTradesProps> = ({ symbol }) => {
         {trades.map((trade, i) => (
           <div
             key={i}
-            className="flex px-3 py-0.5 hover:bg-gray-800 transition-colors"
+            className="flex px-2 py-0.5 hover:bg-gray-800 transition-colors"
           >
-            <span className="w-20 text-gray-500">
+            <span className="w-16 text-gray-500">
               {formatTime(trade.time)}
             </span>
             <span
-              className={`flex-1 ${trade.side === "buy" ? "text-green-400" : "text-red-400"}`}
+              className={`flex-1 truncate ${trade.side === "buy" ? "text-green-400" : "text-red-400"}`}
             >
               {f(trade.price)}
             </span>
-            <span className="flex-1 text-right text-gray-300">
+            <span className="flex-1 truncate text-right text-gray-300">
               {trade.volume}
             </span>
             <span
-              className={`w-12 text-right font-sans ${trade.side === "buy" ? "text-green-400" : "text-red-400"}`}
+              className={`w-10 text-right font-sans ${trade.side === "buy" ? "text-green-400" : "text-red-400"}`}
             >
               {t(trade.side)}
             </span>

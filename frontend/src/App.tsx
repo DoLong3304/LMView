@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useLayoutEffect, useRef } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import Header from "@/components/layout/Header";
 import LeftSidebar from "@/components/layout/LeftSidebar";
 import { CandlestickChart } from "@/features/chart";
@@ -63,6 +64,7 @@ const TradingDashboard: React.FC = () => {
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme);
   const [isDesktop, setIsDesktop] = useState(isDesktopLayout);
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(isDesktopLayout);
+  const [isDrawingToolbarOpen, setIsDrawingToolbarOpen] = useState(isDesktopLayout);
   const [appView, setAppView] = useState<AppView>("charts");
   const [activeTool, setActiveTool] = useState("cursor");
   const [drawings, setDrawings] = useState<Drawing[]>([]);
@@ -98,6 +100,7 @@ const TradingDashboard: React.FC = () => {
       const desktop = mediaQuery.matches;
       setIsDesktop(desktop);
       setIsRightPanelOpen(desktop);
+      setIsDrawingToolbarOpen(desktop);
     };
 
     syncLayout();
@@ -376,6 +379,10 @@ const TradingDashboard: React.FC = () => {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
   }, []);
 
+  const handleToggleDrawingToolbar = useCallback(() => {
+    setIsDrawingToolbarOpen((open) => !open);
+  }, []);
+
   useEffect(() => {
     const handleEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || isEditableTarget(event.target)) return;
@@ -572,22 +579,6 @@ const TradingDashboard: React.FC = () => {
           </div>
         ) : (
           <>
-        {/* Left Sidebar */}
-        {showDrawingToolbar && (
-          <LeftSidebar
-            activeTool={activeTool as any}
-            onToolChange={handleToolChange as any}
-            onClearAll={handleRequestClearAllDrawings}
-            onLockAll={handleLockAll}
-            onHideAll={handleHideAll}
-            magnetEnabled={magnetEnabled}
-            onMagnetToggle={() => setMagnetEnabled((prev) => !prev)}
-            onReplayClick={handleReplayButtonClick}
-            isReplayActive={isReplayActive}
-            isReplaySelectionMode={isReplaySelectionMode}
-          />
-        )}
-
         {/* Chart area */}
         <div className="flex-1 flex flex-col overflow-hidden min-w-0" ref={chartContainerRef}>
           <div className="flex-1 bg-gray-900">
@@ -611,6 +602,51 @@ const TradingDashboard: React.FC = () => {
 
                 return (
                   <>
+                    {showDrawingToolbar && (
+                      <div
+                        className="pointer-events-none absolute left-3 top-3 z-[130] max-h-[calc(100%-1.5rem)] overflow-visible"
+                        style={{ width: 56, minWidth: 56, maxWidth: 56 }}
+                      >
+                        <div
+                          className={`transition-all duration-200 ease-out ${
+                            isDrawingToolbarOpen
+                              ? "pointer-events-auto opacity-100"
+                              : "pointer-events-none opacity-0"
+                          }`}
+                          style={{
+                            transform: isDrawingToolbarOpen
+                              ? "translateX(0)"
+                              : "translateX(calc(-100% - 12px))",
+                          }}
+                        >
+                          <LeftSidebar
+                            activeTool={activeTool as any}
+                            onToolChange={handleToolChange as any}
+                            onClearAll={handleRequestClearAllDrawings}
+                            onLockAll={handleLockAll}
+                            onHideAll={handleHideAll}
+                            magnetEnabled={magnetEnabled}
+                            onMagnetToggle={() => setMagnetEnabled((prev) => !prev)}
+                            onReplayClick={handleReplayButtonClick}
+                            isReplayActive={isReplayActive}
+                            isReplaySelectionMode={isReplaySelectionMode}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleToggleDrawingToolbar}
+                          className={`pointer-events-auto absolute top-1/2 z-[150] flex -translate-y-1/2 items-center justify-center border border-gray-600/80 bg-gray-850/95 text-gray-300 shadow-lg outline-none transition-all duration-200 hover:border-blue-500/70 hover:bg-gray-800 hover:text-white hover:opacity-95 focus-visible:border-blue-500 focus-visible:opacity-95 ${
+                            isDrawingToolbarOpen
+                              ? "-right-2 h-14 w-5 rounded-full opacity-40"
+                              : "-left-3 h-16 w-5 rounded-r-full border-l-0 opacity-45"
+                          }`}
+                          title={isDrawingToolbarOpen ? t("collapseDrawingToolbar") : t("expandDrawingToolbar")}
+                          aria-label={isDrawingToolbarOpen ? t("collapseDrawingToolbar") : t("expandDrawingToolbar")}
+                        >
+                          {isDrawingToolbarOpen ? <ChevronLeft size={14} /> : <ChevronRight size={14} />}
+                        </button>
+                      </div>
+                    )}
                     <ChartOverlay
                       activeTool={activeTool}
                       drawings={drawings}

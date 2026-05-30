@@ -9,8 +9,20 @@ import {
   HistogramSeries,
   LineSeries,
 } from "lightweight-charts";
-import { Settings, Download, ZoomIn, ZoomOut, Maximize2 } from "lucide-react";
-import { normalizeTimeframe } from "@/constants/timeframes";
+import {
+  Activity,
+  AreaChart,
+  BarChart3,
+  CandlestickChart as CandleIcon,
+  ChevronDown,
+  Download,
+  LineChart,
+  Maximize2,
+  Minimize2,
+  ZoomIn,
+  ZoomOut,
+} from "lucide-react";
+import { normalizeTimeframe, TIMEFRAME_KEYS, TIMEFRAMES } from "@/constants/timeframes";
 import { useI18n } from "@/i18n";
 import { useChartZoom } from "@/hooks/useChartZoom";
 import {
@@ -19,7 +31,6 @@ import {
   subscribeAllTimeframes,
   TIMEFRAMES as SERVICE_TIMEFRAMES,
 } from "@/services/marketDataService";
-import MarketSelector from "./MarketSelector";
 import DateRangePicker from "./DateRangePicker";
 import {
   getChartTheme,
@@ -27,24 +38,57 @@ import {
   localTickMarkFormatter,
   localTimeFormatter,
 } from "./chartConstants";
-import { calcSMA, calcEMA, calcRSI, calcMFI } from "./indicatorUtils";
+import {
+  calcATR,
+  calcBollingerBands,
+  calcEMA,
+  calcIchimoku,
+  calcMACD,
+  calcMFI,
+  calcParabolicSAR,
+  calcRSI,
+  calcSMA,
+  calcStochastic,
+  calcSupertrend,
+  calcVolumeMA,
+  calcVWAP,
+} from "./indicatorUtils";
 import IndicatorPanel from "./IndicatorPanel";
+import MarketSelector from "./MarketSelector";
 import OHLCVBar from "./OHLCVBar";
 import type { Candle, ChartType, IndicatorSettings, HistoricalRange, TimeframeKey } from "@/types";
+import type { TranslationKey } from "@/i18n/translations";
+
+const CHART_TYPE_ORDER: ChartType[] = ["candles", "bars", "line", "area"];
+
+const CHART_TYPE_ICONS: Record<ChartType, typeof CandleIcon> = {
+  candles: CandleIcon,
+  bars: BarChart3,
+  line: LineChart,
+  area: AreaChart,
+};
+
+const CHART_TYPE_LABELS: Record<ChartType, TranslationKey> = {
+  candles: "candlestick",
+  bars: "bars",
+  line: "line",
+  area: "area",
+};
 
 interface CandlestickChartProps {
   defaultSymbol?: string;
   symbol?: string;
-  timeframe?: TimeframeKey;
   symbols?: string[];
-  children?: React.ReactNode | ((chartApi: any, candleSeries: any) => React.ReactNode);
   starredSymbols?: string[];
-  onToggleStar?: (symbol: string) => void;
-  onSymbolChange?: (symbol: string) => void;
+  timeframe?: TimeframeKey;
+  children?: React.ReactNode | ((chartApi: any, candleSeries: any) => React.ReactNode);
   onCandlesChange?: (candles: Candle[]) => void;
+  onSymbolChange?: (symbol: string) => void;
+  onToggleStar?: (symbol: string) => void;
   onTimeframeChange?: (timeframe: TimeframeKey) => void;
   themeMode?: "dark" | "light";
   chartType?: ChartType;
+  onChartTypeChange?: (type: ChartType) => void;
   // Replay mode props
   isReplayActive?: boolean;
 }
@@ -61,21 +105,24 @@ interface TooltipData {
 const CandlestickChart: React.FC<CandlestickChartProps> = ({
   defaultSymbol = "BTCUSDT",
   symbol: symbolProp,
-  timeframe: timeframeProp,
   symbols = [],
-  children,
   starredSymbols = [],
-  onToggleStar,
-  onSymbolChange,
+  timeframe: timeframeProp,
+  children,
   onCandlesChange,
+  onSymbolChange,
+  onToggleStar,
   onTimeframeChange,
   themeMode = "dark",
   chartType = "candles",
+  onChartTypeChange,
   isReplayActive = false,
 }) => {
   const { t } = useI18n();
+  const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartStageRef = useRef<HTMLDivElement>(null);
+  const timeframeDropdownRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
   const candleRef = useRef<any>(null);
   const barRef = useRef<any>(null);
@@ -84,7 +131,26 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const volumeRef = useRef<any>(null);
   const sma20Ref = useRef<any>(null);
   const sma50Ref = useRef<any>(null);
-  const emaRef = useRef<any>(null);
+  const ema12Ref = useRef<any>(null);
+  const ema26Ref = useRef<any>(null);
+  const bbUpperRef = useRef<any>(null);
+  const bbBasisRef = useRef<any>(null);
+  const bbLowerRef = useRef<any>(null);
+  const vwapRef = useRef<any>(null);
+  const volumeMaRef = useRef<any>(null);
+  const macdLineRef = useRef<any>(null);
+  const macdSignalRef = useRef<any>(null);
+  const macdHistogramRef = useRef<any>(null);
+  const stochasticKRef = useRef<any>(null);
+  const stochasticDRef = useRef<any>(null);
+  const atrRef = useRef<any>(null);
+  const ichimokuConversionRef = useRef<any>(null);
+  const ichimokuBaseRef = useRef<any>(null);
+  const ichimokuSpanARef = useRef<any>(null);
+  const ichimokuSpanBRef = useRef<any>(null);
+  const ichimokuLaggingRef = useRef<any>(null);
+  const supertrendRef = useRef<any>(null);
+  const psarRef = useRef<any>(null);
   const rsiSeriesRef = useRef<any>(null);
   const mfiSeriesRef = useRef<any>(null);
   const candlesRef = useRef<Candle[]>([]);
@@ -95,23 +161,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   const [symbol, setSymbol] = useState(symbolProp || defaultSymbol);
   const [timeframe, setTimeframe] = useState(timeframeProp || "1m");
-
-  // Sync timeframe from external prop (App.tsx controls it)
-  useEffect(() => {
-    if (timeframeProp && timeframeProp !== timeframe) {
-      setTimeframe(timeframeProp);
-    }
-  }, [timeframeProp]);
-
-  // Notify parent when timeframe changes (from internal setTimeframe)
-  useEffect(() => {
-    if (onTimeframeChange) {
-      onTimeframeChange(timeframe);
-    }
-  }, [timeframe, onTimeframeChange]);
-
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
   const [showIndPanel, setShowIndPanel] = useState(false);
+  const [isTimeframeMenuOpen, setIsTimeframeMenuOpen] = useState(false);
   const [indSettings, setIndSettings] = useState<Record<string, IndicatorSettings>>(() =>
     JSON.parse(JSON.stringify(DEFAULT_INDICATOR_SETTINGS)),
   );
@@ -121,6 +173,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const [retryCount, setRetryCount] = useState(0);
   const [historicalRange, setHistoricalRange] = useState<HistoricalRange | null>(null);
   const [isLiveMode, setIsLiveMode] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [noData, setNoData] = useState(false);
   const isLoadingMoreRef = useRef(false);
   const earliestTimestampRef = useRef<number | null>(null);
@@ -132,12 +185,44 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const seriesControllerRef = useRef<any>(null);
 
   // Initialize zoom control hook
-  const { zoomIn, zoomOut, resetZoom, canZoomIn, canZoomOut } = useChartZoom({
+  const { zoomIn, zoomOut, canZoomIn, canZoomOut } = useChartZoom({
     chartApi: chartRef.current,
     initialBarSpacing: 4,
     minBarSpacing: 2,
     maxBarSpacing: 30,
   });
+
+  const resizeChartToContainer = useCallback(() => {
+    if (!containerRef.current || !chartRef.current) return;
+
+    chartRef.current.resize(
+      containerRef.current.clientWidth,
+      containerRef.current.clientHeight,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!isTimeframeMenuOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (timeframeDropdownRef.current?.contains(event.target as Node)) return;
+      setIsTimeframeMenuOpen(false);
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [isTimeframeMenuOpen]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === rootRef.current);
+      requestAnimationFrame(resizeChartToContainer);
+      window.setTimeout(resizeChartToContainer, 120);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, [resizeChartToContainer]);
 
   const getTimeframeSeconds = useCallback((tf: string) => {
     return SERVICE_TIMEFRAMES[normalizeTimeframe(tf)].seconds;
@@ -261,13 +346,19 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     timeframeRef.current = normalizeTimeframe(timeframe);
   }, [symbol, timeframe]);
 
-  const handleSymbolChange = useCallback(
-    (s: string) => {
-      setSymbol(s);
-      if (onSymbolChange) onSymbolChange(s);
-    },
-    [onSymbolChange],
-  );
+  const handleTimeframeSelect = useCallback((nextTimeframe: TimeframeKey) => {
+    setTimeframe(nextTimeframe);
+    setIsTimeframeMenuOpen(false);
+  }, []);
+
+  const handleSymbolChange = useCallback((nextSymbol: string) => {
+    setSymbol(nextSymbol);
+    onSymbolChange?.(nextSymbol);
+  }, [onSymbolChange]);
+
+  const handleToggleSymbolStar = useCallback((nextSymbol: string) => {
+    onToggleStar?.(nextSymbol);
+  }, [onToggleStar]);
 
   // Sync symbol from external prop
   useEffect(() => {
@@ -392,17 +483,174 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       lastValueVisible: true,
       crosshairMarkerVisible: false,
     });
-    const ema = chart.addSeries(LineSeries, {
-      color: chartTheme.ema,
+    const ema12 = chart.addSeries(LineSeries, {
+      color: chartTheme.ema12,
       lineWidth: 2 as 1 | 2 | 3 | 4,
       priceLineVisible: false,
       lastValueVisible: true,
       crosshairMarkerVisible: false,
       visible: false,
     });
+    const ema26 = chart.addSeries(LineSeries, {
+      color: chartTheme.ema26,
+      lineWidth: 2 as 1 | 2 | 3 | 4,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+    const bbUpper = chart.addSeries(LineSeries, {
+      color: chartTheme.bb,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+    const bbBasis = chart.addSeries(LineSeries, {
+      color: chartTheme.bbBasis,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+    const bbLower = chart.addSeries(LineSeries, {
+      color: chartTheme.bb,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+    const vwapSeries = chart.addSeries(LineSeries, {
+      color: chartTheme.vwap,
+      lineWidth: 2 as 1 | 2 | 3 | 4,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+    const supertrendSeries = chart.addSeries(LineSeries, {
+      color: chartTheme.supertrend,
+      lineWidth: 2 as 1 | 2 | 3 | 4,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+    const psarSeries = chart.addSeries(LineSeries, {
+      color: chartTheme.psar,
+      lineWidth: 1,
+      lineStyle: LineStyle.Dotted,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+    const volumeMaSeries = chart.addSeries(LineSeries, {
+      color: chartTheme.volumeMa,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+      priceScaleId: "volume",
+    });
+    const ichimokuConversion = chart.addSeries(LineSeries, {
+      color: chartTheme.ichimokuConversion,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+    const ichimokuBase = chart.addSeries(LineSeries, {
+      color: chartTheme.ichimokuBase,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+    const ichimokuSpanA = chart.addSeries(LineSeries, {
+      color: chartTheme.ichimokuSpanA,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+    const ichimokuSpanB = chart.addSeries(LineSeries, {
+      color: chartTheme.ichimokuSpanB,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+    const ichimokuLagging = chart.addSeries(LineSeries, {
+      color: chartTheme.bbBasis,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
     // RSI & MFI on a separate left-side oscillator scale (bottom 20%)
     const rsiSeries = chart.addSeries(LineSeries, {
       color: chartTheme.rsi,
+      lineWidth: 2 as 1 | 2 | 3 | 4,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+      priceScaleId: "oscillator",
+    });
+    const macdLine = chart.addSeries(LineSeries, {
+      color: chartTheme.macd,
+      lineWidth: 2 as 1 | 2 | 3 | 4,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+      priceScaleId: "oscillator",
+    });
+    const macdSignal = chart.addSeries(LineSeries, {
+      color: chartTheme.macdSignal,
+      lineWidth: 2 as 1 | 2 | 3 | 4,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+      priceScaleId: "oscillator",
+    });
+    const macdHistogram = chart.addSeries(HistogramSeries, {
+      color: chartTheme.macd,
+      priceFormat: { type: "volume" },
+      priceScaleId: "oscillator",
+      visible: false,
+    });
+    const stochasticK = chart.addSeries(LineSeries, {
+      color: chartTheme.stochastic,
+      lineWidth: 2 as 1 | 2 | 3 | 4,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+      priceScaleId: "oscillator",
+    });
+    const stochasticD = chart.addSeries(LineSeries, {
+      color: chartTheme.stochasticSignal,
+      lineWidth: 1,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+      priceScaleId: "oscillator",
+    });
+    const atrSeries = chart.addSeries(LineSeries, {
+      color: chartTheme.atr,
       lineWidth: 2 as 1 | 2 | 3 | 4,
       priceLineVisible: false,
       lastValueVisible: false,
@@ -431,7 +679,26 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     volumeRef.current = vs;
     sma20Ref.current = s20;
     sma50Ref.current = s50;
-    emaRef.current = ema;
+    ema12Ref.current = ema12;
+    ema26Ref.current = ema26;
+    bbUpperRef.current = bbUpper;
+    bbBasisRef.current = bbBasis;
+    bbLowerRef.current = bbLower;
+    vwapRef.current = vwapSeries;
+    supertrendRef.current = supertrendSeries;
+    psarRef.current = psarSeries;
+    volumeMaRef.current = volumeMaSeries;
+    macdLineRef.current = macdLine;
+    macdSignalRef.current = macdSignal;
+    macdHistogramRef.current = macdHistogram;
+    stochasticKRef.current = stochasticK;
+    stochasticDRef.current = stochasticD;
+    atrRef.current = atrSeries;
+    ichimokuConversionRef.current = ichimokuConversion;
+    ichimokuBaseRef.current = ichimokuBase;
+    ichimokuSpanARef.current = ichimokuSpanA;
+    ichimokuSpanBRef.current = ichimokuSpanB;
+    ichimokuLaggingRef.current = ichimokuLagging;
     rsiSeriesRef.current = rsiSeries;
     mfiSeriesRef.current = mfiSeries;
     chart.subscribeCrosshairMove((param: any) => {
@@ -446,13 +713,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         setTooltip({ ...c, volume: v ? v.value : undefined, timeLabel: lbl });
       }
     });
-    const ro = new ResizeObserver(() => {
-      if (containerRef.current)
-        chart.resize(
-          containerRef.current.clientWidth,
-          containerRef.current.clientHeight,
-        );
-    });
+    const ro = new ResizeObserver(resizeChartToContainer);
     ro.observe(containerRef.current);
     return () => {
       ro.disconnect();
@@ -536,6 +797,93 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     areaRef.current?.applyOptions({ visible: chartType === "area" });
   }, [chartType]);
 
+  const syncIndicatorData = useCallback((data: Candle[]) => {
+    const cfg20 = indSettings.sma20;
+    const cfg50 = indSettings.sma50;
+    const cfgE12 = indSettings.ema12;
+    const cfgE26 = indSettings.ema26;
+    const cfgBb = indSettings.bb;
+    const cfgVolumeMa = indSettings.volumeMa;
+    const cfgMacd = indSettings.macd;
+    const cfgStochastic = indSettings.stochastic;
+    const cfgAtr = indSettings.atr;
+    const cfgIchimoku = indSettings.ichimoku;
+    const cfgSupertrend = indSettings.supertrend;
+    const cfgPsar = indSettings.psar;
+
+    sma20Ref.current?.setData(calcSMA(data, Number(cfg20.period ?? 20)));
+    sma50Ref.current?.setData(calcSMA(data, Number(cfg50.period ?? 50)));
+    ema12Ref.current?.setData(calcEMA(data, Number(cfgE12.period ?? 12)));
+    ema26Ref.current?.setData(calcEMA(data, Number(cfgE26.period ?? 26)));
+
+    const bb = calcBollingerBands(
+      data,
+      Number(cfgBb.period ?? 20),
+      Number(cfgBb.multiplier ?? 2),
+    );
+    bbUpperRef.current?.setData(bb.upper);
+    bbBasisRef.current?.setData(bb.middle);
+    bbLowerRef.current?.setData(bb.lower);
+
+    vwapRef.current?.setData(calcVWAP(data));
+    volumeMaRef.current?.setData(calcVolumeMA(data, Number(cfgVolumeMa.period ?? 20)));
+
+    const macd = calcMACD(
+      data,
+      Number(cfgMacd.fastPeriod ?? 12),
+      Number(cfgMacd.slowPeriod ?? 26),
+      Number(cfgMacd.signalPeriod ?? 9),
+    );
+    macdLineRef.current?.setData(macd.macd);
+    macdSignalRef.current?.setData(macd.signal);
+    macdHistogramRef.current?.setData(
+      macd.histogram.map((point) => ({
+        ...point,
+        color: point.value >= 0 ? themeRef.current.volumeUp : themeRef.current.volumeDown,
+      })),
+    );
+
+    const stochastic = calcStochastic(
+      data,
+      Number(cfgStochastic.period ?? 14),
+      Number(cfgStochastic.signalPeriod ?? 3),
+    );
+    stochasticKRef.current?.setData(stochastic.k);
+    stochasticDRef.current?.setData(stochastic.d);
+    atrRef.current?.setData(calcATR(data, Number(cfgAtr.period ?? 14)));
+
+    const ichimoku = calcIchimoku(
+      data,
+      Number(cfgIchimoku.conversionPeriod ?? 9),
+      Number(cfgIchimoku.basePeriod ?? 26),
+      Number(cfgIchimoku.spanPeriod ?? 52),
+      Number(cfgIchimoku.displacement ?? 26),
+    );
+    ichimokuConversionRef.current?.setData(ichimoku.conversion);
+    ichimokuBaseRef.current?.setData(ichimoku.base);
+    ichimokuSpanARef.current?.setData(ichimoku.spanA);
+    ichimokuSpanBRef.current?.setData(ichimoku.spanB);
+    ichimokuLaggingRef.current?.setData(ichimoku.lagging);
+
+    supertrendRef.current?.setData(
+      calcSupertrend(
+        data,
+        Number(cfgSupertrend.period ?? 10),
+        Number(cfgSupertrend.multiplier ?? 3),
+      ),
+    );
+    psarRef.current?.setData(
+      calcParabolicSAR(
+        data,
+        Number(cfgPsar.step ?? 0.02),
+        Number(cfgPsar.maxStep ?? 0.2),
+      ),
+    );
+
+    rsiSeriesRef.current?.setData(calcRSI(data, Number(indSettings.rsi.period ?? 14)));
+    mfiSeriesRef.current?.setData(calcMFI(data, Number(indSettings.mfi.period ?? 14)));
+  }, [indSettings]);
+
   // Helper: load more historical data when scrolling left
   const loadMoreHistoricalData = useCallback(async () => {
     if (isLoadingMoreRef.current || noMoreDataRef.current || !candleRef.current || historicalRange) return;
@@ -609,16 +957,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           })),
         );
       }
-      if (sma20Ref.current)
-        sma20Ref.current.setData(calcSMA(merged, indSettings.sma20.period ?? 20));
-      if (sma50Ref.current)
-        sma50Ref.current.setData(calcSMA(merged, indSettings.sma50.period ?? 50));
-      if (emaRef.current)
-        emaRef.current.setData(calcEMA(merged, indSettings.ema.period ?? 20));
-      if (rsiSeriesRef.current)
-        rsiSeriesRef.current.setData(calcRSI(merged, indSettings.rsi.period ?? 14));
-      if (mfiSeriesRef.current)
-        mfiSeriesRef.current.setData(calcMFI(merged, indSettings.mfi.period ?? 14));
+      syncIndicatorData(merged);
 
       // Update React state last (avoid triggering re-renders mid-update)
       setCandles(merged);
@@ -628,7 +967,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       console.error('Failed to load more historical data:', error);
       isLoadingMoreRef.current = false;
     }
-  }, [symbol, timeframe, historicalRange, indSettings, onCandlesChange, setAllPriceSeriesData]);
+  }, [symbol, timeframe, historicalRange, onCandlesChange, setAllPriceSeriesData, syncIndicatorData]);
 
   // Subscribe to scroll/zoom events to load more historical data
   useEffect(() => {
@@ -675,21 +1014,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
             color: c.close >= c.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
           })),
         );
-      if (sma20Ref.current)
-        sma20Ref.current.setData(calcSMA(data, indSettings.sma20.period ?? 20));
-      if (sma50Ref.current)
-        sma50Ref.current.setData(calcSMA(data, indSettings.sma50.period ?? 50));
-      if (emaRef.current)
-        emaRef.current.setData(calcEMA(data, indSettings.ema.period ?? 20));
-      if (rsiSeriesRef.current)
-        rsiSeriesRef.current.setData(calcRSI(data, indSettings.rsi.period ?? 14));
-      if (mfiSeriesRef.current)
-        mfiSeriesRef.current.setData(calcMFI(data, indSettings.mfi.period ?? 14));
+      syncIndicatorData(data);
       setInitialVisibleRange(data);
       if (data.length > 0)
         setTooltip({ ...data[data.length - 1], timeLabel: "" });
     },
-    [indSettings, onCandlesChange, setAllPriceSeriesData, setInitialVisibleRange],
+    [onCandlesChange, setAllPriceSeriesData, setInitialVisibleRange, syncIndicatorData],
   );
 
   // Historical mode handlers
@@ -1026,15 +1356,27 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     if (candles.length === 0) return;
     const cfg20 = indSettings.sma20;
     const cfg50 = indSettings.sma50;
-    const cfgE = indSettings.ema;
-    const cfgV = indSettings.volume;
+    const cfgE12 = indSettings.ema12;
+    const cfgE26 = indSettings.ema26;
+    const cfgBb = indSettings.bb;
+    const cfgVwap = indSettings.vwap;
+    const cfgVolume = indSettings.volume;
+    const cfgVolumeMa = indSettings.volumeMa;
+    const cfgR = indSettings.rsi;
+    const cfgM = indSettings.mfi;
+    const cfgMacd = indSettings.macd;
+    const cfgStochastic = indSettings.stochastic;
+    const cfgAtr = indSettings.atr;
+    const cfgIchimoku = indSettings.ichimoku;
+    const cfgSupertrend = indSettings.supertrend;
+    const cfgPsar = indSettings.psar;
+
     if (sma20Ref.current) {
       sma20Ref.current.applyOptions({
         visible: cfg20.visible,
         color: cfg20.color,
         lineWidth: cfg20.lineWidth,
       });
-      sma20Ref.current.setData(calcSMA(candles, cfg20.period ?? 20));
     }
     if (sma50Ref.current) {
       sma50Ref.current.applyOptions({
@@ -1042,28 +1384,115 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         color: cfg50.color,
         lineWidth: cfg50.lineWidth,
       });
-      sma50Ref.current.setData(calcSMA(candles, cfg50.period ?? 50));
     }
-    if (emaRef.current) {
-      emaRef.current.applyOptions({
-        visible: cfgE.visible,
-        color: cfgE.color,
-        lineWidth: cfgE.lineWidth,
+    if (ema12Ref.current) {
+      ema12Ref.current.applyOptions({
+        visible: cfgE12.visible,
+        color: cfgE12.color,
+        lineWidth: cfgE12.lineWidth,
       });
-      emaRef.current.setData(calcEMA(candles, cfgE.period ?? 20));
     }
-    if (volumeRef.current)
-      volumeRef.current.applyOptions({ visible: cfgV.visible });
-    // RSI / MFI on main chart oscillator scale
-    const cfgR = indSettings.rsi;
-    const cfgM = indSettings.mfi;
+    if (ema26Ref.current) {
+      ema26Ref.current.applyOptions({
+        visible: cfgE26.visible,
+        color: cfgE26.color,
+        lineWidth: cfgE26.lineWidth,
+      });
+    }
+    bbUpperRef.current?.applyOptions({
+      visible: cfgBb.visible,
+      color: cfgBb.color,
+      lineWidth: cfgBb.lineWidth,
+    });
+    bbBasisRef.current?.applyOptions({
+      visible: cfgBb.visible,
+      color: cfgBb.basisColor,
+      lineWidth: cfgBb.lineWidth,
+    });
+    bbLowerRef.current?.applyOptions({
+      visible: cfgBb.visible,
+      color: cfgBb.color,
+      lineWidth: cfgBb.lineWidth,
+    });
+    vwapRef.current?.applyOptions({
+      visible: cfgVwap.visible,
+      color: cfgVwap.color,
+      lineWidth: cfgVwap.lineWidth,
+    });
+    supertrendRef.current?.applyOptions({
+      visible: cfgSupertrend.visible,
+      color: cfgSupertrend.color,
+      lineWidth: cfgSupertrend.lineWidth,
+    });
+    psarRef.current?.applyOptions({
+      visible: cfgPsar.visible,
+      color: cfgPsar.color,
+      lineWidth: cfgPsar.lineWidth,
+      lineStyle: LineStyle.Dotted,
+    });
+    volumeRef.current?.applyOptions({ visible: cfgVolume.visible });
+    volumeMaRef.current?.applyOptions({
+      visible: cfgVolumeMa.visible,
+      color: cfgVolumeMa.color,
+      lineWidth: cfgVolumeMa.lineWidth,
+    });
+    macdLineRef.current?.applyOptions({
+      visible: cfgMacd.visible,
+      color: cfgMacd.color,
+      lineWidth: cfgMacd.lineWidth,
+    });
+    macdSignalRef.current?.applyOptions({
+      visible: cfgMacd.visible,
+      color: cfgMacd.signalColor,
+      lineWidth: cfgMacd.lineWidth,
+    });
+    macdHistogramRef.current?.applyOptions({ visible: cfgMacd.visible });
+    stochasticKRef.current?.applyOptions({
+      visible: cfgStochastic.visible,
+      color: cfgStochastic.color,
+      lineWidth: cfgStochastic.lineWidth,
+    });
+    stochasticDRef.current?.applyOptions({
+      visible: cfgStochastic.visible,
+      color: cfgStochastic.signalColor,
+      lineWidth: cfgStochastic.lineWidth,
+    });
+    atrRef.current?.applyOptions({
+      visible: cfgAtr.visible,
+      color: cfgAtr.color,
+      lineWidth: cfgAtr.lineWidth,
+    });
+    ichimokuConversionRef.current?.applyOptions({
+      visible: cfgIchimoku.visible,
+      color: cfgIchimoku.color,
+      lineWidth: cfgIchimoku.lineWidth,
+    });
+    ichimokuBaseRef.current?.applyOptions({
+      visible: cfgIchimoku.visible,
+      color: cfgIchimoku.baseColor,
+      lineWidth: cfgIchimoku.lineWidth,
+    });
+    ichimokuSpanARef.current?.applyOptions({
+      visible: cfgIchimoku.visible,
+      color: cfgIchimoku.spanAColor,
+      lineWidth: cfgIchimoku.lineWidth,
+    });
+    ichimokuSpanBRef.current?.applyOptions({
+      visible: cfgIchimoku.visible,
+      color: cfgIchimoku.spanBColor,
+      lineWidth: cfgIchimoku.lineWidth,
+    });
+    ichimokuLaggingRef.current?.applyOptions({
+      visible: cfgIchimoku.visible,
+      color: cfgIchimoku.color,
+      lineWidth: cfgIchimoku.lineWidth,
+    });
     if (rsiSeriesRef.current) {
       rsiSeriesRef.current.applyOptions({
         visible: cfgR.visible,
         color: cfgR.color,
         lineWidth: cfgR.lineWidth || 1.5,
       });
-      rsiSeriesRef.current.setData(calcRSI(candles, cfgR.period ?? 14));
     }
     if (mfiSeriesRef.current) {
       mfiSeriesRef.current.applyOptions({
@@ -1071,16 +1500,23 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         color: cfgM.color,
         lineWidth: cfgM.lineWidth || 1.5,
       });
-      mfiSeriesRef.current.setData(calcMFI(candles, cfgM.period ?? 14));
     }
-    // Show/hide the oscillator price scale when either is visible
+    syncIndicatorData(candles);
+
     if (chartRef.current) {
+      const oscillatorVisible = Boolean(
+        cfgR.visible ||
+        cfgM.visible ||
+        cfgMacd.visible ||
+        cfgStochastic.visible ||
+        cfgAtr.visible,
+      );
       chartRef.current
         .priceScale("oscillator")
-        .applyOptions({ visible: cfgR.visible || cfgM.visible });
+        .applyOptions({ visible: oscillatorVisible });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [indSettings, candles]);
+  }, [indSettings, candles, syncIndicatorData]);
 
   const lastCandle = candles[candles.length - 1];
   const firstCandle = candles[0];
@@ -1177,117 +1613,213 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     link.click();
   }, [chartType, symbol, timeframe]);
 
-  const handleResetView = useCallback(() => {
-    resetZoom();
-    setInitialVisibleRange(candlesRef.current);
-    chartRef.current?.priceScale("right").applyOptions({ autoScale: true });
-  }, [resetZoom, setInitialVisibleRange]);
+  const handleToggleFullscreen = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    if (document.fullscreenElement === root) {
+      void document.exitFullscreen();
+      return;
+    }
+
+    void root.requestFullscreen();
+  }, []);
+
+  const selectedTimeframeLabel = TIMEFRAMES[normalizeTimeframe(timeframe)].label;
+  const marketSelectorSymbols =
+    symbols.length > 0 ? Array.from(new Set([symbol, ...symbols])) : [symbol];
+  const toolbarGroupClass = "flex h-8 flex-shrink-0 items-center gap-1 rounded-md border border-gray-700 bg-gray-850 p-0.5";
+  const toolbarButtonBase = "flex h-7 flex-shrink-0 items-center justify-center whitespace-nowrap rounded px-2 text-xs font-semibold transition-colors";
+  const toolbarIconButtonBase = "flex h-7 w-7 flex-shrink-0 items-center justify-center rounded transition-colors";
+  const chartTypeButtonBase = "flex h-7 flex-shrink-0 items-center justify-center gap-1 rounded px-2 text-xs font-semibold transition-colors";
+  const toolbarIdleClass = "text-gray-400 hover:bg-gray-700 hover:text-white";
+  const toolbarActiveClass = "bg-blue-600 text-white shadow-sm shadow-blue-950/40";
 
   return (
-    <div className="flex flex-col h-full bg-gray-900 rounded-lg overflow-hidden">
-      {/* Top bar */}
-      <div className="flex items-center justify-between px-3 py-2 bg-gray-800 border-b border-gray-700 flex-wrap gap-2">
-        <div className="flex items-center gap-2">
-          <MarketSelector
-            symbols={symbols}
-            selectedSymbol={symbol}
-            onSelect={handleSymbolChange}
-            starredSymbols={starredSymbols}
-            onToggleStar={onToggleStar || (() => {})}
-          />
-          {lastCandle && (
-            <div className="flex items-center gap-2">
-              <span
-                className={`text-base font-bold font-mono ${isUp ? "text-green-400" : "text-red-400"}`}
-              >
-                {lastCandle.close.toLocaleString(undefined, {
-                  minimumFractionDigits: 2,
-                })}
-              </span>
-              {pricePct && (
-                <span
-                  className={`text-xs px-1.5 py-0.5 rounded ${isUp ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"}`}
-                >
-                  {isUp ? "+" : ""}
-                  {pricePct}%
-                </span>
+    <div
+      ref={rootRef}
+      className={`flex min-h-0 w-full flex-col overflow-hidden bg-gray-900 ${
+        isFullscreen ? "h-screen rounded-none" : "h-full rounded-lg"
+      }`}
+    >
+      <div className="flex-none border-b border-gray-700 bg-gray-800">
+        <div className="max-xl:overflow-x-auto xl:overflow-visible">
+          <div className="flex h-11 w-full min-w-max flex-nowrap items-center gap-2 px-2 py-1.5 sm:px-3 xl:min-w-0">
+            <div className="flex flex-shrink-0 items-center gap-2">
+              <MarketSelector
+                symbols={marketSelectorSymbols}
+                selectedSymbol={symbol}
+                onSelect={handleSymbolChange}
+                starredSymbols={starredSymbols}
+                onToggleStar={handleToggleSymbolStar}
+              />
+
+              {lastCandle && (
+                <div className="flex h-8 flex-shrink-0 items-center gap-2 whitespace-nowrap">
+                  <span
+                    className={`font-mono text-sm font-bold ${isUp ? "text-green-400" : "text-red-400"}`}
+                  >
+                    {lastCandle.close.toLocaleString(undefined, {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}
+                  </span>
+                  {pricePct && (
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-xs font-semibold ${
+                        isUp
+                          ? "bg-green-900/70 text-green-300"
+                          : "bg-red-900/70 text-red-300"
+                      }`}
+                    >
+                      {isUp ? "+" : ""}
+                      {pricePct}%
+                    </span>
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {/* Export button */}
-          <button
-            onClick={handleExportChart}
-            className="flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border border-gray-600 text-gray-400 hover:text-white hover:border-gray-400 transition-colors"
-            title={t("exportAsPNG")}
-          >
-            <Download size={12} /> {t("exportChart")}
-          </button>
-          {/* Indicator panel toggle */}
-          <div className="relative">
-            <button
-              onClick={() => setShowIndPanel((v) => !v)}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors
-                ${showIndPanel ? "bg-blue-600 border-blue-500 text-white" : "border-gray-600 text-gray-400 hover:text-white hover:border-gray-400"}`}
-            >
-              <Settings size={12} /> {t("indicators")}
-            </button>
-            {showIndPanel && (
-              <div className="absolute right-0 top-full mt-1 z-[100]">
-                <IndicatorPanel
-                  indSettings={indSettings}
-                  onChange={setIndSettings}
-                />
+
+            <div className="ml-auto flex min-w-0 flex-shrink-0 items-center gap-1.5">
+              <div ref={timeframeDropdownRef} className="relative flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsTimeframeMenuOpen((open) => !open)}
+                  className={`${toolbarButtonBase} min-w-14 gap-1 border border-gray-700 px-2.5 ${
+                    isTimeframeMenuOpen
+                      ? "border-blue-500 bg-blue-600 text-white shadow-sm shadow-blue-950/40"
+                      : "bg-gray-850 text-gray-300 hover:border-gray-500 hover:bg-gray-800 hover:text-white"
+                  }`}
+                >
+                  <span className="min-w-6 text-left">{selectedTimeframeLabel}</span>
+                  <ChevronDown
+                    size={12}
+                    className={`transition-transform ${isTimeframeMenuOpen ? "rotate-180" : ""}`}
+                  />
+                </button>
+                {isTimeframeMenuOpen && (
+                  <div className="absolute left-0 top-full z-[110] mt-2 w-24 max-w-[calc(100vw-1rem)] overflow-hidden rounded border border-gray-700 bg-gray-850 shadow-2xl">
+                    {TIMEFRAME_KEYS.map((key) => {
+                      const active = normalizeTimeframe(timeframe) === key;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => handleTimeframeSelect(key)}
+                          className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors ${
+                            active
+                              ? "bg-blue-600 text-white"
+                              : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                          }`}
+                        >
+                          {TIMEFRAMES[key].label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-          {/* Historical date-range picker */}
-          <DateRangePicker
-            active={!isLiveMode}
-            onApply={handleHistoricalRange}
-            onClear={handleBackToLive}
-          />
-          {/* Zoom controls */}
-          <div className="flex items-center gap-1 border border-gray-600 rounded overflow-hidden">
-            <button
-              onClick={zoomIn}
-              disabled={!canZoomIn}
-              className={`px-2 py-1 text-xs font-medium transition-colors ${
-                canZoomIn
-                  ? "text-gray-400 hover:text-white hover:bg-gray-700"
-                  : "text-gray-600 cursor-not-allowed"
-              }`}
-              title={t("zoomIn")}
-            >
-              <ZoomIn size={12} />
-            </button>
-            <button
-              onClick={zoomOut}
-              disabled={!canZoomOut}
-              className={`px-2 py-1 text-xs font-medium border-l border-gray-600 transition-colors ${
-                canZoomOut
-                  ? "text-gray-400 hover:text-white hover:bg-gray-700"
-                  : "text-gray-600 cursor-not-allowed"
-              }`}
-              title={t("zoomOut")}
-            >
-              <ZoomOut size={12} />
-            </button>
-            <button
-              onClick={handleResetView}
-              className="px-2 py-1 text-xs font-medium border-l border-gray-600 text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
-              title={t("resetZoom")}
-            >
-              <Maximize2 size={12} />
-            </button>
+
+              <div className={toolbarGroupClass}>
+                <div className="relative">
+                  <button
+                    onClick={() => setShowIndPanel((v) => !v)}
+                    className={`${toolbarButtonBase} gap-1.5 ${
+                      showIndPanel ? toolbarActiveClass : toolbarIdleClass
+                    }`}
+                    title={t("technicalIndicators")}
+                  >
+                    <Activity size={13} /> {t("indicators")}
+                  </button>
+                  {showIndPanel && (
+                    <div className="absolute left-0 top-full mt-1 z-[100] max-w-[calc(100vw-1rem)]">
+                      <IndicatorPanel
+                        indSettings={indSettings}
+                        onChange={setIndSettings}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                <DateRangePicker
+                  active={!isLiveMode}
+                  onApply={handleHistoricalRange}
+                  onClear={handleBackToLive}
+                />
+
+                <button
+                  onClick={handleExportChart}
+                  className={`${toolbarButtonBase} gap-1.5 ${toolbarIdleClass}`}
+                  title={t("exportAsPNG")}
+                >
+                  <Download size={12} />
+                  <span className="hidden sm:inline">{t("exportChart")}</span>
+                </button>
+              </div>
+
+              <div className={toolbarGroupClass}>
+                {CHART_TYPE_ORDER.map((type) => {
+                  const Icon = CHART_TYPE_ICONS[type];
+                  const label = t(CHART_TYPE_LABELS[type]);
+                  return (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => onChartTypeChange?.(type)}
+                      className={`${chartTypeButtonBase} ${
+                        chartType === type ? toolbarActiveClass : toolbarIdleClass
+                      }`}
+                      aria-pressed={chartType === type}
+                      title={label}
+                    >
+                      <Icon size={14} />
+                      <span className="hidden 2xl:inline">{label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className={toolbarGroupClass}>
+                <button
+                  onClick={zoomIn}
+                  disabled={!canZoomIn}
+                  className={`${toolbarIconButtonBase} ${
+                    canZoomIn
+                      ? toolbarIdleClass
+                      : "text-gray-600 cursor-not-allowed"
+                  }`}
+                  title={t("zoomIn")}
+                >
+                  <ZoomIn size={12} />
+                </button>
+                <button
+                  onClick={zoomOut}
+                  disabled={!canZoomOut}
+                  className={`${toolbarIconButtonBase} ${
+                    canZoomOut
+                      ? toolbarIdleClass
+                      : "text-gray-600 cursor-not-allowed"
+                  }`}
+                  title={t("zoomOut")}
+                >
+                  <ZoomOut size={12} />
+                </button>
+                <button
+                  onClick={handleToggleFullscreen}
+                  className={`${toolbarIconButtonBase} ${toolbarIdleClass}`}
+                  title={isFullscreen ? t("exitFullscreen") : t("fullscreen")}
+                >
+                  {isFullscreen ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Historical mode banner */}
       {!isLiveMode && historicalRange && (
-        <div className="flex items-center justify-between px-3 py-1.5 bg-amber-900/40 border-b border-amber-700/50">
+        <div className="flex flex-none items-center justify-between px-3 py-1.5 bg-amber-900/40 border-b border-amber-700/50">
           <span className="text-xs text-amber-300">
             {new Date(historicalRange.startMs).toLocaleString()} &mdash;{" "}
             {new Date(historicalRange.endMs).toLocaleString()} ({timeframe})
@@ -1303,13 +1835,13 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
       {/* Tab content — candlestick chart is always mounted to preserve the
            lightweight-charts instance; visibility is toggled via CSS. */}
-      <div className="contents">
+      <div className="flex min-h-0 flex-1 flex-col">
         {/* OHLCV bar */}
-        <div className="px-3 py-1 bg-gray-900 border-b border-gray-800 min-h-[28px]">
+        <div className="min-h-[28px] flex-none px-3 py-1 bg-gray-900 border-b border-gray-800">
           <OHLCVBar data={tooltip} />
         </div>
         {/* Chart canvas + overlay slot */}
-        <div ref={chartStageRef} className="relative flex-1 min-h-0">
+        <div ref={chartStageRef} className="relative min-h-0 flex-1 overflow-hidden">
           <div ref={containerRef} className="w-full h-full" />
           {isLoading && (
             <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-60 z-10">

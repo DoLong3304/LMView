@@ -147,6 +147,36 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     return Math.sqrt((point.x - closestX) ** 2 + (point.y - closestY) ** 2);
   }, []);
 
+  const distanceToInfiniteLine = useCallback((point: PixelPoint, p1: PixelPoint, p2: PixelPoint): number => {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const length = Math.sqrt(dx * dx + dy * dy);
+
+    if (length === 0) {
+      return Math.sqrt((point.x - p1.x) ** 2 + (point.y - p1.y) ** 2);
+    }
+
+    return Math.abs(dy * point.x - dx * point.y + p2.x * p1.y - p2.y * p1.x) / length;
+  }, []);
+
+  const distanceToRay = useCallback((point: PixelPoint, p1: PixelPoint, p2: PixelPoint): number => {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const lengthSquared = dx * dx + dy * dy;
+
+    if (lengthSquared === 0) {
+      return Math.sqrt((point.x - p1.x) ** 2 + (point.y - p1.y) ** 2);
+    }
+
+    const t = ((point.x - p1.x) * dx + (point.y - p1.y) * dy) / lengthSquared;
+    if (t < 0) {
+      return Math.sqrt((point.x - p1.x) ** 2 + (point.y - p1.y) ** 2);
+    }
+
+    const projected = { x: p1.x + t * dx, y: p1.y + t * dy };
+    return Math.sqrt((point.x - projected.x) ** 2 + (point.y - projected.y) ** 2);
+  }, []);
+
   const hitTestDrawing = useCallback((drawing: Drawing, mousePixel: PixelPoint): boolean => {
     if (!drawing.dataPoints || drawing.dataPoints.length === 0) return false;
 
@@ -238,6 +268,14 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         const validPixels = pixels.filter(p => p !== null) as PixelPoint[];
         if (validPixels.length < 2) return false;
 
+        if (drawing.tool === 'extendedLine') {
+          return distanceToInfiniteLine(mousePixel, validPixels[0], validPixels[1]) <= DRAWING_HIT_TOLERANCE;
+        }
+
+        if (drawing.tool === 'ray') {
+          return distanceToRay(mousePixel, validPixels[0], validPixels[1]) <= DRAWING_HIT_TOLERANCE;
+        }
+
         for (let i = 0; i < validPixels.length - 1; i++) {
           const dist = distanceToLine(mousePixel, validPixels[i], validPixels[i + 1]);
           if (dist <= DRAWING_HIT_TOLERANCE) return true;
@@ -245,7 +283,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         return false;
       }
     }
-  }, [dataToPixel, distanceToLine]);
+  }, [dataToPixel, distanceToInfiniteLine, distanceToLine, distanceToRay]);
 
   // ══════════════════════════════════════════════════════════════
   // MAGNET SNAP
@@ -387,7 +425,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
       let clickedDrawingId: string | number | null = null;
 
       for (const d of [...drawings].reverse()) {
-        if (d.hidden) continue;
+        if (d.hidden || d.locked) continue;
         if (hitTestDrawing(d, pixel)) {
           clickedDrawingId = d.id;
           break;
@@ -439,7 +477,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     if (!dataPoint) return;
 
     const drawing = drawings.find(d => d.id === draggingAnchor.drawingId);
-    if (!drawing || !drawing.dataPoints) return;
+    if (!drawing || drawing.locked || !drawing.dataPoints) return;
 
     // Update the specific data point
     const newDataPoints = [...drawing.dataPoints];
@@ -470,7 +508,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     if (activeTool === 'eraser') {
       let foundId: string | number | null = null;
       for (const d of [...drawings].reverse()) {
-        if (d.hidden) continue;
+        if (d.hidden || d.locked) continue;
         if (hitTestDrawing(d, pixel)) {
           foundId = d.id;
           break;
@@ -574,6 +612,17 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
       resizeObserver.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    setIsDrawing(false);
+    setStartDataPoint(null);
+    setCurrentDataPoint(null);
+    setMultiDataPoints([]);
+    setTextInput(null);
+    setHoveredDrawingId(null);
+    setDraggingAnchor(null);
+    setPanState(null);
+  }, [activeTool]);
 
   // ══════════════════════════════════════════════════════════════
   // RENDERING FUNCTIONS
@@ -814,6 +863,99 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
           );
         }
 
+        if (d.tool === 'ray' || d.tool === 'extendedLine') {
+          const width = svgRef.current?.clientWidth || 0;
+          const height = svgRef.current?.clientHeight || 0;
+          const dx = p2.x - p1.x;
+          const dy = p2.y - p1.y;
+          const candidates: PixelPoint[] = [];
+
+          if (width > 0 && height > 0 && (dx !== 0 || dy !== 0)) {
+            if (dx !== 0) {
+              const yAtLeft = p1.y + ((0 - p1.x) * dy) / dx;
+              const yAtRight = p1.y + ((width - p1.x) * dy) / dx;
+              if (yAtLeft >= 0 && yAtLeft <= height) candidates.push({ x: 0, y: yAtLeft });
+              if (yAtRight >= 0 && yAtRight <= height) candidates.push({ x: width, y: yAtRight });
+            }
+            if (dy !== 0) {
+              const xAtTop = p1.x + ((0 - p1.y) * dx) / dy;
+              const xAtBottom = p1.x + ((height - p1.y) * dx) / dy;
+              if (xAtTop >= 0 && xAtTop <= width) candidates.push({ x: xAtTop, y: 0 });
+              if (xAtBottom >= 0 && xAtBottom <= width) candidates.push({ x: xAtBottom, y: height });
+            }
+          }
+
+          const uniqueCandidates = candidates.filter((candidate, index) =>
+            candidates.findIndex((other) =>
+              Math.abs(other.x - candidate.x) < 0.5 && Math.abs(other.y - candidate.y) < 0.5,
+            ) === index,
+          );
+
+          let lineStart = p1;
+          let lineEnd = p2;
+
+          if (d.tool === 'extendedLine' && uniqueCandidates.length >= 2) {
+            const [startCandidate, endCandidate] = uniqueCandidates
+              .sort((a, b) => (a.x - b.x) || (a.y - b.y))
+              .slice(0, 2);
+            if (startCandidate && endCandidate) {
+              lineStart = startCandidate;
+              lineEnd = endCandidate;
+            }
+          }
+
+          if (d.tool === 'ray' && uniqueCandidates.length > 0) {
+            const forwardCandidates = uniqueCandidates.filter((candidate) =>
+              (candidate.x - p1.x) * dx + (candidate.y - p1.y) * dy >= 0,
+            );
+            const endpoint = forwardCandidates
+              .sort((a, b) =>
+                ((b.x - p1.x) ** 2 + (b.y - p1.y) ** 2) -
+                ((a.x - p1.x) ** 2 + (a.y - p1.y) ** 2),
+              )[0];
+            if (endpoint) lineEnd = endpoint;
+          }
+
+          return (
+            <g key={key} opacity={opacity}>
+              <line
+                x1={lineStart.x} y1={lineStart.y} x2={lineEnd.x} y2={lineEnd.y}
+                stroke={strokeColor}
+                strokeWidth={strokeWidth}
+              />
+              {anchors}
+            </g>
+          );
+        }
+
+        if (d.tool === 'arrow') {
+          const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+          const size = 10;
+          const left = {
+            x: p2.x - size * Math.cos(angle - Math.PI / 6),
+            y: p2.y - size * Math.sin(angle - Math.PI / 6),
+          };
+          const right = {
+            x: p2.x - size * Math.cos(angle + Math.PI / 6),
+            y: p2.y - size * Math.sin(angle + Math.PI / 6),
+          };
+
+        return (
+          <g key={key} opacity={opacity}>
+            <line
+              x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+              stroke={strokeColor}
+              strokeWidth={strokeWidth}
+            />
+            <polygon
+              points={`${p2.x},${p2.y} ${left.x},${left.y} ${right.x},${right.y}`}
+              fill={strokeColor}
+            />
+            {anchors}
+          </g>
+        );
+        }
+
         return (
           <g key={key} opacity={opacity}>
             <line
@@ -853,7 +995,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     : panState
       ? 'grabbing'
       : isEraser
-        ? 'not-allowed'
+        ? 'cell'
         : activeTool === 'cursor'
           ? 'grab'
           : (!isInteractive ? 'default' : isMultiClick ? 'cell' : 'crosshair');

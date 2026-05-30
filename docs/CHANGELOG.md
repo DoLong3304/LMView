@@ -47,6 +47,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Drawing toolbar restore** - Restored the left drawing bar from the stable pre-workspace layout, removed the new flyout registry from the rendered sidebar, and kept fixed-height top-aligned buttons so fullscreen no longer stretches tool spacing.
 - **Drawing toolbar delete actions** - Removed the Delete Selected toolbar button from drawing toolbars while keeping Delete All Drawings behind the existing confirmation modal.
+- **Left drawing bar layout** - Moved the left drawing bar into the chart body as a floating fixed-size toolbar with an iPhone-style collapse handle, separating it from the top chart toolbar and preserving spacing in fullscreen.
+- **Chart toolbar grouping** - Placed the live price/change indicator beside the symbol selector and pushed timeframe, indicators, history, export, chart type, and zoom controls into the right-side toolbar group.
 - **Chart toolbar overflow** - Fixed chart action row overflow by letting control groups wrap inside the chart container and anchoring Indicators/History dropdowns from the left with viewport-bounded widths.
 - **Chart symbol/timeframe controls** - Restored a single chart `MarketSelector` in the chart header and left-anchored the timeframe dropdown inside the chart toolbar container to prevent left-side overflow.
 - **Chart autoscale reset** - Improved chart autoscale reset so it restores the intended initial candle window and price scaling instead of dumping the full loaded history into view.

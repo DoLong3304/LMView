@@ -51,25 +51,25 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
   const selectedMeta = getMeta(selectedSymbol);
 
   return (
-    <div ref={dropdownRef} className="relative">
+    <div ref={dropdownRef} className="relative w-[148px] flex-shrink-0 sm:w-[164px]">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 bg-gray-700 text-white text-sm rounded px-3 py-1.5 border border-gray-600 hover:border-gray-500 focus:outline-none focus:border-blue-500 cursor-pointer min-w-[160px]"
+        className="flex h-8 w-full cursor-pointer items-center gap-2 rounded border border-gray-600 bg-gray-700 px-2.5 text-sm text-white hover:border-gray-500 focus:outline-none focus:border-blue-500"
       >
         <img
           src={selectedMeta.icon}
           alt={selectedMeta.name}
-          className="w-5 h-5 rounded-full"
+          className="w-5 h-5 flex-shrink-0 rounded-full"
           onError={(e) => {
             e.currentTarget.src = DEFAULT_SYMBOL_ICON;
           }}
         />
-        <span className="font-medium">{selectedSymbol}</span>
+        <span className="min-w-0 truncate font-medium">{selectedSymbol}</span>
         <ChevronDown size={14} className="ml-auto text-gray-400" />
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-72 bg-gray-800 border border-gray-700 rounded-lg shadow-2xl z-[150] overflow-hidden">
+        <div className="absolute top-full left-0 mt-1 w-[min(288px,calc(100vw-1rem))] bg-gray-800 border border-gray-700 rounded-lg shadow-2xl z-[150] overflow-hidden">
           {/* Search */}
           <div className="p-2 border-b border-gray-700">
             <div className="relative">
