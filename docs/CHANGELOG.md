@@ -7,6 +7,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.14.2] - 2026-05-30 - Drawing Toolbar Light Theme Polish
+
+### Added
+
+- **Drawing tool groups** - Rebuilt the floating left drawing bar around hoverable Line, Shapes, Fibonacci, Chart Patterns, Elliott Wave, and Position / Forecast groups with viewport-bounded flyout menus.
+- **Drawing tools** - Added stable chart-rendered Fibonacci retracement, ABCD/XABCD patterns, Elliott wave, long/short position, and forecast drawing paths while keeping cursor, text, ruler, eraser, lock, replay, and delete-all flows intact.
+
+### Fixed
+
+- **Light mode contrast** - Moved chart toolbar, symbol selector, drawing toolbar, replay controls, tool flyouts, hover, active, and disabled states onto shared theme tokens so Light Mode remains readable.
+- **Drawing toolbar interaction** - Kept tool group hover highlighted blue, preserved flyouts while moving from the button to the menu, and disabled eraser while all drawings are locked.
+- **Pattern drafting** - Added point-by-point ABCD/XABCD drafting with anchored labels, preview segments, low-opacity polygon fills, and Escape/Cursor cancellation.
+- **Fullscreen delete confirmation** - Moved Delete All Drawings confirmation into the chart fullscreen subtree so cancel/confirm remains visible above the fullscreen canvas.
+- **Indicator localization** - Replaced hardcoded Indicator panel labels, descriptions, pane badges, color labels, and switch status text with i18n keys for full Vietnamese coverage.
+
 ## [0.14.1] - 2026-05-28 - Frontend Chart Controls and Right Panel UI
 
 ### Added

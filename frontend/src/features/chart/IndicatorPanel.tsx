@@ -8,10 +8,10 @@ type IndicatorGroup = "trend" | "momentum" | "volatility" | "volume";
 
 interface IndicatorDef {
   key: string;
-  label: string;
+  labelKey: TranslationKey;
   group: IndicatorGroup;
   pane: "chart" | "pane" | "volume";
-  description: string;
+  descriptionKey: TranslationKey;
 }
 
 const GROUP_LABEL_KEYS: Record<IndicatorGroup, TranslationKey> = {
@@ -21,23 +21,29 @@ const GROUP_LABEL_KEYS: Record<IndicatorGroup, TranslationKey> = {
   volume: "volumeIndicators",
 };
 
+const PANE_LABEL_KEYS: Record<IndicatorDef["pane"], TranslationKey> = {
+  chart: "chartPane",
+  pane: "separatePane",
+  volume: "volumePane",
+};
+
 const INDICATORS: IndicatorDef[] = [
-  { key: "sma20", label: "SMA 20", group: "trend", pane: "chart", description: "Simple Moving Average" },
-  { key: "sma50", label: "SMA 50", group: "trend", pane: "chart", description: "Simple Moving Average" },
-  { key: "ema12", label: "EMA 12", group: "trend", pane: "chart", description: "Exponential Moving Average" },
-  { key: "ema26", label: "EMA 26", group: "trend", pane: "chart", description: "Exponential Moving Average" },
-  { key: "vwap", label: "VWAP", group: "trend", pane: "chart", description: "Volume Weighted Average Price" },
-  { key: "ichimoku", label: "Ichimoku Cloud", group: "trend", pane: "chart", description: "Conversion, base, spans, lagging line" },
-  { key: "supertrend", label: "Supertrend", group: "trend", pane: "chart", description: "ATR-based trend following" },
-  { key: "psar", label: "Parabolic SAR", group: "trend", pane: "chart", description: "Stop and reverse trend marker" },
-  { key: "rsi", label: "RSI", group: "momentum", pane: "pane", description: "Relative Strength Index" },
-  { key: "macd", label: "MACD", group: "momentum", pane: "pane", description: "MACD, signal, histogram" },
-  { key: "stochastic", label: "Stochastic", group: "momentum", pane: "pane", description: "%K and %D oscillator" },
-  { key: "mfi", label: "MFI", group: "momentum", pane: "pane", description: "Money Flow Index" },
-  { key: "bb", label: "Bollinger Bands", group: "volatility", pane: "chart", description: "Basis, upper, lower bands" },
-  { key: "atr", label: "ATR", group: "volatility", pane: "pane", description: "Average True Range" },
-  { key: "volume", label: "Volume", group: "volume", pane: "volume", description: "Exchange volume histogram" },
-  { key: "volumeMa", label: "Volume MA", group: "volume", pane: "volume", description: "Moving average of volume" },
+  { key: "sma20", labelKey: "indicatorSma20", group: "trend", pane: "chart", descriptionKey: "indicatorDescSimpleMovingAverage" },
+  { key: "sma50", labelKey: "indicatorSma50", group: "trend", pane: "chart", descriptionKey: "indicatorDescSimpleMovingAverage" },
+  { key: "ema12", labelKey: "indicatorEma12", group: "trend", pane: "chart", descriptionKey: "indicatorDescExponentialMovingAverage" },
+  { key: "ema26", labelKey: "indicatorEma26", group: "trend", pane: "chart", descriptionKey: "indicatorDescExponentialMovingAverage" },
+  { key: "vwap", labelKey: "indicatorVwap", group: "trend", pane: "chart", descriptionKey: "indicatorDescVwap" },
+  { key: "ichimoku", labelKey: "indicatorIchimoku", group: "trend", pane: "chart", descriptionKey: "indicatorDescIchimoku" },
+  { key: "supertrend", labelKey: "indicatorSupertrend", group: "trend", pane: "chart", descriptionKey: "indicatorDescSupertrend" },
+  { key: "psar", labelKey: "indicatorPsar", group: "trend", pane: "chart", descriptionKey: "indicatorDescPsar" },
+  { key: "rsi", labelKey: "indicatorRsi", group: "momentum", pane: "pane", descriptionKey: "indicatorDescRsi" },
+  { key: "macd", labelKey: "indicatorMacd", group: "momentum", pane: "pane", descriptionKey: "indicatorDescMacd" },
+  { key: "stochastic", labelKey: "indicatorStochastic", group: "momentum", pane: "pane", descriptionKey: "indicatorDescStochastic" },
+  { key: "mfi", labelKey: "indicatorMfi", group: "momentum", pane: "pane", descriptionKey: "indicatorDescMfi" },
+  { key: "bb", labelKey: "indicatorBollingerBands", group: "volatility", pane: "chart", descriptionKey: "indicatorDescBollingerBands" },
+  { key: "atr", labelKey: "indicatorAtr", group: "volatility", pane: "pane", descriptionKey: "indicatorDescAtr" },
+  { key: "volume", labelKey: "indicatorVolume", group: "volume", pane: "volume", descriptionKey: "indicatorDescVolume" },
+  { key: "volumeMa", labelKey: "indicatorVolumeMa", group: "volume", pane: "volume", descriptionKey: "indicatorDescVolumeMa" },
 ];
 
 interface IndicatorPanelProps {
@@ -59,13 +65,13 @@ const NUMBER_FIELDS: Array<{ key: string; labelKey: TranslationKey; min: number;
   { key: "displacement", labelKey: "displacement", min: 0, max: 100 },
 ];
 
-const COLOR_FIELDS: Array<{ key: string; label: string }> = [
-  { key: "color", label: "Main" },
-  { key: "basisColor", label: "Basis" },
-  { key: "signalColor", label: "Signal" },
-  { key: "baseColor", label: "Base" },
-  { key: "spanAColor", label: "Span A" },
-  { key: "spanBColor", label: "Span B" },
+const COLOR_FIELDS: Array<{ key: string; labelKey: TranslationKey }> = [
+  { key: "color", labelKey: "mainColor" },
+  { key: "basisColor", labelKey: "basisColor" },
+  { key: "signalColor", labelKey: "signalColor" },
+  { key: "baseColor", labelKey: "baseColor" },
+  { key: "spanAColor", labelKey: "spanAColor" },
+  { key: "spanBColor", labelKey: "spanBColor" },
 ];
 
 const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange }) => {
@@ -89,7 +95,7 @@ const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange }
   const visibleIndicators = INDICATORS.filter((indicator) => {
     const normalizedQuery = query.trim().toLowerCase();
     if (!normalizedQuery) return true;
-    return `${indicator.label} ${indicator.description} ${indicator.group}`
+    return `${t(indicator.labelKey)} ${t(indicator.descriptionKey)} ${t(GROUP_LABEL_KEYS[indicator.group])}`
       .toLowerCase()
       .includes(normalizedQuery);
   });
@@ -146,17 +152,19 @@ const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange }
                               style={{ backgroundColor: String(cfg.color) }}
                             />
                           )}
-                          <span className="truncate text-xs font-semibold text-gray-200">{indicator.label}</span>
+                          <span className="truncate text-xs font-semibold text-gray-200">{t(indicator.labelKey)}</span>
                           <span className="rounded bg-gray-900 px-1.5 py-0.5 text-[10px] uppercase text-gray-500">
-                            {indicator.pane}
+                            {t(PANE_LABEL_KEYS[indicator.pane])}
                           </span>
                         </div>
-                        <p className="mt-0.5 truncate text-[10px] text-gray-500">{indicator.description}</p>
+                        <p className="mt-0.5 truncate text-[10px] text-gray-500">{t(indicator.descriptionKey)}</p>
                       </div>
                       <div className="flex flex-shrink-0 items-center gap-1.5">
                         <span
                           role="switch"
                           aria-checked={cfg.visible}
+                          aria-label={`${t(indicator.labelKey)} ${cfg.visible ? t("active") : t("inactive")}`}
+                          title={cfg.visible ? t("active") : t("inactive")}
                           tabIndex={0}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -200,9 +208,9 @@ const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange }
                           </div>
                         ))}
 
-                        {COLOR_FIELDS.filter(({ key }) => typeof cfg[key] === "string").map(({ key, label }) => (
+                        {COLOR_FIELDS.filter(({ key }) => typeof cfg[key] === "string").map(({ key, labelKey }) => (
                           <div key={key} className="flex items-center justify-between gap-2">
-                            <span className="text-xs text-gray-400">{label}</span>
+                            <span className="text-xs text-gray-400">{t(labelKey)}</span>
                             <input
                               type="color"
                               value={String(cfg[key])}

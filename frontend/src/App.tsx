@@ -535,6 +535,43 @@ const TradingDashboard: React.FC = () => {
     ? 300
     : Math.min(300, Math.floor(window.innerWidth * 0.86));
 
+  const clearDrawingsConfirmModal = isClearDrawingsConfirmOpen ? (
+    <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/60 px-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="clear-drawings-title"
+        className="w-full max-w-sm rounded border border-[var(--lm-border)] bg-[var(--lm-bg-secondary)] shadow-2xl"
+      >
+        <div className="border-b border-[var(--lm-border)] px-4 py-3">
+          <h2 id="clear-drawings-title" className="text-sm font-semibold text-[var(--lm-text-primary)]">
+            {t("clearAllDrawings")}
+          </h2>
+        </div>
+        <div className="space-y-2 px-4 py-4">
+          <p className="text-sm text-[var(--lm-text-secondary)]">{t("confirmClearDrawings")}</p>
+          <p className="text-xs text-[var(--lm-text-muted)]">{t("actionCannotBeUndone")}</p>
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-[var(--lm-border)] px-4 py-3">
+          <button
+            type="button"
+            onClick={() => setIsClearDrawingsConfirmOpen(false)}
+            className="rounded border border-[var(--lm-border)] px-3 py-1.5 text-xs font-medium text-[var(--lm-text-secondary)] transition-colors hover:bg-[var(--lm-bg-tertiary)] hover:text-[var(--lm-text-primary)]"
+          >
+            {t("cancel")}
+          </button>
+          <button
+            type="button"
+            onClick={handleClearAll}
+            className="rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-red-500"
+          >
+            {t("deleteAll")}
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
       <Header
@@ -620,8 +657,8 @@ const TradingDashboard: React.FC = () => {
                           }}
                         >
                           <LeftSidebar
-                            activeTool={activeTool as any}
-                            onToolChange={handleToolChange as any}
+                            activeTool={activeTool}
+                            onToolChange={handleToolChange}
                             onClearAll={handleRequestClearAllDrawings}
                             onLockAll={handleLockAll}
                             onHideAll={handleHideAll}
@@ -630,12 +667,13 @@ const TradingDashboard: React.FC = () => {
                             onReplayClick={handleReplayButtonClick}
                             isReplayActive={isReplayActive}
                             isReplaySelectionMode={isReplaySelectionMode}
+                            drawingsLocked={drawingsLocked}
                           />
                         </div>
                         <button
                           type="button"
                           onClick={handleToggleDrawingToolbar}
-                          className={`pointer-events-auto absolute top-1/2 z-[150] flex -translate-y-1/2 items-center justify-center border border-gray-600/80 bg-gray-850/95 text-gray-300 shadow-lg outline-none transition-all duration-200 hover:border-blue-500/70 hover:bg-gray-800 hover:text-white hover:opacity-95 focus-visible:border-blue-500 focus-visible:opacity-95 ${
+                          className={`pointer-events-auto absolute top-1/2 z-[150] flex -translate-y-1/2 items-center justify-center border border-[var(--lm-border-strong)] bg-[var(--lm-bg-secondary)] text-[var(--lm-text-secondary)] shadow-lg outline-none transition-all duration-200 hover:border-[var(--lm-blue-border)] hover:bg-[var(--lm-blue-soft)] hover:text-[var(--lm-blue)] hover:opacity-95 focus-visible:border-blue-500 focus-visible:opacity-95 ${
                             isDrawingToolbarOpen
                               ? "-right-2 h-14 w-5 rounded-full opacity-40"
                               : "-left-3 h-16 w-5 rounded-r-full border-l-0 opacity-45"
@@ -683,6 +721,7 @@ const TradingDashboard: React.FC = () => {
                         onExit={exitReplay}
                       />
                     )}
+                    {clearDrawingsConfirmModal}
                   </>
                 );
               }}
@@ -738,42 +777,6 @@ const TradingDashboard: React.FC = () => {
         )}
       </main>
 
-      {isClearDrawingsConfirmOpen && (
-        <div className="fixed inset-0 z-[400] flex items-center justify-center bg-black/60 px-4">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="clear-drawings-title"
-            className="w-full max-w-sm rounded border border-gray-700 bg-gray-850 shadow-2xl"
-          >
-            <div className="border-b border-gray-700 px-4 py-3">
-              <h2 id="clear-drawings-title" className="text-sm font-semibold text-white">
-                {t("clearAllDrawings")}
-              </h2>
-            </div>
-            <div className="space-y-2 px-4 py-4">
-              <p className="text-sm text-gray-200">{t("confirmClearDrawings")}</p>
-              <p className="text-xs text-gray-500">{t("actionCannotBeUndone")}</p>
-            </div>
-            <div className="flex items-center justify-end gap-2 border-t border-gray-700 px-4 py-3">
-              <button
-                type="button"
-                onClick={() => setIsClearDrawingsConfirmOpen(false)}
-                className="rounded border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-gray-800 hover:text-white"
-              >
-                {t("cancel")}
-              </button>
-              <button
-                type="button"
-                onClick={handleClearAll}
-                className="rounded bg-red-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-red-500"
-              >
-                {t("deleteAll")}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

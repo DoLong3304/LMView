@@ -19,6 +19,9 @@
   --lm-green: #16a34a;
   --lm-red: #ef4444;
   --lm-blue: #2563eb;
+  --lm-blue-hover: #1d4ed8;
+  --lm-blue-soft: rgba(37, 99, 235, 0.18);
+  --lm-blue-border: rgba(59, 130, 246, 0.55);
   --lm-grid: #202c3b;
   --lm-border: #283548;
   --lm-border-strong: #3a4960;
@@ -53,6 +56,9 @@ html[data-theme="light"] {
   --lm-green: #047857;
   --lm-red: #dc2626;
   --lm-blue: #1d4ed8;
+  --lm-blue-hover: #1e40af;
+  --lm-blue-soft: rgba(29, 78, 216, 0.12);
+  --lm-blue-border: rgba(37, 99, 235, 0.38);
   --lm-grid: #e1e7ef;
   --lm-border: #d1dae6;
   --lm-border-strong: #aebbd0;
@@ -66,6 +72,92 @@ html[data-theme="light"] {
   --lm-indicator-ema26: #a855f7;
   --lm-indicator-rsi: #0891b2;
   --lm-indicator-mfi: #db2777;
+}
+
+@layer components {
+  .lm-toolbar-surface {
+    background-color: var(--lm-bg-secondary);
+    border-color: var(--lm-border);
+    color: var(--lm-text-secondary);
+  }
+
+  .lm-toolbar-group {
+    background-color: var(--lm-bg-secondary);
+    border-color: var(--lm-border);
+  }
+
+  .lm-toolbar-button {
+    color: var(--lm-text-secondary);
+  }
+
+  .lm-toolbar-button:hover {
+    background-color: var(--lm-blue-soft);
+    color: var(--lm-blue);
+  }
+
+  .lm-toolbar-button.is-active,
+  .lm-toolbar-button[aria-pressed="true"] {
+    background-color: var(--lm-blue);
+    color: #ffffff;
+  }
+
+  .lm-toolbar-button:disabled,
+  .lm-toolbar-button.is-disabled {
+    color: var(--lm-text-disabled);
+    opacity: 0.62;
+  }
+
+  .lm-menu-surface,
+  .lm-tool-flyout {
+    background-color: var(--lm-bg-secondary);
+    border-color: var(--lm-border);
+    color: var(--lm-text-primary);
+  }
+
+  .lm-left-toolbar {
+    background-color: color-mix(in srgb, var(--lm-bg-secondary) 96%, transparent);
+    border-color: var(--lm-border);
+    color: var(--lm-text-secondary);
+  }
+
+  .lm-tool-button {
+    color: var(--lm-text-secondary);
+  }
+
+  .lm-tool-button:hover,
+  .lm-tool-button.is-active {
+    background-color: var(--lm-blue);
+    color: #ffffff;
+  }
+
+  .lm-tool-button.is-disabled,
+  .lm-tool-button:disabled {
+    background-color: transparent;
+    color: var(--lm-text-disabled);
+    opacity: 0.55;
+  }
+
+  .lm-tool-separator {
+    margin: 6px auto;
+    width: 24px;
+    border-top: 1px solid var(--lm-border);
+  }
+
+  .lm-tool-menu-item {
+    color: var(--lm-text-secondary);
+  }
+
+  .lm-tool-menu-item:hover,
+  .lm-tool-menu-item.is-active {
+    background-color: var(--lm-blue);
+    color: #ffffff;
+  }
+
+  .lm-tooltip {
+    background-color: var(--lm-bg-primary);
+    border-color: var(--lm-border-strong);
+    color: var(--lm-text-primary);
+  }
 }
 
 body {
@@ -201,8 +293,8 @@ textarea {
   left: 50%;
   transform: translateX(-50%);
   z-index: 1000;
-  background: rgba(19, 23, 34, 0.95);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, var(--lm-bg-secondary) 96%, transparent);
+  border: 1px solid var(--lm-border);
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   animation: fadeIn 0.3s ease-out;
@@ -211,14 +303,14 @@ textarea {
 
 .replay-progress-bar {
   height: 3px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--lm-bg-tertiary);
   border-radius: 8px 8px 0 0;
   overflow: hidden;
 }
 
 .replay-progress-fill {
   height: 100%;
-  background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+  background: var(--lm-blue);
   transition: width 0.1s linear;
 }
 
@@ -247,13 +339,13 @@ textarea {
 .replay-counter {
   font-size: 14px;
   font-weight: 600;
-  color: #fff;
+  color: var(--lm-text-primary);
   font-family: 'Courier New', monospace;
 }
 
 .replay-label {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--lm-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
@@ -264,18 +356,18 @@ textarea {
   justify-content: center;
   width: 36px;
   height: 36px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--lm-bg-tertiary);
+  border: 1px solid var(--lm-border);
   border-radius: 6px;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--lm-text-secondary);
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .replay-btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.2);
+  background: var(--lm-blue-soft);
+  color: var(--lm-blue);
+  border-color: var(--lm-blue-border);
 }
 
 .replay-btn:disabled {
@@ -284,14 +376,15 @@ textarea {
 }
 
 .replay-btn-primary {
-  background: #3b82f6;
-  border-color: #3b82f6;
+  background: var(--lm-blue);
+  border-color: var(--lm-blue);
   color: #fff;
 }
 
 .replay-btn-primary:hover:not(:disabled) {
-  background: #2563eb;
-  border-color: #2563eb;
+  background: var(--lm-blue-hover);
+  border-color: var(--lm-blue-hover);
+  color: #fff;
 }
 
 .replay-btn-exit {
@@ -308,8 +401,8 @@ textarea {
 .replay-speed-selector {
   display: flex;
   gap: 4px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--lm-bg-tertiary);
+  border: 1px solid var(--lm-border);
   border-radius: 6px;
   padding: 4px;
 }
@@ -318,7 +411,7 @@ textarea {
   padding: 6px 12px;
   font-size: 12px;
   font-weight: 600;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--lm-text-secondary);
   background: transparent;
   border: none;
   border-radius: 4px;
@@ -327,13 +420,13 @@ textarea {
 }
 
 .replay-speed-btn:hover {
-  color: rgba(255, 255, 255, 0.9);
-  background: rgba(255, 255, 255, 0.05);
+  color: var(--lm-blue);
+  background: var(--lm-blue-soft);
 }
 
 .replay-speed-btn.active {
   color: #fff;
-  background: #3b82f6;
+  background: var(--lm-blue);
 }
 
 /* Replay Mode Button */
@@ -342,10 +435,10 @@ textarea {
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  background: rgba(59, 130, 246, 0.1);
-  border: 1px solid rgba(59, 130, 246, 0.3);
+  background: var(--lm-blue-soft);
+  border: 1px solid var(--lm-blue-border);
   border-radius: 8px;
-  color: #3b82f6;
+  color: var(--lm-blue);
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
@@ -354,8 +447,9 @@ textarea {
 }
 
 .replay-mode-button:hover:not(:disabled) {
-  background: rgba(59, 130, 246, 0.2);
-  border-color: rgba(59, 130, 246, 0.5);
+  background: var(--lm-blue);
+  border-color: var(--lm-blue);
+  color: #fff;
   transform: translateY(-1px);
 }
 

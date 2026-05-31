@@ -54,7 +54,7 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
     <div ref={dropdownRef} className="relative w-[148px] flex-shrink-0 sm:w-[164px]">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex h-8 w-full cursor-pointer items-center gap-2 rounded border border-gray-600 bg-gray-700 px-2.5 text-sm text-white hover:border-gray-500 focus:outline-none focus:border-blue-500"
+        className="flex h-8 w-full cursor-pointer items-center gap-2 rounded border border-[var(--lm-border-strong)] bg-[var(--lm-bg-tertiary)] px-2.5 text-sm text-[var(--lm-text-primary)] transition-colors hover:border-[var(--lm-blue-border)] hover:bg-[var(--lm-blue-soft)] focus:border-blue-500 focus:outline-none"
       >
         <img
           src={selectedMeta.icon}
@@ -65,24 +65,24 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
           }}
         />
         <span className="min-w-0 truncate font-medium">{selectedSymbol}</span>
-        <ChevronDown size={14} className="ml-auto text-gray-400" />
+        <ChevronDown size={14} className="ml-auto text-[var(--lm-text-secondary)]" />
       </button>
 
       {isOpen && (
-        <div className="absolute top-full left-0 mt-1 w-[min(288px,calc(100vw-1rem))] bg-gray-800 border border-gray-700 rounded-lg shadow-2xl z-[150] overflow-hidden">
+        <div className="lm-menu-surface absolute top-full left-0 mt-1 w-[min(288px,calc(100vw-1rem))] overflow-hidden rounded-lg border shadow-2xl z-[150]">
           {/* Search */}
-          <div className="p-2 border-b border-gray-700">
+          <div className="border-b border-[var(--lm-border)] p-2">
             <div className="relative">
               <Search
                 size={14}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--lm-text-secondary)]"
               />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder={t("searchSymbol")}
-                className="w-full bg-gray-700 text-white text-sm rounded px-3 py-1.5 pl-8 border border-gray-600 focus:outline-none focus:border-blue-500"
+                className="w-full rounded border border-[var(--lm-border-strong)] bg-[var(--lm-bg-tertiary)] px-3 py-1.5 pl-8 text-sm text-[var(--lm-text-primary)] placeholder-gray-500 focus:border-blue-500 focus:outline-none"
                 autoFocus
               />
             </div>
@@ -91,7 +91,7 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
           {/* Symbol list */}
           <div className="max-h-64 overflow-y-auto">
             {filtered.length === 0 && (
-              <div className="px-3 py-4 text-center text-gray-500 text-sm">
+              <div className="px-3 py-4 text-center text-sm text-[var(--lm-text-muted)]">
                 {t("noResults")}
               </div>
             )}
@@ -105,7 +105,7 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
                   className={`flex items-center gap-2 px-3 py-2 cursor-pointer transition-colors ${
                     isActive
                       ? "bg-blue-600 bg-opacity-30"
-                      : "hover:bg-gray-700"
+                      : "hover:bg-[var(--lm-blue-soft)]"
                   }`}
                   onClick={() => {
                     onSelect(s);
@@ -122,9 +122,9 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
                     }}
                   />
                   <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium text-white">{s}</span>
+                    <span className="text-sm font-medium text-[var(--lm-text-primary)]">{s}</span>
                     {m?.name && (
-                      <span className="text-xs text-gray-400 ml-2">
+                      <span className="ml-2 text-xs text-[var(--lm-text-secondary)]">
                         {m.name}
                       </span>
                     )}
@@ -134,7 +134,7 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
                       e.stopPropagation();
                       onToggleStar(s);
                     }}
-                    className={`p-0.5 rounded transition-colors ${isStarred ? "text-yellow-400" : "text-gray-600 hover:text-gray-400"}`}
+                    className={`rounded p-0.5 transition-colors ${isStarred ? "text-yellow-500" : "text-[var(--lm-text-disabled)] hover:text-[var(--lm-text-secondary)]"}`}
                   >
                     <Star
                       size={14}

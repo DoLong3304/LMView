@@ -1,12 +1,13 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useI18n } from "@/i18n";
 import type { Drawing, DataPoint } from "@/types";
-import type { ToolSettings } from './ToolSettingsPopup';
+import { DEFAULT_TOOL_SETTINGS, type ToolSettings } from './ToolSettingsPopup';
 import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 
 const MULTI_CLICK_NEEDED: Record<string, boolean> = {
   elliottWave: true,
-  harmonicABCD: true
+  harmonicABCD: true,
+  xabcdPattern: true
 };
 
 const DRAWING_HIT_TOLERANCE = 8; // pixels
@@ -29,6 +30,16 @@ interface ChartOverlayProps {
 }
 
 interface PixelPoint { x: number; y: number; }
+
+const PATTERN_TOOLS = new Set(["harmonicABCD", "xabcdPattern", "elliottWave"]);
+
+const getPatternLabels = (tool: string, settings: Record<string, any>): string[] => {
+  if (tool === "xabcdPattern") return ["X", "A", "B", "C", "D"];
+  if (tool === "harmonicABCD") return ["A", "B", "C", "D"];
+  return (settings.waveType || "impulse") === "corrective"
+    ? ["A", "B", "C", "D"]
+    : ["0", "1", "2", "3", "4", "5"];
+};
 
 const ChartOverlay: React.FC<ChartOverlayProps> = ({
   activeTool,
@@ -71,7 +82,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
   const isMultiClick = MULTI_CLICK_NEEDED[activeTool] || false;
 
   const activeSettings = useCallback((): ToolSettings => {
-    return (toolSettings && toolSettings[activeTool]) || { color: '#3b82f6', lineWidth: 2 };
+    return (toolSettings && toolSettings[activeTool]) || DEFAULT_TOOL_SETTINGS[activeTool] || { color: '#3b82f6', lineWidth: 2 };
   }, [toolSettings, activeTool]);
 
   const requiredPoints = useCallback((): number => {
@@ -80,6 +91,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
       return wt === 'corrective' ? 4 : 6;
     }
     if (activeTool === 'harmonicABCD') return 4;
+    if (activeTool === 'xabcdPattern') return 5;
     return 0;
   }, [activeTool, activeSettings]);
 
@@ -251,6 +263,20 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
           mousePixel.y <= bottom + DRAWING_HIT_TOLERANCE;
       }
 
+      case 'longPosition':
+      case 'shortPosition': {
+        if (pixels.length < 2 || !pixels[0] || !pixels[1]) return false;
+        const [p1, p2] = pixels;
+        const left = Math.min(p1.x, p2.x);
+        const right = Math.max(p1.x, p2.x);
+        const top = Math.min(p1.y, p2.y);
+        const bottom = Math.max(p1.y, p2.y);
+        return mousePixel.x >= left - DRAWING_HIT_TOLERANCE &&
+          mousePixel.x <= right + DRAWING_HIT_TOLERANCE &&
+          mousePixel.y >= top - DRAWING_HIT_TOLERANCE &&
+          mousePixel.y <= bottom + DRAWING_HIT_TOLERANCE;
+      }
+
       case 'text': {
         // Text: check bounding box
         if (!pixels[0]) return false;
@@ -267,6 +293,13 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         // Trendline, ray, arrow, etc: check distance to line
         const validPixels = pixels.filter(p => p !== null) as PixelPoint[];
         if (validPixels.length < 2) return false;
+
+        if (PATTERN_TOOLS.has(drawing.tool)) {
+          const nearAnchor = validPixels.some((point) =>
+            Math.sqrt((mousePixel.x - point.x) ** 2 + (mousePixel.y - point.y) ** 2) <= DRAWING_HIT_TOLERANCE,
+          );
+          if (nearAnchor) return true;
+        }
 
         if (drawing.tool === 'extendedLine') {
           return distanceToInfiniteLine(mousePixel, validPixels[0], validPixels[1]) <= DRAWING_HIT_TOLERANCE;
@@ -385,8 +418,10 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         settings: activeSettings(),
       });
       setMultiDataPoints([]);
+      setCurrentDataPoint(null);
     } else {
       setMultiDataPoints(next);
+      setCurrentDataPoint(snapped);
     }
   }, [multiDataPoints, requiredPoints, activeTool, getSVGPoint, pixelToData, magneticSnap, onAddDrawing, activeSettings]);
 
@@ -743,9 +778,6 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         const validPixels = pixels.filter(p => p !== null) as PixelPoint[];
         if (validPixels.length !== pixels.length) return null; // Some points off-screen, don't render
 
-        if (validPixels.length < 2) return null;
-
-        const [p1, p2] = validPixels;
         const anchors = isSelected && !isPreview && !d.locked ? validPixels.map((p, index) => (
           <circle
             key={`${d.id}-anchor-${index}`}
@@ -759,6 +791,80 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
             onMouseDown={(e) => handleAnchorMouseDown(e, d.id, index)}
           />
         )) : null;
+
+        if (PATTERN_TOOLS.has(d.tool)) {
+          const labels = getPatternLabels(d.tool, s);
+          const pointList = validPixels.map((point) => `${point.x},${point.y}`).join(' ');
+          const canFill = validPixels.length >= 3;
+
+          return (
+            <g key={key} opacity={opacity}>
+              {canFill && (
+                <polygon
+                  points={pointList}
+                  fill={`${color}16`}
+                  stroke={`${color}66`}
+                  strokeWidth={Math.max(1, strokeWidth - 0.5)}
+                  strokeLinejoin="round"
+                />
+              )}
+              {validPixels.length >= 2 && (
+                <polyline
+                  points={pointList}
+                  fill="none"
+                  stroke={strokeColor}
+                  strokeWidth={strokeWidth}
+                  strokeLinejoin="round"
+                />
+              )}
+              {validPixels.map((point, index) => {
+                const label = labels[index] ?? `${index + 1}`;
+                const isPreviewPoint = isPreview && index === validPixels.length - 1;
+                return (
+                  <g key={`${d.id}-point-${index}`} opacity={isPreviewPoint ? 0.82 : 1}>
+                    <circle
+                      cx={point.x}
+                      cy={point.y}
+                      r={isPreviewPoint ? 3.5 : 4.5}
+                      fill={strokeColor}
+                      stroke="white"
+                      strokeWidth="1.5"
+                    />
+                    {s.showLabel !== false && (
+                      <>
+                        <rect
+                          x={point.x + 7}
+                          y={point.y - 19}
+                          width={Math.max(18, label.length * 8 + 10)}
+                          height={17}
+                          rx={4}
+                          fill={`${color}34`}
+                          stroke={`${color}80`}
+                          strokeWidth="1"
+                        />
+                        <text
+                          x={point.x + 16}
+                          y={point.y - 7}
+                          textAnchor="middle"
+                          fontSize="10"
+                          fontWeight="600"
+                          fill={strokeColor}
+                        >
+                          {label}
+                        </text>
+                      </>
+                    )}
+                  </g>
+                );
+              })}
+              {anchors}
+            </g>
+          );
+        }
+
+        if (validPixels.length < 2) return null;
+
+        const [p1, p2] = validPixels;
 
         if (d.tool === 'rectangle') {
           const left = Math.min(p1.x, p2.x);
@@ -858,6 +964,140 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
               <text x={midX} y={midY - 12} textAnchor="middle" fontSize="11" fill={strokeColor}>
                 {label}
               </text>
+              {anchors}
+            </g>
+          );
+        }
+
+        if (d.tool === 'fibRetracement') {
+          const start = d.dataPoints[0];
+          const end = d.dataPoints[1];
+          const levels = (s.levels as number[] | undefined) ?? [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+          const left = Math.min(p1.x, p2.x);
+          const right = Math.max(p1.x, p2.x);
+          const top = Math.min(p1.y, p2.y);
+          const bottom = Math.max(p1.y, p2.y);
+
+          return (
+            <g key={key} opacity={opacity}>
+              <line
+                x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
+                stroke={strokeColor}
+                strokeWidth={strokeWidth}
+                strokeDasharray="4 4"
+              />
+              {levels.map((level) => {
+                const price = start.price + (end.price - start.price) * level;
+                const y = p1.y + (p2.y - p1.y) * level;
+                return (
+                  <g key={`${d.id}-fib-${level}`}>
+                    <line
+                      x1={left}
+                      y1={y}
+                      x2={right}
+                      y2={y}
+                      stroke={strokeColor}
+                      strokeWidth={Math.max(1, strokeWidth - 0.5)}
+                      opacity={0.82}
+                    />
+                    {s.showLabel !== false && (
+                      <>
+                        <rect
+                          x={right + 4}
+                          y={y - 8}
+                          width={86}
+                          height={16}
+                          rx={3}
+                          fill={`${color}24`}
+                        />
+                        <text x={right + 8} y={y + 4} fontSize="10" fill={strokeColor}>
+                          {(level * 100).toFixed(1)}% {price.toFixed(2)}
+                        </text>
+                      </>
+                    )}
+                  </g>
+                );
+              })}
+              <rect
+                x={left}
+                y={top}
+                width={right - left}
+                height={bottom - top}
+                fill={`${color}08`}
+                stroke="none"
+              />
+              {anchors}
+            </g>
+          );
+        }
+
+        if (d.tool === 'longPosition' || d.tool === 'shortPosition') {
+          const left = Math.min(p1.x, p2.x);
+          const top = Math.min(p1.y, p2.y);
+          const width = Math.abs(p2.x - p1.x);
+          const entryY = p1.y;
+          const targetY = d.tool === 'longPosition' ? top : Math.max(p1.y, p2.y);
+          const riskY = d.tool === 'longPosition' ? Math.max(p1.y, p2.y) : top;
+          const targetHeight = Math.abs(entryY - targetY);
+          const riskHeight = Math.abs(riskY - entryY);
+          const priceMove = d.tool === 'longPosition'
+            ? d.dataPoints[1].price - d.dataPoints[0].price
+            : d.dataPoints[0].price - d.dataPoints[1].price;
+          const pct = d.dataPoints[0].price ? (priceMove / d.dataPoints[0].price) * 100 : 0;
+
+          return (
+            <g key={key} opacity={opacity}>
+              <rect
+                x={left}
+                y={targetY}
+                width={width}
+                height={targetHeight}
+                fill="#16a34a22"
+                stroke="#16a34a"
+                strokeWidth={strokeWidth}
+              />
+              <rect
+                x={left}
+                y={Math.min(entryY, riskY)}
+                width={width}
+                height={riskHeight}
+                fill="#dc262622"
+                stroke="#dc2626"
+                strokeWidth={strokeWidth}
+              />
+              <line x1={left} y1={entryY} x2={left + width} y2={entryY} stroke={strokeColor} strokeWidth={strokeWidth} />
+              {s.showLabel !== false && (
+                <text x={left + width / 2} y={top - 6} textAnchor="middle" fontSize="11" fill={strokeColor}>
+                  {d.tool === 'longPosition' ? 'Long' : 'Short'} {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                </text>
+              )}
+              {anchors}
+            </g>
+          );
+        }
+
+        if (d.tool === 'forecast') {
+          const pct = d.dataPoints[0].price ? ((d.dataPoints[1].price - d.dataPoints[0].price) / d.dataPoints[0].price) * 100 : 0;
+          const midX = (p1.x + p2.x) / 2;
+          const midY = (p1.y + p2.y) / 2;
+
+          return (
+            <g key={key} opacity={opacity}>
+              <line
+                x1={p1.x}
+                y1={p1.y}
+                x2={p2.x}
+                y2={p2.y}
+                stroke={strokeColor}
+                strokeWidth={strokeWidth}
+                strokeDasharray="6 4"
+              />
+              <circle cx={p2.x} cy={p2.y} r={4} fill={strokeColor} />
+              {s.showLabel !== false && (
+                <text x={midX} y={midY - 8} textAnchor="middle" fontSize="11" fill={strokeColor}>
+                  Forecast {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                </text>
+              )}
               {anchors}
             </g>
           );
@@ -983,6 +1223,23 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     return renderDrawing(previewDrawing, true);
   }, [isDrawing, startDataPoint, currentDataPoint, activeTool, activeSettings, renderDrawing]);
 
+  const renderMultiClickPreview = useCallback(() => {
+    if (!isMultiClick || multiDataPoints.length === 0) return null;
+
+    const previewPoints = currentDataPoint
+      ? [...multiDataPoints, currentDataPoint]
+      : multiDataPoints;
+
+    const previewDrawing: Drawing = {
+      id: 'multi-preview',
+      tool: activeTool,
+      dataPoints: previewPoints,
+      settings: activeSettings(),
+    };
+
+    return renderDrawing(previewDrawing, true);
+  }, [activeSettings, activeTool, currentDataPoint, isMultiClick, multiDataPoints, renderDrawing]);
+
   const isInteractive = activeTool !== 'cursor';
   const isEraser = activeTool === 'eraser';
   const shouldCapturePointer =
@@ -1025,6 +1282,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
       >
         {drawings.map((d) => renderDrawing(d))}
         {renderPreview()}
+        {renderMultiClickPreview()}
       </svg>
 
       {textInput && (

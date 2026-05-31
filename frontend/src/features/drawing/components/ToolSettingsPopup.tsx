@@ -28,6 +28,10 @@ export const DEFAULT_TOOL_SETTINGS: Record<string, ToolSettings> = {
   ruler: { color: "#facc15", lineWidth: 2, showLabel: true, dashArray: "dashed" },
   elliottWave: { color: "#f97316", lineWidth: 2, showLabel: true, waveType: "impulse" },
   harmonicABCD: { color: "#a855f7", lineWidth: 2, showLabel: true, fiboLevels: [0.618, 1.272] },
+  xabcdPattern: { color: "#a855f7", lineWidth: 2, showLabel: true, fiboLevels: [0.618, 0.786, 1.272] },
+  longPosition: { color: "#16a34a", lineWidth: 1.5, showLabel: true, fillOpacity: 0.12 },
+  shortPosition: { color: "#dc2626", lineWidth: 1.5, showLabel: true, fillOpacity: 0.12 },
+  forecast: { color: "#2563eb", lineWidth: 2, showLabel: true, dashArray: "dashed" },
 };
 
 const TOOL_TITLE_KEYS: Record<string, TranslationKey> = {

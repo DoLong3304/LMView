@@ -1628,21 +1628,21 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const selectedTimeframeLabel = TIMEFRAMES[normalizeTimeframe(timeframe)].label;
   const marketSelectorSymbols =
     symbols.length > 0 ? Array.from(new Set([symbol, ...symbols])) : [symbol];
-  const toolbarGroupClass = "flex h-8 flex-shrink-0 items-center gap-1 rounded-md border border-gray-700 bg-gray-850 p-0.5";
-  const toolbarButtonBase = "flex h-7 flex-shrink-0 items-center justify-center whitespace-nowrap rounded px-2 text-xs font-semibold transition-colors";
-  const toolbarIconButtonBase = "flex h-7 w-7 flex-shrink-0 items-center justify-center rounded transition-colors";
-  const chartTypeButtonBase = "flex h-7 flex-shrink-0 items-center justify-center gap-1 rounded px-2 text-xs font-semibold transition-colors";
-  const toolbarIdleClass = "text-gray-400 hover:bg-gray-700 hover:text-white";
-  const toolbarActiveClass = "bg-blue-600 text-white shadow-sm shadow-blue-950/40";
+  const toolbarGroupClass = "lm-toolbar-group flex h-8 flex-shrink-0 items-center gap-1 rounded-md border p-0.5";
+  const toolbarButtonBase = "lm-toolbar-button flex h-7 flex-shrink-0 items-center justify-center whitespace-nowrap rounded px-2 text-xs font-semibold transition-colors";
+  const toolbarIconButtonBase = "lm-toolbar-button flex h-7 w-7 flex-shrink-0 items-center justify-center rounded transition-colors";
+  const chartTypeButtonBase = "lm-toolbar-button flex h-7 flex-shrink-0 items-center justify-center gap-1 rounded px-2 text-xs font-semibold transition-colors";
+  const toolbarIdleClass = "";
+  const toolbarActiveClass = "is-active shadow-sm shadow-blue-950/20";
 
   return (
     <div
       ref={rootRef}
-      className={`flex min-h-0 w-full flex-col overflow-hidden bg-gray-900 ${
+      className={`flex min-h-0 w-full flex-col overflow-hidden bg-[var(--lm-bg-primary)] ${
         isFullscreen ? "h-screen rounded-none" : "h-full rounded-lg"
       }`}
     >
-      <div className="flex-none border-b border-gray-700 bg-gray-800">
+      <div className="lm-toolbar-surface flex-none border-b">
         <div className="max-xl:overflow-x-auto xl:overflow-visible">
           <div className="flex h-11 w-full min-w-max flex-nowrap items-center gap-2 px-2 py-1.5 sm:px-3 xl:min-w-0">
             <div className="flex flex-shrink-0 items-center gap-2">
@@ -1657,7 +1657,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
               {lastCandle && (
                 <div className="flex h-8 flex-shrink-0 items-center gap-2 whitespace-nowrap">
                   <span
-                    className={`font-mono text-sm font-bold ${isUp ? "text-green-400" : "text-red-400"}`}
+                    className={`font-mono text-sm font-bold ${isUp ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
                   >
                     {lastCandle.close.toLocaleString(undefined, {
                       minimumFractionDigits: 2,
@@ -1668,8 +1668,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                     <span
                       className={`rounded px-1.5 py-0.5 text-xs font-semibold ${
                         isUp
-                          ? "bg-green-900/70 text-green-300"
-                          : "bg-red-900/70 text-red-300"
+                          ? "bg-green-100 text-green-700 dark:bg-green-900/70 dark:text-green-300"
+                          : "bg-red-100 text-red-700 dark:bg-red-900/70 dark:text-red-300"
                       }`}
                     >
                       {isUp ? "+" : ""}
@@ -1685,10 +1685,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsTimeframeMenuOpen((open) => !open)}
-                  className={`${toolbarButtonBase} min-w-14 gap-1 border border-gray-700 px-2.5 ${
+                  className={`${toolbarButtonBase} min-w-14 gap-1 border border-[var(--lm-border)] px-2.5 ${
                     isTimeframeMenuOpen
-                      ? "border-blue-500 bg-blue-600 text-white shadow-sm shadow-blue-950/40"
-                      : "bg-gray-850 text-gray-300 hover:border-gray-500 hover:bg-gray-800 hover:text-white"
+                      ? "border-blue-500 bg-blue-600 text-white shadow-sm shadow-blue-950/20"
+                      : "lm-toolbar-button bg-[var(--lm-bg-secondary)] text-[var(--lm-text-secondary)] hover:border-[var(--lm-blue-border)]"
                   }`}
                 >
                   <span className="min-w-6 text-left">{selectedTimeframeLabel}</span>
@@ -1698,7 +1698,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                   />
                 </button>
                 {isTimeframeMenuOpen && (
-                  <div className="absolute left-0 top-full z-[110] mt-2 w-24 max-w-[calc(100vw-1rem)] overflow-hidden rounded border border-gray-700 bg-gray-850 shadow-2xl">
+                  <div className="lm-menu-surface absolute left-0 top-full z-[110] mt-2 w-24 max-w-[calc(100vw-1rem)] overflow-hidden rounded border shadow-2xl">
                     {TIMEFRAME_KEYS.map((key) => {
                       const active = normalizeTimeframe(timeframe) === key;
                       return (
@@ -1709,7 +1709,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                           className={`w-full px-3 py-2 text-left text-xs font-medium transition-colors ${
                             active
                               ? "bg-blue-600 text-white"
-                              : "text-gray-300 hover:bg-gray-800 hover:text-white"
+                              : "text-[var(--lm-text-secondary)] hover:bg-[var(--lm-blue-soft)] hover:text-[var(--lm-blue)]"
                           }`}
                         >
                           {TIMEFRAMES[key].label}
@@ -1786,7 +1786,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                   className={`${toolbarIconButtonBase} ${
                     canZoomIn
                       ? toolbarIdleClass
-                      : "text-gray-600 cursor-not-allowed"
+                      : "is-disabled cursor-not-allowed"
                   }`}
                   title={t("zoomIn")}
                 >
@@ -1798,7 +1798,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                   className={`${toolbarIconButtonBase} ${
                     canZoomOut
                       ? toolbarIdleClass
-                      : "text-gray-600 cursor-not-allowed"
+                      : "is-disabled cursor-not-allowed"
                   }`}
                   title={t("zoomOut")}
                 >
@@ -1826,7 +1826,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           </span>
           <button
             onClick={handleBackToLive}
-            className="text-xs text-amber-400 hover:text-white underline"
+            className="text-xs text-amber-600 underline hover:text-amber-500 dark:text-amber-400 dark:hover:text-white"
           >
             {t("live")}
           </button>
@@ -1837,21 +1837,21 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
            lightweight-charts instance; visibility is toggled via CSS. */}
       <div className="flex min-h-0 flex-1 flex-col">
         {/* OHLCV bar */}
-        <div className="min-h-[28px] flex-none px-3 py-1 bg-gray-900 border-b border-gray-800">
+        <div className="min-h-[28px] flex-none border-b border-[var(--lm-border)] bg-[var(--lm-bg-primary)] px-3 py-1">
           <OHLCVBar data={tooltip} />
         </div>
         {/* Chart canvas + overlay slot */}
         <div ref={chartStageRef} className="relative min-h-0 flex-1 overflow-hidden">
           <div ref={containerRef} className="w-full h-full" />
           {isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-60 z-10">
-              <span className="text-gray-400 text-sm animate-pulse">
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--lm-bg-primary)]/60">
+              <span className="animate-pulse text-sm text-[var(--lm-text-secondary)]">
                 {t("loading")}
               </span>
             </div>
           )}
           {fetchError && !isLoading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-60 z-10">
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--lm-bg-primary)]/60">
               <div className="text-center">
                 <p className="text-red-400 text-sm mb-2">{fetchError}</p>
                 <button
@@ -1859,7 +1859,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                     setFetchError(null);
                     setRetryCount((c) => c + 1);
                   }}
-                  className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded text-xs transition-colors"
+                  className="rounded bg-blue-600 px-3 py-1 text-xs text-white transition-colors hover:bg-blue-700"
                 >
                   {t("retry")}
                 </button>
@@ -1867,8 +1867,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
             </div>
           )}
           {noData && !isLoading && !fetchError && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-40 z-10">
-              <p className="text-gray-400 text-sm">
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--lm-bg-primary)]/40">
+              <p className="text-sm text-[var(--lm-text-secondary)]">
                 {t("noDataAvailable")} {symbol} @ {timeframe}
               </p>
             </div>
