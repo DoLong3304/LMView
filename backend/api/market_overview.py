@@ -92,7 +92,13 @@ async def get_market_overview(
             "trending_news": trending_news,
             "sector_performance": sector_performance,
             "heatmap_data": heatmap_data,
-            "indicators_summary": indicators_summary
+            "indicators_summary": indicators_summary,
+            "metadata": {
+                "is_placeholder": True,
+                "source": "default",
+                "warning": "Market overview currently returns placeholder/default data. "
+                           "Connect to Trino gold tables for live analytics.",
+            },
         }
 
     except Exception as e:

@@ -1,91 +1,158 @@
-import React, { createContext, useContext, useState, useCallback } from "react";
-import type { UserSession, AuthResult } from "@/types";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+} from "react";
+import {
+  type UserResponse,
+  apiRegister,
+  apiLogin,
+  apiLogout,
+  apiGetMe,
+  mockRegister,
+  mockLogin,
+  mockLogout,
+  mockGetCurrentUser,
+  shouldUseMockAuth,
+  hasStoredSession,
+} from "@/services/authService";
 
 interface AuthContextValue {
-  user: UserSession | null;
-  login: (email: string, password: string) => AuthResult;
-  register: (name: string, email: string, password: string) => AuthResult;
-  logout: () => void;
-}
-
-interface StoredUser {
-  name: string;
-  email: string;
-  password: string;
+  user: UserResponse | null;
+  loading: boolean;
+  error: string | null;
+  isAuthenticated: boolean;
+  login: (
+    email: string,
+    password: string,
+  ) => Promise<{ success: boolean; error?: string }>;
+  register: (
+    name: string,
+    email: string,
+    password: string,
+  ) => Promise<{ success: boolean; error?: string }>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-// Mock user storage using localStorage
-function getStoredUsers(): StoredUser[] {
-  try {
-    return JSON.parse(localStorage.getItem("app_users") || "[]") as StoredUser[];
-  } catch {
-    return [];
-  }
-}
-
-function storeUsers(users: StoredUser[]): void {
-  try {
-    localStorage.setItem("app_users", JSON.stringify(users));
-  } catch {
-    // Storage unavailable
-  }
-}
-
-function getStoredSession(): UserSession | null {
-  try {
-    const s = localStorage.getItem("app_session");
-    return s ? (JSON.parse(s) as UserSession) : null;
-  } catch {
-    return null;
-  }
-}
-
-function storeSession(session: UserSession | null): void {
-  try {
-    if (session) localStorage.setItem("app_session", JSON.stringify(session));
-    else localStorage.removeItem("app_session");
-  } catch {
-    // Storage unavailable
-  }
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<UserSession | null>(() => getStoredSession());
+  const [user, setUser] = useState<UserResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const login = useCallback((email: string, password: string): AuthResult => {
-    const users = getStoredUsers();
-    const found = users.find(
-      (u) => u.email === email && u.password === password,
-    );
-    if (!found) return { success: false, error: "invalidCredentials" };
-    const session: UserSession = { email: found.email, name: found.name };
-    setUser(session);
-    storeSession(session);
-    return { success: true };
+  // Restore session on mount
+  useEffect(() => {
+    const restore = async () => {
+      if (shouldUseMockAuth()) {
+        const mockUser = mockGetCurrentUser();
+        setUser(mockUser);
+        setLoading(false);
+        return;
+      }
+
+      if (!hasStoredSession()) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const me = await apiGetMe();
+        setUser(me.user);
+      } catch {
+        // Token invalid/expired — clear silently
+        setUser(null);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    restore();
   }, []);
 
-  const register = useCallback((name: string, email: string, password: string): AuthResult => {
-    const users = getStoredUsers();
-    if (users.find((u) => u.email === email)) {
-      return { success: false, error: "emailExists" };
+  const login = useCallback(
+    async (
+      email: string,
+      password: string,
+    ): Promise<{ success: boolean; error?: string }> => {
+      setError(null);
+
+      if (shouldUseMockAuth()) {
+        const result = mockLogin(email, password);
+        if (result.success && result.user) {
+          setUser(result.user);
+        }
+        return result;
+      }
+
+      try {
+        const data = await apiLogin(email, password);
+        setUser(data.user);
+        return { success: true };
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Login failed";
+        setError(message);
+        return { success: false, error: message };
+      }
+    },
+    [],
+  );
+
+  const register = useCallback(
+    async (
+      name: string,
+      email: string,
+      password: string,
+    ): Promise<{ success: boolean; error?: string }> => {
+      setError(null);
+
+      if (shouldUseMockAuth()) {
+        const result = mockRegister(name, email, password);
+        if (result.success && result.user) {
+          setUser(result.user);
+        }
+        return result;
+      }
+
+      try {
+        const data = await apiRegister(email, password, name);
+        setUser(data.user);
+        return { success: true };
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Registration failed";
+        setError(message);
+        return { success: false, error: message };
+      }
+    },
+    [],
+  );
+
+  const logout = useCallback(async () => {
+    if (shouldUseMockAuth()) {
+      mockLogout();
+    } else {
+      await apiLogout();
     }
-    users.push({ name, email, password });
-    storeUsers(users);
-    const session: UserSession = { email, name };
-    setUser(session);
-    storeSession(session);
-    return { success: true };
-  }, []);
-
-  const logout = useCallback(() => {
     setUser(null);
-    storeSession(null);
+    setError(null);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, login, register, logout }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        loading,
+        error,
+        isAuthenticated: user !== null,
+        login,
+        register,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

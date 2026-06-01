@@ -36,12 +36,9 @@ class RedisSentinelManager:
     def __init__(self):
         # Get sentinel nodes from environment
         sentinels_str = os.getenv('REDIS_SENTINELS', 'redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379')
-        self.sentinel_nodes = [
-            tuple(node.split(':')) for node in sentinels_str.split(',')
-        ]
-        # Convert port to int
-        self.sentinel_nodes = [
-            (host, int(port)) for host, port in self.sentinel_nodes
+        nodes_str = [tuple(node.split(':')) for node in sentinels_str.split(',')]
+        self.sentinel_nodes: list[tuple[str, int]] = [
+            (host, int(port)) for host, port in nodes_str
         ]
 
         self.master_name = os.getenv('REDIS_MASTER_NAME', 'mymaster')
@@ -235,13 +232,13 @@ def get_redis_sentinel() -> RedisSentinelManager:
     return _redis_sentinel
 
 
-async def get_redis_master():
+async def get_redis_master() -> Redis:
     """Get master client for writes"""
     sentinel = get_redis_sentinel()
     return await sentinel.get_master()
 
 
-async def get_redis_replica():
+async def get_redis_replica() -> Redis:
     """Get replica client for reads"""
     sentinel = get_redis_sentinel()
     return await sentinel.get_replica()

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from redis.asyncio import Redis
+
 from influxdb_client import InfluxDBClient
 import trino
 
@@ -12,7 +14,7 @@ from backend.core.redis_sentinel import get_redis_master, get_redis_replica, get
 _influx: InfluxDBClient | None = None
 
 
-async def get_redis():
+async def get_redis() -> Redis:
     """
     Get Redis client for general use (reads from replica, writes to master)
 

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useI18n } from "@/i18n";
 
@@ -17,10 +17,11 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const [password, setPassword] = useState("");
   const [confirmPw, setConfirmPw] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
@@ -33,19 +34,32 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         setError(t("passwordMinLength"));
         return;
       }
-      const result = register(name, email, password);
-      if (!result.success) {
-        setError(result.error ? t(result.error as Parameters<typeof t>[0]) : "");
-        return;
-      }
-    } else {
-      const result = login(email, password);
-      if (!result.success) {
-        setError(result.error ? t(result.error as Parameters<typeof t>[0]) : "");
-        return;
-      }
     }
-    onClose();
+
+    setLoading(true);
+    try {
+      let result: { success: boolean; error?: string };
+
+      if (mode === "register") {
+        result = await register(name, email, password);
+      } else {
+        result = await login(email, password);
+      }
+
+      if (!result.success) {
+        setError(
+          result.error
+            ? t(result.error as Parameters<typeof t>[0])
+            : t("somethingWentWrong"),
+        );
+        return;
+      }
+      onClose();
+    } catch {
+      setError(t("somethingWentWrong"));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const switchMode = () => {
@@ -80,6 +94,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 onChange={(e) => setName(e.target.value)}
                 className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500"
                 placeholder={t("name")}
+                disabled={loading}
               />
             </div>
           )}
@@ -94,6 +109,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               onChange={(e) => setEmail(e.target.value)}
               className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500"
               placeholder="email@example.com"
+              disabled={loading}
             />
           </div>
           <div>
@@ -107,6 +123,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               onChange={(e) => setPassword(e.target.value)}
               className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500"
               placeholder="••••••"
+              disabled={loading}
             />
           </div>
           {mode === "register" && (
@@ -121,6 +138,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 onChange={(e) => setConfirmPw(e.target.value)}
                 className="w-full bg-gray-700 text-white rounded-lg px-3 py-2 border border-gray-600 focus:outline-none focus:border-blue-500"
                 placeholder="••••••"
+                disabled={loading}
               />
             </div>
           )}
@@ -129,8 +147,10 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
           <button
             type="submit"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg py-2 transition-colors"
+            disabled={loading}
+            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-800 disabled:cursor-wait text-white font-semibold rounded-lg py-2 transition-colors flex items-center justify-center gap-2"
           >
+            {loading && <Loader2 size={16} className="animate-spin" />}
             {mode === "login" ? t("signIn") : t("signUp")}
           </button>
         </form>
@@ -140,6 +160,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
           <button
             onClick={switchMode}
             className="text-blue-400 hover:text-blue-300"
+            disabled={loading}
           >
             {mode === "login" ? t("signUp") : t("signIn")}
           </button>

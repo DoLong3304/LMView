@@ -7,6 +7,51 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.15.0] - 2026-06-01 - Phase 0: AI Foundation Layer
+
+### Added
+
+- **PostgreSQL auth foundation** — `backend/core/postgres.py` async connection pool (asyncpg), `backend/core/security.py` password hashing (bcrypt/SHA-256 fallback), `backend/core/auth_dependencies.py` FastAPI Bearer-token auth dependencies.
+- **Auth API** — `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `PATCH /api/auth/preferences` with session-based authentication.
+- **Auth Pydantic models** — `RegisterRequest`, `LoginRequest`, `AuthResponse`, `UserResponse`, `SessionInfo`, `UserPreferencesResponse`, `MeResponse` in `backend/models/auth.py`.
+- **AI backend API** — `GET /api/ai/health`, `POST /api/ai/chat` (scope gate + mock response + message persistence), `GET /POST /api/ai/sessions`, `GET /api/ai/sessions/{id}/messages`, `POST /api/ai/chart-context`, `POST /api/ai/chart-actions/validate`, `POST /api/ai/chart-actions/record`.
+- **AI Pydantic models** — `AIChatRequest`, `AIChatResponse`, `AIChartAction`, `AIChartActionType` (10 action types), `AISessionResponse`, `AIMessageResponse`, `AIHealthResponse`, `ScopeGateResult`, `ChartContextDTO` in `backend/models/ai.py` and `backend/models/chart_context.py`.
+- **Scope gate service** — Keyword-based in-scope/out-of-scope classification (crypto, indicators, charts, news, risk education). Blocks prompt injection, weather, recipes, code generation.
+- **Chart action validator** — Validates AI-proposed chart actions against known indicator names, price/time ranges, payload safety (blocks JS/SQL injection, nesting depth), note length limits.
+- **Mock AI service** — Deterministic Phase 0 responses that echo received context to prove wiring, clearly marked as mock.
+- **Indicator service** — Catalog of 10 supported indicators, Redis-backed latest values, compact AI-context summaries with freshness metadata.
+- **Common response models** — `DataFreshness`, `DataMetadata`, `PaginatedResponse`, `ErrorDetail` in `backend/models/common.py`.
+- **SQL migration** — `backend/migrations/001_phase0_schema.sql` with 9 tables: `users`, `auth_sessions`, `user_preferences`, `ai_chat_sessions`, `ai_messages`, `ai_chart_snapshots`, `ai_tool_actions`, `news_articles`, `ai_knowledge_documents`.
+- **Frontend auth service** — `frontend/src/services/authService.ts` with API calls + mock fallback for `VITE_DATA_SOURCE=mock`.
+- **Frontend AI service** — `frontend/src/services/aiService.ts` with all AI API calls + auth header injection.
+- **Frontend AI panel** — Extracted `AiAssistantPanel` from `RightPanel` into `frontend/src/features/ai/`, using `useAiChat` hook with backend API / local mock dispatching.
+- **Frontend types** — Added `DataFreshness`, `DataMetadata`, `UserSession` to `frontend/src/types/index.ts`.
+- **Unit tests** — 53 tests covering auth security (password hashing, session tokens, email validation), AI models (enums, DTOs), scope gate (in-scope/out-of-scope, prompt injection), chart action validator (indicators, ranges, XSS/SQL injection), and mock service.
+
+### Changed
+
+- **AuthContext rewrite** — `AuthContext.tsx` now uses backend API (Bearer token auth) with async login/register/logout. Falls back to localStorage mock for `VITE_DATA_SOURCE=mock`.
+- **AuthModal** — Now async with loading spinner, disabled inputs during submission, error handling for both API and mock paths.
+- **RightPanel** — Extracted ~150 lines of inline AI chat code into standalone `AiAssistantPanel` component.
+- **Trades API** — Response now includes `metadata.data_type = "ticker_derived"`, `metadata.is_true_trade_tape = false`, source/exchange/freshness. Added `GET /api/trades/{symbol}/summary`.
+- **Order book API** — Every response path now includes `metadata` with source, exchange, `is_synthetic` flag, and `DataFreshness`. Added `GET /api/orderbook/{symbol}/summary` with depth/imbalance.
+- **Indicators API** — Added `GET /api/indicators/supported` listing all 10 indicators, expanded freshness metadata. Added `GET /api/indicators/{symbol}/summary`.
+- **Market overview API** — Response now includes `metadata.is_placeholder = true` to prevent AI/users from treating default data as real analytics.
+- **Backend config** — Added PostgreSQL connection vars, auth session config, migration flag.
+- **Test conftest** — Added PostgreSQL env defaults, graceful mocking for environments without Docker-only deps.
+- **`.env.example`** — Added `POSTGRES_HOST`, `POSTGRES_LMVIEW_DB`, `RUN_MIGRATIONS`, `SESSION_EXPIRY_HOURS`.
+
+### Not Implemented (Phase 1+)
+
+- Real LLM integration (LangGraph, model inference, RAG)
+- Autonomous chart interaction
+- News PostgreSQL persistence (schema ready, service stubbed)
+- Frontend AI Interact Mode (action approval/execution UI)
+- Cookie-based session transport (Bearer token for Phase 0)
+- Alembic/SQLAlchemy migration framework
+
+---
+
 ## [0.14.2] - 2026-05-30 - Drawing Toolbar Light Theme Polish
 
 ### Added

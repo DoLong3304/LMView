@@ -4,7 +4,7 @@ Shared test fixtures and configuration.
 
 import os
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 # Set environment variables before any backend imports
 os.environ.setdefault("INFLUX_TOKEN", "test-token")
@@ -16,6 +16,11 @@ os.environ.setdefault("REDIS_PORT", "6379")
 os.environ.setdefault("TRINO_HOST", "localhost")
 os.environ.setdefault("TRINO_PORT", "8080")
 os.environ.setdefault("CORS_ORIGINS", "*")
+os.environ.setdefault("POSTGRES_HOST", "localhost")
+os.environ.setdefault("POSTGRES_PORT", "5432")
+os.environ.setdefault("POSTGRES_USER", "test")
+os.environ.setdefault("POSTGRES_PASSWORD", "test")
+os.environ.setdefault("POSTGRES_LMVIEW_DB", "test_lmview")
 
 
 @pytest.fixture
@@ -51,9 +56,28 @@ def sample_1m_candles():
 
 @pytest.fixture(autouse=True)
 def mock_background_tasks():
-    """Mock background fetchers to prevent them from starting during tests."""
-    with patch("backend.app.news_fetcher.start"), \
-         patch("backend.app.news_fetcher.stop"), \
-         patch("backend.app.market_fetcher.start"), \
-         patch("backend.app.market_fetcher.stop"):
-        yield
+    """Mock background fetchers and PostgreSQL to prevent them from starting during tests."""
+    patches = []
+    try:
+        patches.append(patch("backend.app.news_fetcher.start"))
+        patches.append(patch("backend.app.news_fetcher.stop"))
+        patches.append(patch("backend.app.market_fetcher.start"))
+        patches.append(patch("backend.app.market_fetcher.stop"))
+        patches.append(patch("backend.app.init_pg_pool"))
+        patches.append(patch("backend.app.close_pg_pool"))
+        patches.append(patch("backend.app.run_migration"))
+
+        for p in patches:
+            p.start()
+    except (ImportError, AttributeError, ModuleNotFoundError):
+        # Some modules may not be importable in local dev (missing influxdb_client, etc.)
+        # Unit tests for models/security don't need the full app
+        pass
+
+    yield
+
+    for p in patches:
+        try:
+            p.stop()
+        except (RuntimeError, AttributeError):
+            pass

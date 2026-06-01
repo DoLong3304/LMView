@@ -3,17 +3,10 @@ import {
   ArrowLeftRight,
   Bot,
   BookOpen,
-  CircleDot,
-  CornerDownLeft,
-  MoreHorizontal,
-  Plus,
-  Send,
   Star,
   Search,
-  Sparkles,
   TrendingUp,
   TrendingDown,
-  UserRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useI18n } from "@/i18n";
@@ -21,6 +14,7 @@ import { useSymbolMeta } from "@/hooks/useSymbolMeta";
 import { DEFAULT_SYMBOL_ICON } from "@/services/symbolMetaService";
 import OrderBook from "@/features/market/components/OrderBook";
 import RecentTrades from "@/features/market/components/RecentTrades";
+import AiAssistantPanel from "@/features/ai/components/AiAssistantPanel";
 import type { WatchlistItem, Candle } from "@/types";
 import type { TranslationKey } from "@/i18n/translations";
 
@@ -73,8 +67,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTopTab, setActiveTopTab] = useState<RightPanelTopTab>("overview");
   const [activeTab, setActiveTab] = useState<RightPanelTab>("watchlist");
-  const [aiQuestion, setAiQuestion] = useState("");
-  const [aiMessages, setAiMessages] = useState<Array<{ id: number; role: "user" | "assistant"; content: string }>>([]);
+
 
   // Sort: starred first, then by % change (gainers → losers)
   const sortedItems = useMemo(() => {
@@ -157,42 +150,6 @@ const RightPanel: React.FC<RightPanelProps> = ({
   // Price position within range
   const rangeSpan = high24 - low24 || 1;
   const positionPct = lastCandle ? ((lastCandle.close - low24) / rangeSpan) * 100 : 50;
-  const aiPlaceholder = t("aiHelperPlaceholder").replace("{symbol}", selectedSymbol);
-  const assistantIntro = t("aiReadyMessage")
-    .replace("{symbol}", selectedSymbol)
-    .replace("{timeframe}", timeframe.toUpperCase());
-  const assistantMessages = [
-    { id: 0, role: "assistant" as const, content: assistantIntro },
-    ...aiMessages,
-  ];
-  const aiSuggestions = [
-    t("aiSuggestionTrend"),
-    t("aiSuggestionSupport"),
-    t("aiSuggestionIndicators"),
-  ];
-
-  const handleAskAi = () => {
-    const trimmed = aiQuestion.trim();
-    if (!trimmed) return;
-
-    setAiMessages((current) => [
-      ...current,
-      { id: Date.now(), role: "user", content: trimmed },
-      {
-        id: Date.now() + 1,
-        role: "assistant",
-        content: t("aiMockResponse")
-          .replace("{symbol}", selectedSymbol)
-          .replace("{timeframe}", timeframe.toUpperCase()),
-      },
-    ]);
-    setAiQuestion("");
-  };
-
-  const handleNewAiChat = () => {
-    setAiMessages([]);
-    setAiQuestion("");
-  };
 
   return (
     <div
@@ -219,150 +176,11 @@ const RightPanel: React.FC<RightPanelProps> = ({
       </div>
 
       {activeTopTab === "aiHelper" ? (
-        <div className="flex min-h-0 flex-1 flex-col bg-gray-900">
-          <div className="border-b border-gray-800 bg-gray-850 px-3 py-2.5">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex min-w-0 items-center gap-2">
-                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded bg-blue-500/10 text-blue-300">
-                  <Sparkles size={15} />
-                </div>
-                <div className="min-w-0">
-                  <h2 className="truncate text-sm font-semibold text-white">{t("lmviewAi")}</h2>
-                  <p className="truncate text-[11px] text-gray-500">{t("assistantWorkspace")}</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={handleNewAiChat}
-                  className="flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
-                  title={t("newChat")}
-                >
-                  <Plus size={14} />
-                </button>
-                <button
-                  type="button"
-                  className="flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
-                  title={t("assistantOptions")}
-                >
-                  <MoreHorizontal size={15} />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="border-b border-gray-800 bg-gray-900 px-3 py-2">
-            <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-              <CircleDot size={10} /> {t("chartContext")}
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              <span className="rounded border border-gray-700 bg-gray-850 px-2 py-1 text-[10px] font-medium text-gray-300">
-                {selectedSymbol}
-              </span>
-              <span className="rounded border border-gray-700 bg-gray-850 px-2 py-1 text-[10px] font-medium text-gray-300">
-                {timeframe.toUpperCase()}
-              </span>
-              <span className="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-medium text-blue-300">
-                {t("marketAnalysisMode")}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex min-h-0 flex-1 flex-col">
-            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
-              {assistantMessages.map((message) => {
-                const isUser = message.role === "user";
-                return (
-                  <div
-                    key={message.id}
-                    className={`flex gap-2 ${isUser ? "justify-end" : "justify-start"}`}
-                  >
-                    {!isUser && (
-                      <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-blue-500/10 text-blue-300">
-                        <Bot size={13} />
-                      </div>
-                    )}
-                    <div className={`max-w-[86%] ${isUser ? "items-end" : "items-start"}`}>
-                      <div className={`mb-1 flex items-center gap-1.5 text-[10px] text-gray-500 ${isUser ? "justify-end" : ""}`}>
-                        {isUser ? <UserRound size={10} /> : <Sparkles size={10} />}
-                        <span>{isUser ? t("you") : t("assistantName")}</span>
-                      </div>
-                      <div
-                        className={`rounded-lg px-3 py-2 text-xs leading-5 shadow-sm ${
-                          isUser
-                            ? "bg-blue-600 text-white"
-                            : "border border-gray-800 bg-gray-850 text-gray-200"
-                        }`}
-                      >
-                        {message.content}
-                      </div>
-                    </div>
-                    {isUser && (
-                      <div className="mt-5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-gray-800 text-gray-300">
-                        <UserRound size={13} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-
-              <div className="rounded-lg border border-dashed border-gray-800 bg-gray-850/70 p-2">
-                <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                  {t("suggestedPrompts")}
-                </div>
-                <div className="space-y-1.5">
-                  {aiSuggestions.map((suggestion) => (
-                    <button
-                      key={suggestion}
-                      type="button"
-                      onClick={() => setAiQuestion(suggestion)}
-                      className="w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-left text-[11px] text-gray-300 transition-colors hover:border-blue-500/50 hover:text-white"
-                    >
-                      {suggestion}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="border-t border-gray-800 bg-gray-850 p-2.5">
-              <div className="rounded-lg border border-gray-700 bg-gray-900 transition-colors focus-within:border-blue-500">
-                <textarea
-                  value={aiQuestion}
-                  onChange={(event) => setAiQuestion(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                      event.preventDefault();
-                      handleAskAi();
-                    }
-                  }}
-                  placeholder={aiPlaceholder}
-                  className="min-h-20 w-full resize-none rounded-t-lg bg-transparent px-3 py-2 text-xs text-white placeholder-gray-500 outline-none"
-                />
-                <div className="flex items-center justify-between gap-2 border-t border-gray-800 px-2 py-1.5">
-                  <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-gray-500">
-                    <CornerDownLeft size={11} />
-                    <span className="truncate">{t("sendHint")}</span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={handleAskAi}
-                    disabled={!aiQuestion.trim()}
-                    className={`flex h-7 items-center gap-1.5 rounded px-2 text-xs font-semibold transition-colors ${
-                      aiQuestion.trim()
-                        ? "bg-blue-600 text-white hover:bg-blue-500"
-                        : "cursor-not-allowed bg-gray-800 text-gray-600"
-                    }`}
-                    title={t("sendMessage")}
-                  >
-                    <Send size={12} />
-                    {t("send")}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
+        <AiAssistantPanel
+          selectedSymbol={selectedSymbol}
+          timeframe={timeframe}
+          candles={candles}
+        />
       ) : (
         <>
       {/* Coin Summary - Fixed at top */}

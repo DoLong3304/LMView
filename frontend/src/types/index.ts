@@ -262,3 +262,42 @@ export interface HistoryState {
   commands: Command[];
   currentIndex: number;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 0: Data freshness and metadata types (shared with backend contracts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Reusable freshness metadata for AI-critical data responses */
+export interface DataFreshness {
+  source: string;
+  exchange?: string | null;
+  event_time?: number | null;
+  last_updated?: string | null;
+  freshness_seconds?: number | null;
+  is_stale: boolean;
+  is_fallback: boolean;
+  warnings: string[];
+}
+
+/** Extended data metadata for provenance */
+export interface DataMetadata {
+  data_type: string; // live, cached, computed, synthetic, placeholder
+  source: string;
+  exchange?: string | null;
+  is_synthetic: boolean;
+  is_true_data: boolean;
+  freshness?: DataFreshness | null;
+  persisted: boolean;
+}
+
+/** User session (backend auth response) */
+export interface UserSession {
+  id: string;
+  email: string;
+  display_name: string;
+  role: string;
+  preferred_language?: string | null;
+  is_active: boolean;
+  session_token?: string;
+  expires_at?: string;
+}
