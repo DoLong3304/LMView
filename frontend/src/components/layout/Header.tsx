@@ -28,6 +28,7 @@ interface HeaderProps {
   activeView: AppView;
   onViewChange: (view: AppView) => void;
   onLoginClick: () => void;
+  onSettingsClick: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -38,6 +39,7 @@ const Header: React.FC<HeaderProps> = ({
   activeView,
   onViewChange,
   onLoginClick,
+  onSettingsClick,
 }) => {
   const { t } = useI18n();
   const { user, loading, isAuthenticated, logout } = useAuth();
@@ -127,6 +129,7 @@ const Header: React.FC<HeaderProps> = ({
           <LanguageSwitcher />
           <button
             type="button"
+            onClick={onSettingsClick}
             className="text-gray-400 hover:text-white p-1.5 rounded hover:bg-gray-800 transition-colors"
             title={t("settings")}
           >

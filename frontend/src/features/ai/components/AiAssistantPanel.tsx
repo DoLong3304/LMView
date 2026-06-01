@@ -10,6 +10,7 @@ import {
   Bot,
   CircleDot,
   CornerDownLeft,
+  Lock,
   Loader2,
   MoreHorizontal,
   Plus,
@@ -17,6 +18,7 @@ import {
   Sparkles,
   UserRound,
 } from "lucide-react";
+import { DATA_SOURCE } from "@/constants/env";
 import { useI18n } from "@/i18n";
 import { useAiChat } from "@/features/ai/hooks/useAiChat";
 import type { ChartContextForAi } from "@/features/ai/types";
@@ -28,6 +30,7 @@ interface AiAssistantPanelProps {
   candles?: Candle[];
   selectedIndicators?: string[];
   exchange?: string;
+  onOpenSettings?: () => void;
 }
 
 const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
@@ -36,9 +39,10 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
   candles = [],
   selectedIndicators = [],
   exchange = "binance",
+  onOpenSettings,
 }) => {
   const { t } = useI18n();
-  const { messages, loading, sendMessage, clearChat } = useAiChat();
+  const { messages, loading, error, mode, setMode, sendMessage, clearChat } = useAiChat();
   const [inputValue, setInputValue] = React.useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -83,15 +87,16 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
     }
   };
 
-  const introMessage = t("aiReadyMessage")
+  const introMessage = t("lmviewHelpReadyMessage")
     .replace("{symbol}", selectedSymbol)
     .replace("{timeframe}", timeframe.toUpperCase());
 
   const suggestions = [
-    t("aiSuggestionTrend"),
-    t("aiSuggestionSupport"),
-    t("aiSuggestionIndicators"),
+    t("aiSuggestionLmview"),
+    t("aiSuggestionDrawingTools"),
+    t("aiSuggestionIndicatorsHelp"),
   ];
+  const assistantLabel = DATA_SOURCE === "api" ? t("lmviewHelpMode") : t("assistantName");
 
   // Combine intro + messages
   const allMessages = [
@@ -128,6 +133,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
             </button>
             <button
               type="button"
+              onClick={onOpenSettings}
               className="flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
               title={t("assistantOptions")}
             >
@@ -150,7 +156,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
             {timeframe.toUpperCase()}
           </span>
           <span className="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-medium text-blue-300">
-            {t("marketAnalysisMode")}
+            {mode === "ask" ? t("lmviewHelpMode") : t("aiInteractUnavailable")}
           </span>
           {selectedIndicators.length > 0 && (
             <span className="rounded border border-gray-700 bg-gray-850 px-2 py-1 text-[10px] font-medium text-gray-300">
@@ -163,6 +169,42 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
       {/* Messages */}
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+          <div className="flex rounded border border-gray-800 bg-gray-850 p-1">
+            <button
+              type="button"
+              onClick={() => setMode("ask")}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[11px] font-semibold transition-colors ${
+                mode === "ask"
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-400 hover:bg-gray-800 hover:text-white"
+              }`}
+            >
+              <Sparkles size={12} />
+              {t("askMode")}
+            </button>
+            <button
+              type="button"
+              disabled
+              className="flex flex-1 cursor-not-allowed items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[11px] font-semibold text-gray-600"
+              title={t("aiInteractUnavailable")}
+            >
+              <Lock size={12} />
+              {t("interactMode")}
+            </button>
+          </div>
+
+          {DATA_SOURCE === "api" && (
+            <div className="rounded border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
+              {t("aiApiUnavailableHelpOnly")}
+            </div>
+          )}
+
+          {error && (
+            <div className="rounded border border-red-500/25 bg-red-500/10 px-3 py-2 text-[11px] leading-5 text-red-200">
+              {error}
+            </div>
+          )}
+
           {allMessages.map((message) => {
             const isUser = message.role === "user";
             return (
@@ -180,7 +222,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
                     className={`mb-1 flex items-center gap-1.5 text-[10px] text-gray-500 ${isUser ? "justify-end" : ""}`}
                   >
                     {isUser ? <UserRound size={10} /> : <Sparkles size={10} />}
-                    <span>{isUser ? t("you") : t("assistantName")}</span>
+                    <span>{isUser ? t("you") : assistantLabel}</span>
                   </div>
                   <div
                     className={`rounded-lg px-3 py-2 text-xs leading-5 shadow-sm ${
@@ -254,9 +296,9 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
               <button
                 type="button"
                 onClick={handleSend}
-                disabled={!inputValue.trim() || loading}
+                disabled={!inputValue.trim() || loading || mode === "interact"}
                 className={`flex h-7 items-center gap-1.5 rounded px-2 text-xs font-semibold transition-colors ${
-                  inputValue.trim() && !loading
+                  inputValue.trim() && !loading && mode !== "interact"
                     ? "bg-blue-600 text-white hover:bg-blue-500"
                     : "cursor-not-allowed bg-gray-800 text-gray-600"
                 }`}

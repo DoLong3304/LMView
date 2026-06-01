@@ -36,3 +36,5 @@ export interface ChartContextForAi {
   } | null;
   frontend_context_version: string;
 }
+
+export type { AiMode, LocalAiHelpSession } from "@/types";

@@ -2,7 +2,7 @@
  * AI service — API calls for AI chat, sessions, and chart actions.
  *
  * Talks to /api/ai/* endpoints.
- * Falls back to local mock when API is unavailable or VITE_DATA_SOURCE=mock.
+ * Real API helpers only. Mock and local help modes live at frontend service boundary.
  */
 
 import { API_BASE_URL, DATA_SOURCE } from "@/constants/env";

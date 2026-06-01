@@ -1,15 +1,13 @@
 import { DATA_SOURCE } from "@/constants/env";
 import { apiGet, buildQuery } from "@/services/apiClient";
+import { isUnavailableApiPayload } from "@/services/apiMetadata";
 import { makeClientCacheKey, withClientCache } from "@/services/clientCache";
-import {
-  generateMockGainers,
-  generateMockLosers,
-  generateMockMarketOverview,
-} from "@/data/mockDataGenerator";
+import { getMockDataAdapter } from "@/services/dataSourceAdapter";
 import type { MarketMetrics, TopMover } from "@/types";
 
 const MARKET_OVERVIEW_CACHE_MS = 30_000;
 const TOP_MOVERS_CACHE_MS = 15_000;
+const mockDataAdapter = getMockDataAdapter();
 
 function unwrapData<T>(payload: T | { data: T }): T {
   if (payload && typeof payload === "object" && "data" in payload) {
@@ -28,9 +26,10 @@ function normalizeMover(item: Partial<TopMover>): TopMover {
   };
 }
 
-export async function fetchMarketOverview(): Promise<MarketMetrics> {
+export async function fetchMarketOverview(): Promise<MarketMetrics | null> {
   if (DATA_SOURCE === "mock") {
-    return generateMockMarketOverview();
+    const payload = await mockDataAdapter.fetchMarketOverview();
+    return payload.data;
   }
   const payload = await withClientCache(
     "market-overview",
@@ -38,12 +37,14 @@ export async function fetchMarketOverview(): Promise<MarketMetrics> {
     () => apiGet<MarketMetrics | { data: MarketMetrics }>("/market/overview"),
     { staleOnError: true },
   );
+  if (isUnavailableApiPayload(payload)) return null;
   return unwrapData(payload);
 }
 
 export async function fetchTopGainers(limit: number = 5): Promise<TopMover[]> {
   if (DATA_SOURCE === "mock") {
-    return generateMockGainers().slice(0, limit);
+    const payload = await mockDataAdapter.fetchTopGainers(limit);
+    return payload.data;
   }
   const payload = await withClientCache(
     makeClientCacheKey(["market-gainers", limit]),
@@ -54,13 +55,15 @@ export async function fetchTopGainers(limit: number = 5): Promise<TopMover[]> {
       ),
     { staleOnError: true },
   );
+  if (isUnavailableApiPayload(payload)) return [];
   const items = Array.isArray(payload) ? payload : payload.gainers || payload.data || [];
   return items.map(normalizeMover);
 }
 
 export async function fetchTopLosers(limit: number = 5): Promise<TopMover[]> {
   if (DATA_SOURCE === "mock") {
-    return generateMockLosers().slice(0, limit);
+    const payload = await mockDataAdapter.fetchTopLosers(limit);
+    return payload.data;
   }
   const payload = await withClientCache(
     makeClientCacheKey(["market-losers", limit]),
@@ -71,6 +74,7 @@ export async function fetchTopLosers(limit: number = 5): Promise<TopMover[]> {
       ),
     { staleOnError: true },
   );
+  if (isUnavailableApiPayload(payload)) return [];
   const items = Array.isArray(payload) ? payload : payload.losers || payload.data || [];
   return items.map(normalizeMover);
 }

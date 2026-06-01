@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import {
   ArrowLeftRight,
   Bot,
@@ -10,12 +10,14 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useI18n } from "@/i18n";
+import { useToast } from "@/components/ui/ToastProvider";
+import { useAuth } from "@/features/auth/AuthContext";
 import { useSymbolMeta } from "@/hooks/useSymbolMeta";
 import { DEFAULT_SYMBOL_ICON } from "@/services/symbolMetaService";
 import OrderBook from "@/features/market/components/OrderBook";
 import RecentTrades from "@/features/market/components/RecentTrades";
 import AiAssistantPanel from "@/features/ai/components/AiAssistantPanel";
-import type { WatchlistItem, Candle } from "@/types";
+import type { WatchlistItem, Candle, SettingsTab } from "@/types";
 import type { TranslationKey } from "@/i18n/translations";
 
 type RightPanelTopTab = "overview" | "aiHelper";
@@ -49,6 +51,7 @@ interface RightPanelProps {
   width?: number;
   candles?: Candle[];
   timeframe?: string;
+  onOpenSettings?: (tab?: SettingsTab) => void;
 }
 
 const RightPanel: React.FC<RightPanelProps> = ({
@@ -60,13 +63,21 @@ const RightPanel: React.FC<RightPanelProps> = ({
   width = 286,
   candles = [],
   timeframe = "1m",
+  onOpenSettings,
 }) => {
   const { t } = useI18n();
+  const { showWarning } = useToast();
+  const { isAuthenticated } = useAuth();
   const { getMeta } = useSymbolMeta();
   const [filter, setFilter] = useState<"all" | "starred">("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTopTab, setActiveTopTab] = useState<RightPanelTopTab>("overview");
   const [activeTab, setActiveTab] = useState<RightPanelTab>("watchlist");
+  useEffect(() => {
+    if (activeTopTab === "aiHelper" && !isAuthenticated) {
+      setActiveTopTab("overview");
+    }
+  }, [activeTopTab, isAuthenticated]);
 
 
   // Sort: starred first, then by % change (gainers → losers)
@@ -151,6 +162,14 @@ const RightPanel: React.FC<RightPanelProps> = ({
   const rangeSpan = high24 - low24 || 1;
   const positionPct = lastCandle ? ((lastCandle.close - low24) / rangeSpan) * 100 : 50;
 
+  const handleTopTabClick = (id: RightPanelTopTab) => {
+    if (id === "aiHelper" && !isAuthenticated) {
+      showWarning("You must log in to use AI Helper");
+      return;
+    }
+    setActiveTopTab(id);
+  };
+
   return (
     <div
       className="bg-gray-900 border-l border-gray-700 flex h-full min-w-0 flex-col overflow-hidden"
@@ -161,7 +180,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
           <button
             key={id}
             type="button"
-            onClick={() => setActiveTopTab(id)}
+            onClick={() => handleTopTabClick(id)}
             className={`flex min-w-0 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-semibold transition-colors ${
               activeTopTab === id
                 ? "bg-blue-600 text-white"
@@ -180,6 +199,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
           selectedSymbol={selectedSymbol}
           timeframe={timeframe}
           candles={candles}
+          onOpenSettings={() => onOpenSettings?.("aiHelper")}
         />
       ) : (
         <>

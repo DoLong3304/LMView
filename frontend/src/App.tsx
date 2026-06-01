@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import Header from "@/components/layout/Header";
 import LeftSidebar from "@/components/layout/LeftSidebar";
 import AuthModal from "@/features/auth/AuthModal";
+import SettingsModal from "@/features/settings/SettingsModal";
 import { CandlestickChart } from "@/features/chart";
 import ChartOverlay from "@/features/drawing/components/ChartOverlay";
 import DrawingContextToolbar from "@/features/drawing/components/DrawingContextToolbar";
@@ -17,7 +18,15 @@ import { useChartKeyboardShortcuts } from "@/hooks/useChartKeyboardShortcuts";
 import { useDrawingToolbarPosition } from "@/hooks/useDrawingToolbarPosition";
 import { useReplayMode } from "@/hooks/useReplayMode";
 import { useI18n } from "@/i18n";
-import type { Candle, ChartType, Drawing, SymbolInfo, Ticker, TimeframeKey } from "@/types";
+import type {
+  Candle,
+  ChartType,
+  Drawing,
+  SettingsTab,
+  SymbolInfo,
+  Ticker,
+  TimeframeKey,
+} from "@/types";
 
 interface WatchlistItemData {
   symbol: string;
@@ -30,12 +39,26 @@ type ThemeMode = "dark" | "light";
 type AppView = "charts" | "marketsNews";
 
 const DESKTOP_LAYOUT_QUERY = "(min-width: 1024px)";
+const DEFAULT_TIMEFRAME_STORAGE_KEY = "app_defaultTimeframe";
+const DEFAULT_CHART_TYPE_STORAGE_KEY = "app_defaultChartType";
+const VALID_TIMEFRAMES: TimeframeKey[] = ["1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"];
+const VALID_CHART_TYPES: ChartType[] = ["candles", "line", "area", "bars"];
 
 function getInitialTheme(): ThemeMode {
   if (typeof window === "undefined") return "dark";
   const stored = window.localStorage.getItem("app_theme");
   if (stored === "dark" || stored === "light") return stored;
   return window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function getInitialTimeframe(): TimeframeKey {
+  const stored = loadFromStorage<TimeframeKey>(DEFAULT_TIMEFRAME_STORAGE_KEY, "1m");
+  return VALID_TIMEFRAMES.includes(stored) ? stored : "1m";
+}
+
+function getInitialChartType(): ChartType {
+  const stored = loadFromStorage<ChartType>(DEFAULT_CHART_TYPE_STORAGE_KEY, "candles");
+  return VALID_CHART_TYPES.includes(stored) ? stored : "candles";
 }
 
 function isDesktopLayout(): boolean {
@@ -72,9 +95,11 @@ const TradingDashboard: React.FC = () => {
   const [selectedDrawingIds, setSelectedDrawingIds] = useState<(string | number)[]>([]);
   const [isClearDrawingsConfirmOpen, setIsClearDrawingsConfirmOpen] = useState(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("account");
   const [magnetEnabled, setMagnetEnabled] = useState(false);
-  const [currentTimeframe, setCurrentTimeframe] = useState<TimeframeKey>("1m");
-  const [chartType, setChartType] = useState<ChartType>("candles");
+  const [currentTimeframe, setCurrentTimeframe] = useState<TimeframeKey>(getInitialTimeframe);
+  const [chartType, setChartType] = useState<ChartType>(getInitialChartType);
   const [isDrawing, setIsDrawing] = useState(false);
   const [selectedSymbol, setSelectedSymbol] = useState<string>(() => {
     const stored = loadFromStorage("app_selectedSymbol", "BTCUSDT");
@@ -170,6 +195,8 @@ const TradingDashboard: React.FC = () => {
   // Persist settings to localStorage
   useEffect(() => { saveToStorage("app_starred", starredSymbols); }, [starredSymbols]);
   useEffect(() => { saveToStorage("app_selectedSymbol", selectedSymbol); }, [selectedSymbol]);
+  useEffect(() => { saveToStorage(DEFAULT_TIMEFRAME_STORAGE_KEY, currentTimeframe); }, [currentTimeframe]);
+  useEffect(() => { saveToStorage(DEFAULT_CHART_TYPE_STORAGE_KEY, chartType); }, [chartType]);
 
   // Load drawings when symbol or timeframe changes
   useEffect(() => {
@@ -381,6 +408,15 @@ const TradingDashboard: React.FC = () => {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
   }, []);
 
+  const handleThemeModeChange = useCallback((mode: ThemeMode) => {
+    setThemeMode(mode);
+  }, []);
+
+  const handleOpenSettings = useCallback((tab: SettingsTab = "account") => {
+    setSettingsInitialTab(tab);
+    setIsSettingsModalOpen(true);
+  }, []);
+
   const handleToggleDrawingToolbar = useCallback(() => {
     setIsDrawingToolbarOpen((open) => !open);
   }, []);
@@ -584,6 +620,7 @@ const TradingDashboard: React.FC = () => {
         activeView={appView}
         onViewChange={setAppView}
         onLoginClick={() => setIsAuthModalOpen(true)}
+        onSettingsClick={() => handleOpenSettings("account")}
       />
 
       {connError && (
@@ -772,6 +809,7 @@ const TradingDashboard: React.FC = () => {
                 width={isDesktop ? sidebarWidth : compactRightPanelWidth}
                 candles={chartCandles}
                 timeframe={currentTimeframe}
+                onOpenSettings={handleOpenSettings}
               />
             </div>
           </>
@@ -783,6 +821,21 @@ const TradingDashboard: React.FC = () => {
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
+      />
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        initialTab={settingsInitialTab}
+        themeMode={themeMode}
+        timeframe={currentTimeframe}
+        chartType={chartType}
+        onClose={() => setIsSettingsModalOpen(false)}
+        onLoginClick={() => {
+          setIsSettingsModalOpen(false);
+          setIsAuthModalOpen(true);
+        }}
+        onThemeChange={handleThemeModeChange}
+        onTimeframeChange={handleTimeframeChange}
+        onChartTypeChange={setChartType}
       />
     </div>
   );

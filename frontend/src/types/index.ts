@@ -237,6 +237,33 @@ export type Timeframe = TimeframeKey;
 
 export type ChartType = "candles" | "line" | "area" | "bars";
 
+export interface FeatureAvailability {
+  available: boolean;
+  reason?: string;
+  requiresLogin?: boolean;
+  requiresAdmin?: boolean;
+}
+
+export type SettingsTab = "account" | "customization" | "aiHelper" | "about" | "debug";
+
+export type AiMode = "ask" | "interact";
+
+export interface LocalAiHelpSession {
+  id: string;
+  userId: string;
+  title: string;
+  mode: AiMode;
+  messages: Array<{
+    id: string;
+    role: "user" | "assistant" | "system";
+    content: string;
+    created_at?: string | null;
+    warnings?: string[];
+  }>;
+  created_at: string;
+  updated_at: string;
+}
+
 /** Watchlist filter mode */
 export type WatchlistFilter = "all" | "starred";
 

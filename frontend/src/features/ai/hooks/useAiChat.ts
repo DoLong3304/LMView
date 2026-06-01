@@ -1,117 +1,187 @@
-/**
- * useAiChat — hook for AI chat state management.
- *
- * Manages messages, session state, and API/mock dispatching.
- */
-
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/features/auth/AuthContext";
-import { aiChat, shouldUseMockAi } from "@/services/aiService";
-import { generateMockAiResponse } from "@/data/mockAi";
-import type { AiChatState, AiMessage, ChartContextForAi } from "@/features/ai/types";
+import {
+  deleteLocalAiSession,
+  loadLocalAiSessions,
+  upsertLocalAiSession,
+} from "@/features/ai/localAiSessions";
+import { generateLmviewHelpResponse } from "@/features/ai/localHelpResponder";
+import { shouldUseMockAi } from "@/services/aiService";
+import { getMockDataAdapter } from "@/services/dataSourceAdapter";
+import type {
+  AiChatState,
+  AiMessage,
+  ChartContextForAi,
+} from "@/features/ai/types";
+import type { AiMode, LocalAiHelpSession } from "@/types";
+
+const mockDataAdapter = getMockDataAdapter();
 
 interface UseAiChatReturn extends AiChatState {
+  mode: AiMode;
+  sessions: LocalAiHelpSession[];
   sendMessage: (message: string, context?: ChartContextForAi | null) => Promise<void>;
   clearChat: () => void;
+  setMode: (mode: AiMode) => void;
+  loadSession: (session: LocalAiHelpSession) => void;
+  deleteSession: (sessionId: string) => void;
+}
+
+function titleFromMessage(message: string): string {
+  const trimmed = message.trim();
+  if (trimmed.length <= 48) return trimmed || "LMView Help";
+  return `${trimmed.slice(0, 45)}...`;
 }
 
 export function useAiChat(): UseAiChatReturn {
-  const { isAuthenticated } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AiMessage[]>([]);
+  const [sessions, setSessions] = useState<LocalAiHelpSession[]>([]);
+  const [mode, setMode] = useState<AiMode>("ask");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setSessions([]);
+      return;
+    }
+    setSessions(loadLocalAiSessions(user.id));
+  }, [user?.id]);
+
+  const persistSession = useCallback(
+    (nextMessages: AiMessage[], firstMessage: string, nextSessionId: string | null) => {
+      if (!user?.id || nextMessages.length === 0) return null;
+      const session = upsertLocalAiSession({
+        userId: user.id,
+        sessionId: nextSessionId,
+        title: titleFromMessage(firstMessage),
+        mode,
+        messages: nextMessages,
+      });
+      setSessions(loadLocalAiSessions(user.id));
+      setSessionId(session.id);
+      return session.id;
+    },
+    [mode, user?.id],
+  );
 
   const sendMessage = useCallback(
     async (message: string, context?: ChartContextForAi | null) => {
       const trimmed = message.trim();
-      if (!trimmed) return;
+      if (!trimmed || loading) return;
 
-      // Add user message immediately
       const userMsg: AiMessage = {
         id: `user-${Date.now()}`,
         role: "user",
         content: trimmed,
         created_at: new Date().toISOString(),
       };
-      setMessages((prev) => [...prev, userMsg]);
+      const baseMessages = [...messages, userMsg];
+      setMessages(baseMessages);
       setLoading(true);
       setError(null);
 
       try {
-        if (shouldUseMockAi() || !isAuthenticated) {
-          // Local mock response
-          const mockResp = generateMockAiResponse(trimmed, context);
-          setMessages((prev) => [...prev, mockResp]);
-        } else {
-          // Backend API call
-          const chartContext = context
-            ? {
-                symbol: context.symbol,
-                exchange: context.exchange,
-                timeframe: context.timeframe,
-                chart_type: context.chart_type,
-                selected_indicators: context.selected_indicators,
-                latest_candle: context.latest_candle,
-              }
-            : null;
+        let assistantMsg: AiMessage;
 
-          const resp = await aiChat({
-            session_id: sessionId,
-            mode: "ask",
-            message: trimmed,
-            chart_context: chartContext,
-          });
-
-          if (!sessionId && resp.session_id) {
-            setSessionId(resp.session_id);
-          }
-
-          const assistantMsg: AiMessage = {
-            id: resp.message_id || `resp-${Date.now()}`,
+        if (!isAuthenticated) {
+          assistantMsg = {
+            id: `auth-required-${Date.now()}`,
             role: "assistant",
-            content: resp.content,
-            is_mock: resp.is_mock,
-            provider: resp.provider,
-            created_at: resp.created_at,
-            warnings: resp.warnings,
-            suggested_actions: resp.suggested_actions,
+            content: "You must log in to use AI Helper.",
+            provider: "auth_gate",
+            is_mock: false,
+            created_at: new Date().toISOString(),
+            warnings: ["Login required."],
           };
-          setMessages((prev) => [...prev, assistantMsg]);
+          setError("You must log in to use AI Helper.");
+        } else if (mode === "interact") {
+          assistantMsg = {
+            id: `interact-unavailable-${Date.now()}`,
+            role: "assistant",
+            content: "AI Interact mode is unavailable until a real AI action service exists.",
+            provider: "unavailable",
+            is_mock: false,
+            created_at: new Date().toISOString(),
+            warnings: ["AI Interact unavailable."],
+          };
+        } else if (shouldUseMockAi()) {
+          assistantMsg = mockDataAdapter.generateAiResponse(trimmed, context);
+        } else {
+          assistantMsg = generateLmviewHelpResponse(trimmed, context);
         }
+
+        const nextMessages = [...baseMessages, assistantMsg];
+        setMessages(nextMessages);
+        persistSession(nextMessages, trimmed, sessionId);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : "AI request failed";
         setError(errMsg);
 
-        // Add error message to chat
         const errorMsg: AiMessage = {
           id: `error-${Date.now()}`,
           role: "assistant",
-          content: `Error: ${errMsg}. The AI backend may be unavailable.`,
-          is_mock: true,
+          content: `Error: ${errMsg}.`,
           provider: "error",
           warnings: [errMsg],
+          created_at: new Date().toISOString(),
         };
-        setMessages((prev) => [...prev, errorMsg]);
+        const nextMessages = [...baseMessages, errorMsg];
+        setMessages(nextMessages);
+        persistSession(nextMessages, trimmed, sessionId);
       } finally {
         setLoading(false);
       }
     },
-    [isAuthenticated, sessionId],
+    [
+      isAuthenticated,
+      loading,
+      messages,
+      mode,
+      persistSession,
+      sessionId,
+    ],
   );
 
   const clearChat = useCallback(() => {
     setMessages([]);
     setSessionId(null);
     setError(null);
+    setMode("ask");
   }, []);
+
+  const loadSession = useCallback((session: LocalAiHelpSession) => {
+    setSessionId(session.id);
+    setMessages(session.messages);
+    setMode(session.mode);
+    setError(null);
+  }, []);
+
+  const deleteSession = useCallback(
+    (targetSessionId: string) => {
+      if (!user?.id) return;
+      deleteLocalAiSession(user.id, targetSessionId);
+      setSessions(loadLocalAiSessions(user.id));
+      if (sessionId === targetSessionId) {
+        clearChat();
+      }
+    },
+    [clearChat, sessionId, user?.id],
+  );
 
   return {
     sessionId,
     messages,
+    sessions,
+    mode,
     loading,
     error,
     sendMessage,
     clearChat,
+    setMode,
+    loadSession,
+    deleteSession,
   };
 }

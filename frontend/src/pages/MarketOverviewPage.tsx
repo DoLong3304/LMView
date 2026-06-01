@@ -3,6 +3,7 @@ import {
   Activity,
   ArrowDownRight,
   ArrowUpRight,
+  AlertTriangle,
   BarChart3,
   DollarSign,
   Flame,
@@ -127,50 +128,60 @@ const MarketOverviewPage: React.FC = () => {
           <p className="text-sm text-gray-400">{t("marketOverviewSubtitle")}</p>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4 mb-6">
-          <MetricCard
-            accent="orange"
-            icon={<span className="text-orange-400 font-bold text-sm">BTC</span>}
-            label={t("bitcoin")}
-            value={formatNumber(metrics?.btc_price || 0)}
-            detail="BTC/USDT"
-          />
-          <MetricCard
-            accent="blue"
-            icon={<DollarSign size={16} className="text-blue-400" />}
-            label={t("marketCap")}
-            value={formatNumber(metrics?.total_market_cap || 0)}
-            detail={t("totalValue")}
-          />
-          <MetricCard
-            accent="purple"
-            icon={<BarChart3 size={16} className="text-purple-400" />}
-            label={t("volume24h")}
-            value={formatNumber(metrics?.total_volume_24h || 0)}
-            detail={t("tradingVolume")}
-          />
-          <MetricCard
-            accent="green"
-            icon={<Activity size={16} className="text-green-400" />}
-            label={t("btcDominance")}
-            value={`${(metrics?.btc_dominance || 0).toFixed(1)}%`}
-            detail={t("marketShare")}
-          />
-          <MetricCard
-            accent="cyan"
-            icon={<Activity size={16} className="text-cyan-400" />}
-            label={t("ethDominance")}
-            value={`${(metrics?.eth_dominance || 0).toFixed(1)}%`}
-            detail={t("marketShare")}
-          />
-          <MetricCard
-            accent="gray"
-            icon={<Flame size={16} className="text-gray-400" />}
-            label={t("activeSymbols")}
-            value={String(metrics?.total_symbols || 0)}
-            detail={t("tradingPairs")}
-          />
-        </div>
+        {metrics ? (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4 mb-6">
+            <MetricCard
+              accent="orange"
+              icon={<span className="text-orange-400 font-bold text-sm">BTC</span>}
+              label={t("bitcoin")}
+              value={formatNumber(metrics.btc_price)}
+              detail="BTC/USDT"
+            />
+            <MetricCard
+              accent="blue"
+              icon={<DollarSign size={16} className="text-blue-400" />}
+              label={t("marketCap")}
+              value={formatNumber(metrics.total_market_cap)}
+              detail={t("totalValue")}
+            />
+            <MetricCard
+              accent="purple"
+              icon={<BarChart3 size={16} className="text-purple-400" />}
+              label={t("volume24h")}
+              value={formatNumber(metrics.total_volume_24h)}
+              detail={t("tradingVolume")}
+            />
+            <MetricCard
+              accent="green"
+              icon={<Activity size={16} className="text-green-400" />}
+              label={t("btcDominance")}
+              value={`${metrics.btc_dominance.toFixed(1)}%`}
+              detail={t("marketShare")}
+            />
+            <MetricCard
+              accent="cyan"
+              icon={<Activity size={16} className="text-cyan-400" />}
+              label={t("ethDominance")}
+              value={`${(metrics.eth_dominance || 0).toFixed(1)}%`}
+              detail={t("marketShare")}
+            />
+            <MetricCard
+              accent="gray"
+              icon={<Flame size={16} className="text-gray-400" />}
+              label={t("activeSymbols")}
+              value={String(metrics.total_symbols)}
+              detail={t("tradingPairs")}
+            />
+          </div>
+        ) : (
+          <div className="mb-6 flex items-start gap-3 rounded border border-amber-500/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            <AlertTriangle size={18} className="mt-0.5 flex-shrink-0" />
+            <div>
+              <div className="font-semibold">{t("marketOverviewUnavailable")}</div>
+              <div className="mt-1 text-xs text-amber-200/80">{t("apiPlaceholderUnavailable")}</div>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 flex-1 overflow-hidden">
           <section className="bg-gray-850 border border-gray-800 rounded overflow-hidden flex flex-col">

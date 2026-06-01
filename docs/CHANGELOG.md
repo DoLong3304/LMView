@@ -7,6 +7,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.15.2] - 2026-06-01 - Auth-gated settings and mock data isolation
+
+### Added
+
+- **Settings modal** - Wired the header Settings button to Account, Customization, AI Helper, About, and Debug tabs with login/admin gates, real auth user display, real theme/timeframe/chart-type controls, local AI session cleanup, and read-only health checks.
+- **AI Helper gate** - Requires login before opening AI Helper and shows `You must log in to use AI Helper` when blocked.
+- **LMView Help mode** - Replaced API-mode fake AI behavior with deterministic product-help responses only; Interact and market-analysis requests now return unavailable states until real AI services exist.
+
+### Changed
+
+- **Mock data boundary** - Moved market/news/AI mock generators under `frontend/src/data/mock/` and routed mock mode through API-shaped mock adapter functions consumed by frontend services.
+- **API placeholder handling** - Added frontend metadata guards so API-mode placeholder/mock-tagged market, news, candle, ticker, order book, and trade payloads render empty/unavailable states instead of generated fallback data.
+
+---
+
 ## [0.15.1] - 2026-06-01 - Bug fixes for Phase 0 implementation
 
 ### Fixed

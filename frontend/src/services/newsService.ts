@@ -1,11 +1,13 @@
 import { DATA_SOURCE } from "@/constants/env";
 import { apiGet, buildQuery } from "@/services/apiClient";
+import { isUnavailableApiPayload } from "@/services/apiMetadata";
 import { makeClientCacheKey, withClientCache } from "@/services/clientCache";
-import { generateMockNews } from "@/data/mockDataGenerator";
+import { getMockDataAdapter } from "@/services/dataSourceAdapter";
 import type { NewsArticle, NewsFilters, TrendingSymbol } from "@/types";
 
 const NEWS_CACHE_MS = 60_000;
 const TRENDING_SYMBOLS_CACHE_MS = 60_000;
+const mockDataAdapter = getMockDataAdapter();
 
 function normalizeNewsItem(item: Partial<NewsArticle>): NewsArticle {
   return {
@@ -26,14 +28,10 @@ function normalizeNewsItem(item: Partial<NewsArticle>): NewsArticle {
   };
 }
 
-function mockNews(filters: NewsFilters): NewsArticle[] {
-  return generateMockNews(filters.limit || 20, filters.symbol === "all" ? undefined : filters.symbol)
-    .map((item) => normalizeNewsItem({ ...item, published_at: Date.parse(item.published_at) }));
-}
-
 export async function fetchLatestNews(filters: NewsFilters = {}): Promise<NewsArticle[]> {
   if (DATA_SOURCE === "mock") {
-    return mockNews(filters);
+    const payload = await mockDataAdapter.fetchLatestNews(filters);
+    return payload.articles.map(normalizeNewsItem);
   }
 
   const query = buildQuery({
@@ -54,6 +52,7 @@ export async function fetchLatestNews(filters: NewsFilters = {}): Promise<NewsAr
     () => apiGet<{ articles?: NewsArticle[] } | NewsArticle[]>(`/news/latest?${query}`),
     { staleOnError: true },
   );
+  if (isUnavailableApiPayload(payload)) return [];
   const articles = Array.isArray(payload) ? payload : payload.articles || [];
   return articles.map(normalizeNewsItem);
 }
@@ -64,10 +63,8 @@ export async function searchNews(filters: NewsFilters): Promise<NewsArticle[]> {
   }
 
   if (DATA_SOURCE === "mock") {
-    const q = filters.query.toLowerCase();
-    return mockNews(filters).filter((item) =>
-      `${item.title} ${item.summary}`.toLowerCase().includes(q),
-    );
+    const payload = await mockDataAdapter.searchNews(filters);
+    return payload.articles.map(normalizeNewsItem);
   }
 
   const query = buildQuery({ q: filters.query, limit: filters.limit || 100 });
@@ -77,18 +74,15 @@ export async function searchNews(filters: NewsFilters): Promise<NewsArticle[]> {
     () => apiGet<{ articles?: NewsArticle[] } | NewsArticle[]>(`/news/search?${query}`),
     { staleOnError: true },
   );
+  if (isUnavailableApiPayload(payload)) return [];
   const articles = Array.isArray(payload) ? payload : payload.articles || [];
   return articles.map(normalizeNewsItem);
 }
 
 export async function fetchTrendingSymbols(limit: number = 10): Promise<TrendingSymbol[]> {
   if (DATA_SOURCE === "mock") {
-    return [
-      { symbol: "BTC", mention_count: 42, avg_sentiment: 0.18 },
-      { symbol: "ETH", mention_count: 35, avg_sentiment: 0.12 },
-      { symbol: "SOL", mention_count: 28, avg_sentiment: 0.32 },
-      { symbol: "BNB", mention_count: 20, avg_sentiment: 0.04 },
-    ].slice(0, limit);
+    const payload = await mockDataAdapter.fetchTrendingSymbols(limit);
+    return payload.trending_symbols;
   }
 
   const payload = await withClientCache(
@@ -100,5 +94,6 @@ export async function fetchTrendingSymbols(limit: number = 10): Promise<Trending
       ),
     { staleOnError: true },
   );
+  if (isUnavailableApiPayload(payload)) return [];
   return Array.isArray(payload) ? payload : payload.trending_symbols || [];
 }

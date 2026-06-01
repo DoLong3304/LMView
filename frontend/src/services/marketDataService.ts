@@ -1,13 +1,9 @@
 import { DATA_SOURCE } from "@/constants/env";
 import { TIMEFRAMES, normalizeTimeframe } from "@/constants/timeframes";
 import { apiGet, buildQuery, getWsBaseUrl } from "@/services/apiClient";
+import { isUnavailableApiPayload } from "@/services/apiMetadata";
 import { makeClientCacheKey, withClientCache } from "@/services/clientCache";
-import {
-  generateMockCandles,
-  generateMockOrderBook,
-  generateMockTrades,
-  generateMockTickers,
-} from "@/data/mockDataGenerator";
+import { getMockDataAdapter } from "@/services/dataSourceAdapter";
 import type { Candle, SymbolInfo, Ticker, Trade } from "@/types";
 
 export { TIMEFRAMES };
@@ -17,6 +13,7 @@ const ORDER_BOOK_CACHE_MS = 1_000;
 const CANDLE_LATEST_CACHE_MS = 3_000;
 const CANDLE_HISTORY_CACHE_MS = 5 * 60_000;
 const SYMBOLS_CACHE_MS = 10 * 60_000;
+const mockDataAdapter = getMockDataAdapter();
 
 interface RawKline {
   openTime: number;
@@ -36,10 +33,6 @@ function mapRawToCandle(k: RawKline): Candle {
     close: parseFloat(String(k.close)),
     volume: parseFloat(String(k.volume)),
   };
-}
-
-function getMockTickerPrice(symbol: string): number {
-  return generateMockTickers().find((ticker) => ticker.symbol === symbol)?.price || 100;
 }
 
 export async function fetchCandles(
@@ -72,16 +65,16 @@ export async function fetchCandles(
       cacheKey,
       endTime ? CANDLE_HISTORY_CACHE_MS : CANDLE_LATEST_CACHE_MS,
       async () => {
-        const raw = await apiGet<RawKline[]>(`/klines?${query}`);
-        return raw.map(mapRawToCandle);
+        const raw = await apiGet<RawKline[] | { data?: RawKline[] }>(`/klines?${query}`);
+        if (isUnavailableApiPayload(raw)) return [];
+        const rows = Array.isArray(raw) ? raw : raw.data ?? [];
+        return rows.map(mapRawToCandle);
       },
       { persist: Boolean(endTime), staleOnError: true },
     );
   }
 
-  return new Promise((resolve) => {
-    setTimeout(() => resolve(generateMockCandles(symbol, interval, limit)), 300);
-  });
+  return mockDataAdapter.fetchCandles(symbol, interval, limit);
 }
 
 export function subscribeCandle(
@@ -103,17 +96,7 @@ export function subscribeCandle(
     return () => ws.close();
   }
 
-  let lastCandle: Candle | null = null;
-  const timer = setInterval(() => {
-    const mockSeries = generateMockCandles(symbol, interval, 2);
-    const latest = mockSeries[mockSeries.length - 1];
-    if (!lastCandle || latest.time >= lastCandle.time) {
-      lastCandle = latest;
-      onCandle(latest);
-    }
-  }, 2000);
-
-  return () => clearInterval(timer);
+  return mockDataAdapter.subscribeCandle(symbol, interval, onCandle);
 }
 
 export type TimeframeCallback = (timeframe: string, candle: Candle) => void;
@@ -143,71 +126,7 @@ export function subscribeAllTimeframes(options: MultiTimeframeOptions): () => vo
     return () => ws.close();
   }
 
-  const tfKeys = Object.keys(TIMEFRAMES);
-  const openCandles: Record<string, Candle> = {};
-  const seedPrices: Record<string, number> = {
-    BTCUSDT: 64000,
-    ETHUSDT: 3400,
-    BNBUSDT: 580,
-    SOLUSDT: 165,
-    XRPUSDT: 2.35,
-    DOGEUSDT: 0.158,
-    ADAUSDT: 0.72,
-    AVAXUSDT: 35.2,
-    DOTUSDT: 7.5,
-    LINKUSDT: 18.5,
-    MATICUSDT: 0.72,
-    LTCUSDT: 95,
-  };
-  let price = seedPrices[symbol] || 100;
-  const volatility = price * 0.008;
-
-  const timer = setInterval(() => {
-    const now = Math.floor(Date.now() / 1000);
-    const tickPrice = price + (Math.random() - 0.5) * volatility;
-    price = tickPrice;
-
-    for (const tf of tfKeys) {
-      const normalized = normalizeTimeframe(tf);
-      const tfSeconds = TIMEFRAMES[normalized].seconds;
-      const currentPeriod = Math.floor(now / tfSeconds) * tfSeconds;
-
-      if (normalized === "1s") {
-        const candle: Candle = {
-          time: currentPeriod,
-          open: +tickPrice.toFixed(2),
-          high: +tickPrice.toFixed(2),
-          low: +tickPrice.toFixed(2),
-          close: +tickPrice.toFixed(2),
-          volume: Math.round(Math.random() * 100),
-        };
-        onCandle(normalized, candle);
-        continue;
-      }
-
-      const openCandle = openCandles[normalized];
-      if (!openCandle || openCandle.time < currentPeriod) {
-        if (openCandle) onCandle(normalized, { ...openCandle });
-        openCandles[normalized] = {
-          time: currentPeriod,
-          open: +tickPrice.toFixed(2),
-          high: +tickPrice.toFixed(2),
-          low: +tickPrice.toFixed(2),
-          close: +tickPrice.toFixed(2),
-          volume: Math.round(Math.random() * 1000),
-        };
-        onCandle(normalized, { ...openCandles[normalized] });
-      } else {
-        openCandle.close = +tickPrice.toFixed(2);
-        openCandle.high = Math.max(openCandle.high, tickPrice);
-        openCandle.low = Math.min(openCandle.low, tickPrice);
-        openCandle.volume += Math.round(Math.random() * 100);
-        onCandle(normalized, { ...openCandle });
-      }
-    }
-  }, 1000);
-
-  return () => clearInterval(timer);
+  return mockDataAdapter.subscribeAllTimeframes(symbol, onCandle);
 }
 
 export async function fetchSymbols(): Promise<SymbolInfo[]> {
@@ -215,25 +134,16 @@ export async function fetchSymbols(): Promise<SymbolInfo[]> {
     return withClientCache(
       "symbols",
       SYMBOLS_CACHE_MS,
-      () => apiGet<SymbolInfo[]>("/symbols"),
+      async () => {
+        const data = await apiGet<SymbolInfo[] | { data?: SymbolInfo[] }>("/symbols");
+        if (isUnavailableApiPayload(data)) return [];
+        return Array.isArray(data) ? data : data.data ?? [];
+      },
       { staleOnError: true },
     );
   }
 
-  return [
-    { symbol: "BTCUSDT", name: "Bitcoin / USDT", type: "crypto" },
-    { symbol: "ETHUSDT", name: "Ethereum / USDT", type: "crypto" },
-    { symbol: "BNBUSDT", name: "BNB / USDT", type: "crypto" },
-    { symbol: "SOLUSDT", name: "Solana / USDT", type: "crypto" },
-    { symbol: "XRPUSDT", name: "XRP / USDT", type: "crypto" },
-    { symbol: "DOGEUSDT", name: "Dogecoin / USDT", type: "crypto" },
-    { symbol: "ADAUSDT", name: "Cardano / USDT", type: "crypto" },
-    { symbol: "AVAXUSDT", name: "Avalanche / USDT", type: "crypto" },
-    { symbol: "DOTUSDT", name: "Polkadot / USDT", type: "crypto" },
-    { symbol: "LINKUSDT", name: "Chainlink / USDT", type: "crypto" },
-    { symbol: "MATICUSDT", name: "Polygon / USDT", type: "crypto" },
-    { symbol: "LTCUSDT", name: "Litecoin / USDT", type: "crypto" },
-  ];
+  return mockDataAdapter.fetchSymbols();
 }
 
 export async function fetchHistoricalCandles(
@@ -257,21 +167,22 @@ export async function fetchHistoricalCandles(
       makeClientCacheKey(["klines-historical", symbol, normalizedInterval, startMs, endMs, limit]),
       CANDLE_HISTORY_CACHE_MS,
       async () => {
-        const raw = await apiGet<RawKline[]>(`/klines/historical?${query}`);
-        return raw.map(mapRawToCandle);
+        const raw = await apiGet<RawKline[] | { data?: RawKline[] }>(`/klines/historical?${query}`);
+        if (isUnavailableApiPayload(raw)) return [];
+        const rows = Array.isArray(raw) ? raw : raw.data ?? [];
+        return rows.map(mapRawToCandle);
       },
       { staleOnError: true },
     );
   }
 
-  const hourMs = 3600 * 1000;
-  const count = Math.min(Math.floor((endMs - startMs) / hourMs), limit);
-  return new Promise((resolve) => {
-    setTimeout(
-      () => resolve(generateMockCandles(symbol, normalizedInterval, Math.max(count, 10))),
-      300,
-    );
-  });
+  return mockDataAdapter.fetchHistoricalCandles(
+    symbol,
+    startMs,
+    endMs,
+    limit,
+    normalizedInterval,
+  );
 }
 
 export interface RawOrderBookData {
@@ -287,11 +198,18 @@ export async function fetchOrderBook(symbol: string): Promise<RawOrderBookData> 
     return withClientCache(
       makeClientCacheKey(["orderbook", symbol]),
       ORDER_BOOK_CACHE_MS,
-      () => apiGet<RawOrderBookData>(`/orderbook/${encodeURIComponent(symbol)}`),
+      async () => {
+        const data = await apiGet<RawOrderBookData>(`/orderbook/${encodeURIComponent(symbol)}`);
+        return isUnavailableApiPayload(data)
+          ? { bids: [], asks: [], spread: 0, best_bid: 0, best_ask: 0 }
+          : data;
+      },
       { persist: false },
     );
   }
-  return generateMockOrderBook(getMockTickerPrice(symbol));
+  const payload = await mockDataAdapter.fetchOrderBook(symbol);
+  const { metadata: _metadata, symbol: _symbol, ...orderBook } = payload;
+  return orderBook;
 }
 
 export async function fetchTrades(symbol: string, limit: number = 50): Promise<Trade[]> {
@@ -303,12 +221,14 @@ export async function fetchTrades(symbol: string, limit: number = 50): Promise<T
         const data = await apiGet<Trade[] | { trades?: Trade[] }>(
           `/trades/${encodeURIComponent(symbol)}?${buildQuery({ limit })}`,
         );
+        if (isUnavailableApiPayload(data)) return [];
         return Array.isArray(data) ? data : data.trades ?? [];
       },
       { persist: false },
     );
   }
-  return generateMockTrades(getMockTickerPrice(symbol), limit);
+  const payload = await mockDataAdapter.fetchTrades(symbol, limit);
+  return payload.trades;
 }
 
 export async function fetchTicker(symbol: string): Promise<Ticker> {
@@ -316,18 +236,31 @@ export async function fetchTicker(symbol: string): Promise<Ticker> {
     return withClientCache(
       makeClientCacheKey(["ticker", symbol]),
       LIVE_TICK_CACHE_MS,
-      () => apiGet<Ticker>(`/ticker/${encodeURIComponent(symbol)}`),
+      async () => {
+        const data = await apiGet<Ticker>(`/ticker/${encodeURIComponent(symbol)}`);
+        return isUnavailableApiPayload(data) ? { symbol, price: 0 } : data;
+      },
       { persist: false },
     );
   }
-  return generateMockTickers().find((ticker) => ticker.symbol === symbol) || { symbol, price: 0 };
+  const payload = await mockDataAdapter.fetchTicker(symbol);
+  return payload.ticker;
 }
 
 export async function fetchTickers(): Promise<Ticker[]> {
   if (DATA_SOURCE === "api") {
-    return withClientCache("tickers", LIVE_TICK_CACHE_MS, () => apiGet<Ticker[]>("/ticker"), {
-      persist: false,
-    });
+    return withClientCache(
+      "tickers",
+      LIVE_TICK_CACHE_MS,
+      async () => {
+        const data = await apiGet<Ticker[]>("/ticker");
+        return isUnavailableApiPayload(data) ? [] : data;
+      },
+      {
+        persist: false,
+      },
+    );
   }
-  return generateMockTickers();
+  const payload = await mockDataAdapter.fetchTickers();
+  return payload.tickers;
 }
