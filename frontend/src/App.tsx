@@ -2,6 +2,7 @@ import React, { useState, useCallback, useEffect, useLayoutEffect, useRef } from
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Header from "@/components/layout/Header";
 import LeftSidebar from "@/components/layout/LeftSidebar";
+import AuthModal from "@/features/auth/AuthModal";
 import { CandlestickChart } from "@/features/chart";
 import ChartOverlay from "@/features/drawing/components/ChartOverlay";
 import DrawingContextToolbar from "@/features/drawing/components/DrawingContextToolbar";
@@ -70,6 +71,7 @@ const TradingDashboard: React.FC = () => {
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [selectedDrawingIds, setSelectedDrawingIds] = useState<(string | number)[]>([]);
   const [isClearDrawingsConfirmOpen, setIsClearDrawingsConfirmOpen] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [magnetEnabled, setMagnetEnabled] = useState(false);
   const [currentTimeframe, setCurrentTimeframe] = useState<TimeframeKey>("1m");
   const [chartType, setChartType] = useState<ChartType>("candles");
@@ -581,6 +583,7 @@ const TradingDashboard: React.FC = () => {
         onToggleRightPanel={() => setIsRightPanelOpen((open) => !open)}
         activeView={appView}
         onViewChange={setAppView}
+        onLoginClick={() => setIsAuthModalOpen(true)}
       />
 
       {connError && (
@@ -777,6 +780,10 @@ const TradingDashboard: React.FC = () => {
         )}
       </main>
 
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+      />
     </div>
   );
 };

@@ -17,6 +17,7 @@ import {
   mockGetCurrentUser,
   shouldUseMockAuth,
   hasStoredSession,
+  clearStoredSession,
 } from "@/services/authService";
 
 interface AuthContextValue {
@@ -62,6 +63,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const me = await apiGetMe();
         setUser(me.user);
       } catch {
+        clearStoredSession();
         // Token invalid/expired — clear silently
         setUser(null);
       } finally {

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import os
 import secrets
 from typing import Tuple
 
@@ -21,7 +22,7 @@ SESSION_TOKEN_BYTES = 32
 MIN_PASSWORD_LENGTH = 6
 
 # Session expiry (seconds) — 7 days
-SESSION_EXPIRY_SECONDS = 7 * 24 * 3600
+SESSION_EXPIRY_SECONDS = int(os.environ.get("SESSION_EXPIRY_HOURS", "168")) * 3600
 
 # Try to use passlib+bcrypt for production-grade hashing
 _USE_BCRYPT = False

@@ -299,7 +299,12 @@ export async function fetchTrades(symbol: string, limit: number = 50): Promise<T
     return withClientCache(
       makeClientCacheKey(["trades", symbol, limit]),
       LIVE_TICK_CACHE_MS,
-      () => apiGet<Trade[]>(`/trades/${encodeURIComponent(symbol)}?${buildQuery({ limit })}`),
+      async () => {
+        const data = await apiGet<Trade[] | { trades?: Trade[] }>(
+          `/trades/${encodeURIComponent(symbol)}?${buildQuery({ limit })}`,
+        );
+        return Array.isArray(data) ? data : data.trades ?? [];
+      },
       { persist: false },
     );
   }

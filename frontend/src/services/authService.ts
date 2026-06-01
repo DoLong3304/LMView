@@ -77,6 +77,10 @@ function clearToken(): void {
   }
 }
 
+export function clearStoredSession(): void {
+  clearToken();
+}
+
 export function getAuthHeaders(): Record<string, string> {
   const token = getStoredToken();
   if (!token) return {};
@@ -100,12 +104,42 @@ async function authFetch<T>(
 
   if (!resp.ok) {
     const errorData = await resp.json().catch(() => ({}));
-    throw new Error(
-      errorData.detail || `Auth API error: ${resp.status}`
-    );
+    throw new Error(formatAuthError(errorData, resp.status));
   }
 
   return resp.json();
+}
+
+function formatAuthError(errorData: unknown, statusCode: number): string {
+  if (!errorData || typeof errorData !== "object") {
+    return `Auth API error: ${statusCode}`;
+  }
+
+  const detail = (errorData as { detail?: unknown }).detail;
+  if (typeof detail === "string") return detail;
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object") {
+          return (item as { msg?: unknown }).msg;
+        }
+        return null;
+      })
+      .filter((msg): msg is string => typeof msg === "string");
+
+    if (messages.length > 0) return messages.join(". ");
+  }
+
+  if (detail && typeof detail === "object") {
+    const msg = (detail as { msg?: unknown; message?: unknown }).msg;
+    const message = (detail as { msg?: unknown; message?: unknown }).message;
+    if (typeof msg === "string") return msg;
+    if (typeof message === "string") return message;
+  }
+
+  return `Auth API error: ${statusCode}`;
 }
 
 export async function apiRegister(

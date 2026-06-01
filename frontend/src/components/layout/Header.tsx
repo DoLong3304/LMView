@@ -1,6 +1,8 @@
 import React from "react";
 import {
   CandlestickChart as CandleIcon,
+  Loader2,
+  LogOut,
   Moon,
   Newspaper,
   PanelRight,
@@ -11,6 +13,7 @@ import {
 import { getDataSourceLabel, DATA_SOURCE } from "@/constants/env";
 import LanguageSwitcher from "@/components/ui/LanguageSwitcher";
 import SystemHealthCard from "@/components/ui/SystemHealthCard";
+import { useAuth } from "@/features/auth/AuthContext";
 import { useI18n } from "@/i18n";
 
 const SHOW_DEVELOPER_TOOLS = false;
@@ -24,6 +27,7 @@ interface HeaderProps {
   onToggleRightPanel: () => void;
   activeView: AppView;
   onViewChange: (view: AppView) => void;
+  onLoginClick: () => void;
 }
 
 const Header: React.FC<HeaderProps> = ({
@@ -33,8 +37,20 @@ const Header: React.FC<HeaderProps> = ({
   onToggleRightPanel,
   activeView,
   onViewChange,
+  onLoginClick,
 }) => {
   const { t } = useI18n();
+  const { user, loading, isAuthenticated, logout } = useAuth();
+  const [isLoggingOut, setIsLoggingOut] = React.useState(false);
+
+  const handleLogout = async () => {
+    setIsLoggingOut(true);
+    try {
+      await logout();
+    } finally {
+      setIsLoggingOut(false);
+    }
+  };
 
   return (
     <>
@@ -116,14 +132,47 @@ const Header: React.FC<HeaderProps> = ({
           >
             <Settings className="w-5 h-5" />
           </button>
-          <button
-            type="button"
-            className="flex items-center gap-1.5 rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-gray-700 hover:text-white"
-            title={t("login")}
-          >
-            <UserRound className="w-4 h-4" />
-            <span className="hidden md:inline">{t("login")}</span>
-          </button>
+          {isAuthenticated && user ? (
+            <div className="flex min-w-0 items-center gap-1 rounded border border-gray-700 bg-gray-800 px-1.5 py-1">
+              <div
+                className="flex min-w-0 items-center gap-1.5 px-1 text-xs font-medium text-gray-300"
+                title={user.email}
+              >
+                <UserRound className="h-4 w-4 flex-shrink-0" />
+                <span className="hidden max-w-28 truncate md:inline">
+                  {user.display_name || user.email}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={isLoggingOut}
+                className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-700 hover:text-white disabled:cursor-wait disabled:opacity-60"
+                title={t("logout")}
+              >
+                {isLoggingOut ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <LogOut className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onLoginClick}
+              disabled={loading}
+              className="flex items-center gap-1.5 rounded border border-gray-700 bg-gray-800 px-2 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-gray-700 hover:text-white disabled:cursor-wait disabled:opacity-60"
+              title={t("login")}
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <UserRound className="h-4 w-4" />
+              )}
+              <span className="hidden md:inline">{t("login")}</span>
+            </button>
+          )}
         </div>
       </header>
     </>

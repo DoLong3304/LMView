@@ -7,6 +7,16 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.15.1] - 2026-06-01 - Bug fixes for Phase 0 implementation
+
+### Fixed
+
+- **Frontend auth session UI** - Wrapped the app with `AuthProvider`, wired the header Login button to the centered login/register modal with blurred backdrop, displayed authenticated user/logout state, cleared expired stored tokens during restore, and normalized FastAPI auth validation errors for the browser UI.
+- **Auth registration runtime** - Added PostgreSQL async driver support to the FastAPI image, pinned bcrypt for passlib compatibility, wired auth PostgreSQL/migration environment values into Compose, and applied `SESSION_EXPIRY_HOURS` in token expiry calculations.
+- **Recent Trades frontend** - Normalized the metadata-wrapped `/api/trades/{symbol}` response in `marketDataService` so the right-panel Recent Trades view always receives an array.
+
+---
+
 ## [0.15.0] - 2026-06-01 - Phase 0: AI Foundation Layer
 
 ### Added
