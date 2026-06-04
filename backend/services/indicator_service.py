@@ -55,6 +55,11 @@ SUPPORTED_INDICATORS: List[SupportedIndicator] = [
         available_sources=["computed"],
     ),
     SupportedIndicator(
+        name="bb", display_name="Bollinger Bands",
+        category="volatility", default_params={"period": 20, "std_dev": 2},
+        available_sources=["computed"],
+    ),
+    SupportedIndicator(
         name="vwap", display_name="VWAP",
         category="volume", default_params={},
         available_sources=["computed"],
@@ -68,6 +73,51 @@ SUPPORTED_INDICATORS: List[SupportedIndicator] = [
         name="volume_ma", display_name="Volume MA",
         category="volume", default_params={"period": 20},
         available_sources=["computed"],
+    ),
+    SupportedIndicator(
+        name="volumeMa", display_name="Volume MA",
+        category="volume", default_params={"period": 20},
+        available_sources=["computed"],
+    ),
+    SupportedIndicator(
+        name="stochastic", display_name="Stochastic",
+        category="momentum", default_params={"k": 14, "d": 3},
+        available_sources=["computed"],
+    ),
+    SupportedIndicator(
+        name="mfi", display_name="MFI",
+        category="momentum", default_params={"period": 14},
+        available_sources=["computed"],
+    ),
+    SupportedIndicator(
+        name="ichimoku", display_name="Ichimoku Cloud",
+        category="trend", default_params={"conversion": 9, "base": 26, "span": 52},
+        available_sources=["computed"],
+    ),
+    SupportedIndicator(
+        name="supertrend", display_name="Supertrend",
+        category="trend", default_params={"period": 10, "multiplier": 3},
+        available_sources=["computed"],
+    ),
+    SupportedIndicator(
+        name="psar", display_name="Parabolic SAR",
+        category="trend", default_params={"step": 0.02, "max_step": 0.2},
+        available_sources=["computed"],
+    ),
+    SupportedIndicator(
+        name="volume", display_name="Volume",
+        category="volume", default_params={},
+        available_sources=["redis", "computed"],
+    ),
+    SupportedIndicator(
+        name="support_resistance", display_name="Support / Resistance",
+        category="levels", default_params={"lookback": 120},
+        available_sources=["future"],
+    ),
+    SupportedIndicator(
+        name="whale_alert", display_name="Whale Alert",
+        category="alerts", default_params={"min_notional_usd": 1000000},
+        available_sources=["future"],
     ),
 ]
 
@@ -117,9 +167,10 @@ async def get_indicator_snapshot(
             except (ValueError, TypeError):
                 pass
 
-    # Mark extended indicators as unavailable
-    for ind in ("rsi", "macd", "bollinger_bands", "vwap", "atr", "volume_ma"):
-        indicators[ind] = None
+    # Mark extended indicators as unavailable until computed by pipeline.
+    for ind in SUPPORTED_NAMES:
+        if ind not in indicators:
+            indicators[ind] = None
 
     freshness_seconds = None
     if timestamp:
@@ -138,7 +189,7 @@ async def get_indicator_snapshot(
             freshness_seconds=freshness_seconds,
             is_stale=freshness_seconds is not None and freshness_seconds > 120,
             is_fallback=source == "unavailable",
-            warnings=["Extended indicators (RSI, MACD, BB, VWAP, ATR, Volume MA) not yet computed by pipeline"]
+            warnings=["Extended indicators are listed but not all are computed by the pipeline yet"]
             if source != "unavailable" else ["No indicator data available"],
         ),
     )

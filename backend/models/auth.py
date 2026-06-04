@@ -3,7 +3,7 @@ Pydantic models for authentication and user management.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, EmailStr, Field
@@ -37,18 +37,47 @@ class UpdatePreferencesRequest(BaseModel):
     ai_response_style: Optional[str] = None
 
 
+class UpdateProfileRequest(BaseModel):
+    """Update account profile fields."""
+    display_name: Optional[str] = Field(None, min_length=1, max_length=100)
+    username: Optional[str] = Field(None, min_length=3, max_length=40)
+    avatar_url: Optional[str] = Field(None, max_length=1000)
+    date_of_birth: Optional[date] = None
+    bio: Optional[str] = Field(None, max_length=500)
+    preferred_language: Optional[str] = Field(None, max_length=16)
+    timezone: Optional[str] = Field(None, max_length=80)
+
+
+class ChangePasswordRequest(BaseModel):
+    """Change the current user's password."""
+    current_password: str = Field(..., min_length=1, max_length=128)
+    new_password: str = Field(..., min_length=6, max_length=128)
+
+
+class DeleteAccountRequest(BaseModel):
+    """Deactivate the current user's account after explicit confirmation."""
+    confirmation: str = Field(..., min_length=1, max_length=32)
+
+
 # ── Response models ───────────────────────────────────────────────────────────
 
 class UserResponse(BaseModel):
     """Safe user representation (no password hash)."""
     id: str
     email: str
+    username: Optional[str] = None
     display_name: str
+    avatar_url: Optional[str] = None
+    date_of_birth: Optional[date] = None
+    bio: Optional[str] = None
     role: str = "user"
     preferred_language: Optional[str] = None
     timezone: Optional[str] = None
     is_active: bool = True
     is_verified: bool = False
+    must_change_password: bool = False
+    password_changed_at: Optional[datetime] = None
+    deactivated_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     last_login_at: Optional[datetime] = None
 

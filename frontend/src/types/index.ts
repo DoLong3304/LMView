@@ -31,6 +31,7 @@ export interface Ticker {
   ask?: number;
   volume?: number;
   event_time?: number;
+  activity_score?: number;
 }
 
 /** Single order book price level */
@@ -140,6 +141,8 @@ export interface WatchlistItem {
   symbol: string;
   price: number;
   change: number;
+  activityScore?: number;
+  volume?: number;
   color: "green" | "red" | "gray";
 }
 
@@ -244,7 +247,14 @@ export interface FeatureAvailability {
   requiresAdmin?: boolean;
 }
 
-export type SettingsTab = "account" | "customization" | "aiHelper" | "about" | "debug";
+export type SettingsTab =
+  | "account"
+  | "notifications"
+  | "customization"
+  | "aiHelper"
+  | "about"
+  | "debug"
+  | "adminAccounts";
 
 export type AiMode = "ask" | "interact";
 

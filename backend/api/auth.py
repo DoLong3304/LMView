@@ -13,10 +13,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from backend.core.auth_dependencies import get_current_user
 from backend.models.auth import (
     AuthResponse,
+    ChangePasswordRequest,
+    DeleteAccountRequest,
     LoginRequest,
     MeResponse,
     RegisterRequest,
     SessionInfo,
+    UpdateProfileRequest,
     UpdatePreferencesRequest,
     UserPreferencesResponse,
     UserResponse,
@@ -125,3 +128,76 @@ async def update_preferences(
         raise HTTPException(status_code=404, detail="User not found")
 
     return UserPreferencesResponse(**result)
+
+
+@router.patch("/profile", response_model=UserResponse)
+async def update_profile(
+    body: UpdateProfileRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update the current user's account profile."""
+    updates = body.model_dump(exclude_none=True)
+    if not updates:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No fields to update",
+        )
+    try:
+        result = await auth_service.update_profile(current_user["id"], updates)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+    if result is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserResponse(**result)
+
+
+@router.post("/change-password", response_model=UserResponse)
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Change password for the current user."""
+    try:
+        result = await auth_service.change_password(
+            current_user["id"],
+            body.current_password,
+            body.new_password,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+    if result is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserResponse(**result)
+
+
+@router.delete("/account", status_code=status.HTTP_200_OK)
+async def delete_account(
+    body: DeleteAccountRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Soft-deactivate the current account after explicit confirmation."""
+    try:
+        deactivated = await auth_service.deactivate_account(
+            current_user["id"],
+            body.confirmation,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        )
+    if not deactivated:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"deactivated": True}

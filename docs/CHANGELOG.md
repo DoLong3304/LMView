@@ -7,6 +7,28 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.15.3] - 2026-06-05 - Phase 0 readiness and admin account controls
+
+### Added
+
+- **Default admin bootstrap** - Added ordered PostgreSQL migration execution, additive Phase 1 account/settings schema, environment-driven default admin creation/recovery when no active admin exists, and forced password change after first login.
+- **Account and admin APIs** - Added profile update, password change, account deactivation, admin user list/search, role/active-state management, forced password-change, user settings, notifications, and admin app-settings routes.
+- **Settings UI expansion** - Reworked Settings with Account editing, Notifications, saved Customization defaults, AI Helper agent settings, professional About view, admin-only Debug, and admin-only account management.
+- **Notifications UI** - Added a header notification button and popup backed by API-shaped notification services in both API and mock modes.
+- **Chart action baseline** - Expanded chart action contracts and validation for highlight area/candle/indicator, drawing tools, indicator/timeframe/chart/market toggles, chart move/resize, and replay validation.
+
+### Changed
+
+- **Watchlist activity ordering** - Ticker APIs now expose activity scores and sort high-activity markets first; the frontend watchlist uses that score before falling back to percent change and symbol.
+- **Indicator catalog alignment** - Backend and chart indicator UI now include frontend-supported indicators plus support/resistance and whale-alert placeholders.
+- **User-facing UI hygiene** - Removed normal-user settings exposure of internal data-source/development labels and documented the rule in `AGENTS.md`.
+- **Translation packs** - Split the monolithic frontend translation map into English and Vietnamese locale modules imported by `frontend/src/i18n/translations.ts`, with mirrored section comments and shared key typing for maintenance.
+
+### Fixed
+
+- **Theme/default persistence** - Saved customization defaults now apply on login/session restore without immediately overriding the current chart when edited.
+- **Vietnamese coverage** - Added the missing Vietnamese strings for support/resistance, whale alert, and the new settings, notification, admin, AI helper, and unavailable-state surfaces.
+
 ## [0.15.2] - 2026-06-01 - Auth-gated settings and mock data isolation
 
 ### Added

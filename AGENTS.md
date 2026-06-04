@@ -18,11 +18,12 @@ Project rules for AI coding agents.
 
 Every session starts with:
 
-1. Read `docs/SYSTEM.md`.
-2. Read the latest entries in `docs/CHANGELOG.md` (at least 3).
-3. Check `git status --short --branch`.
-4. Identify affected modules and planned files.
-5. For explicit, low-risk user requests, proceed after stating intent. Ask first for broad, destructive, ambiguous, or cross-system changes.
+1. Use `caveman` skill/plugin for agents to cut down output token usage if available.
+2. Read `docs/SYSTEM.md`.
+3. Read the latest entries in `docs/CHANGELOG.md` (at least 3).
+4. Check `git status --short --branch`.
+5. Identify affected modules and planned files.
+6. For explicit, low-risk user requests, proceed after stating intent. Ask first for broad, destructive, ambiguous, or cross-system changes.
 
 Before editing, run `git pull --ff-only` when safe. If the worktree is dirty, do not overwrite user changes.
 
@@ -102,6 +103,9 @@ Applies to `frontend/`.
 - Static/mock data lives in `frontend/src/data/`.
 - Env, timeframe, and market constants live in `frontend/src/constants/`.
 - User-facing strings use `useI18n()`.
+- Normal-user UI must not expose internal/development labels such as data mode,
+  API mode, mock mode, migration phase names, schema phase names, or debug
+  diagnostics. Keep those behind admin-only Debug surfaces.
 - API calls belong in `frontend/src/services/*`, not components.
 - Use `useApiCall` for fetch flows that need retry/toast/error states.
 - Use `useSymbolMeta` for logos/names.
@@ -204,13 +208,13 @@ For future AI/ML work:
 
 ## Reference Files
 
-| File | Purpose |
-|---|---|
-| `docs/SYSTEM.md` | Full system map and caveats |
-| `docs/CHANGELOG.md` | Project history |
-| `AGENTS.md` | This file |
-| `README.md` | User-facing overview |
-| `docker-compose.yml` | Runtime service graph |
-| `.env.example` | Env template |
-| `Makefile` | Common commands |
-| `schemas/*.avsc` | Kafka contracts |
+| File                 | Purpose                     |
+| -------------------- | --------------------------- |
+| `docs/SYSTEM.md`     | Full system map and caveats |
+| `docs/CHANGELOG.md`  | Project history             |
+| `AGENTS.md`          | This file                   |
+| `README.md`          | User-facing overview        |
+| `docker-compose.yml` | Runtime service graph       |
+| `.env.example`       | Env template                |
+| `Makefile`           | Common commands             |
+| `schemas/*.avsc`     | Kafka contracts             |

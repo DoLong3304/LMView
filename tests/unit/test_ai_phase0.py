@@ -46,9 +46,12 @@ class TestAIChartActionType:
     def test_all_action_types(self):
         expected = {
             "pause_live_stream", "resume_live_stream", "set_visible_range",
-            "add_indicator", "remove_indicator", "draw_trendline",
-            "highlight_region", "add_note", "capture_chart_snapshot",
-            "clear_ai_annotations",
+            "add_indicator", "remove_indicator", "toggle_indicator",
+            "toggle_timeframe", "toggle_chart", "toggle_market",
+            "draw_trendline", "draw_tool", "highlight_region",
+            "highlight_area", "highlight_candle", "highlight_indicator",
+            "move_resize_chart", "replay_chart", "add_note",
+            "capture_chart_snapshot", "clear_ai_annotations",
         }
         assert set(t.value for t in AIChartActionType) == expected
 
@@ -183,6 +186,28 @@ class TestChartActionValidator:
         actions = [
             AIChartAction(action_type=AIChartActionType.PAUSE_LIVE_STREAM, params={}),
             AIChartAction(action_type=AIChartActionType.RESUME_LIVE_STREAM, params={}),
+        ]
+        result = validate_actions(actions)
+        assert result["valid"] is True
+
+    def test_valid_baseline_chart_actions(self):
+        actions = [
+            AIChartAction(
+                action_type=AIChartActionType.HIGHLIGHT_CANDLE,
+                params={"time": 1700000000},
+            ),
+            AIChartAction(
+                action_type=AIChartActionType.TOGGLE_TIMEFRAME,
+                params={"timeframe": "1h"},
+            ),
+            AIChartAction(
+                action_type=AIChartActionType.TOGGLE_MARKET,
+                params={"symbol": "BTCUSDT"},
+            ),
+            AIChartAction(
+                action_type=AIChartActionType.REPLAY_CHART,
+                params={"start_time": 1700000000, "speed": 1},
+            ),
         ]
         result = validate_actions(actions)
         assert result["valid"] is True

@@ -96,10 +96,15 @@ const RightPanel: React.FC<RightPanelProps> = ({
       if (aStarred && !bStarred) return -1;
       if (!aStarred && bStarred) return 1;
 
+      const aActivity = a.activityScore ?? 0;
+      const bActivity = b.activityScore ?? 0;
+      if (aActivity !== bActivity) return bActivity - aActivity;
+
       // Then sort by % change (descending - gainers first)
       const aChange = a.change || 0;
       const bChange = b.change || 0;
-      return bChange - aChange;
+      if (aChange !== bChange) return bChange - aChange;
+      return a.symbol.localeCompare(b.symbol);
     });
   }, [items, filter, searchQuery, starredSymbols]);
 

@@ -29,8 +29,9 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 
   const t = useCallback(
     (key: TranslationKey): string => {
-      const langTranslations =
-        translations[lang as keyof typeof translations];
+      const langTranslations = translations[
+        lang as keyof typeof translations
+      ] as Partial<Record<TranslationKey, string>> | undefined;
       return (
         (langTranslations && langTranslations[key]) ||
         translations["en"][key] ||

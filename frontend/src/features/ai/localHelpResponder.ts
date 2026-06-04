@@ -47,8 +47,8 @@ export function generateLmviewHelpResponse(
 
   if (wantsMarketReasoning && !isStaticConceptQuestion(message)) {
     return createMessage(
-      "AI market analysis is unavailable in API mode. LMView Help can explain app features, drawing tools, indicators, replay, watchlist, settings, auth/session, and market/news UI. It cannot interpret the current chart, predict price, or provide trade advice until a real AI service is connected.",
-      ["AI market analysis unavailable."],
+      "LMView Help can explain app features, drawing tools, indicators, replay, watchlist, settings, accounts, and market/news UI. It does not provide live chart interpretation, price prediction, or trade advice.",
+      ["Market analysis is not available in Help mode."],
     );
   }
 
@@ -65,7 +65,7 @@ export function generateLmviewHelpResponse(
 
   if (lower.includes("ai") || lower.includes("helper") || lower.includes("assistant")) {
     return createMessage(
-      "AI Helper is gated behind login. In API mode the real AI service is not implemented, so Ask mode uses LMView Help only. Interact mode is unavailable until backend AI actions exist.",
+      "AI Helper requires login. Ask mode can explain LMView features and workflows. Interact mode will be enabled when chart action approval is ready for users.",
     );
   }
 
@@ -77,7 +77,7 @@ export function generateLmviewHelpResponse(
 
   if (lower.includes("support") || lower.includes("resistance")) {
     return createMessage(
-      "Support and resistance are chart concepts for areas where price has historically reacted. In LMView you can mark them with horizontal lines, rays, rectangles, text notes, or Fibonacci tools. LMView Help cannot identify live levels for the current chart until real AI analysis is connected.",
+      "Support and resistance are chart concepts for areas where price has historically reacted. In LMView you can mark them with horizontal lines, rays, rectangles, text notes, or Fibonacci tools.",
     );
   }
 
@@ -95,25 +95,25 @@ export function generateLmviewHelpResponse(
 
   if (lower.includes("watchlist") || lower.includes("order book") || lower.includes("trades")) {
     return createMessage(
-      `Right panel shows ${symbol} context on ${timeframe}: watchlist prices, order book depth, recent trades, and AI Helper when logged in. API mode uses backend market endpoints only.`,
+      `Right panel shows ${symbol} context on ${timeframe}: watchlist prices, order book depth, recent trades, and AI Helper when logged in.`,
     );
   }
 
   if (lower.includes("settings") || lower.includes("theme") || lower.includes("timeframe") || lower.includes("chart type")) {
     return createMessage(
-      "Settings contains Account, Customization, AI Helper, About, and Debug. Account, Customization, and AI Helper require login. Debug requires an admin account. Current customization wiring supports theme, default timeframe, and default chart type; other controls are unavailable until wired.",
+      "Settings contains Account, Notifications, Customization, AI Helper, and About. Admin accounts also see Debug and account-management tools. Saved defaults are applied on login or reload.",
     );
   }
 
   if (lower.includes("login") || lower.includes("register") || lower.includes("session") || lower.includes("account")) {
     return createMessage(
-      "Login and register use backend auth in API mode and local mock auth in mock mode. The current session is restored with /auth/me when a stored session token exists.",
+      "Login, registration, profile editing, password changes, and account deactivation are available from Account settings. Sessions restore automatically when a valid session exists.",
     );
   }
 
   if (lower.includes("news") || lower.includes("market overview")) {
     return createMessage(
-      "Markets & News reads market overview, top movers, latest news, search, and trending symbols from real backend endpoints in API mode. Placeholder or mock-tagged API payloads are shown as unavailable.",
+      "Markets & News shows market overview, top movers, latest news, search, and trending symbols when data is available.",
     );
   }
 

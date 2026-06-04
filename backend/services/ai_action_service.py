@@ -30,6 +30,8 @@ KNOWN_INDICATORS = {
     "supertrend",
     "parabolic_sar", "psar",
     "mfi",
+    "support_resistance", "support", "resistance",
+    "whale_alert",
 }
 
 # Valid symbol pattern
@@ -37,6 +39,14 @@ SYMBOL_RE = re.compile(r"^[A-Z0-9]{1,20}$")
 
 # Valid timeframes
 VALID_TIMEFRAMES = {"1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"}
+
+VALID_CHART_TYPES = {"candles", "bars", "line", "area"}
+
+VALID_DRAWING_TOOLS = {
+    "trendline", "ray", "extendedLine", "horizontal", "vertical",
+    "rectangle", "arrow", "fibRetracement", "text", "ruler",
+    "elliottWave", "harmonicABCD",
+}
 
 # Max payload size (characters)
 MAX_PAYLOAD_SIZE = 10_000
@@ -105,17 +115,16 @@ def _validate_single_action(action: AIChartAction, index: int) -> List[str]:
     # Validate action-specific params
     action_type = action.action_type
 
-    if action_type == AIChartActionType.ADD_INDICATOR:
+    if action_type in {
+        AIChartActionType.ADD_INDICATOR,
+        AIChartActionType.REMOVE_INDICATOR,
+        AIChartActionType.TOGGLE_INDICATOR,
+    }:
         indicator_name = params.get("indicator", "").lower()
         if not indicator_name:
             errors.append(f"{prefix}: 'indicator' parameter required")
         elif indicator_name not in KNOWN_INDICATORS:
             errors.append(f"{prefix}: Unknown indicator '{indicator_name}'")
-
-    elif action_type == AIChartActionType.REMOVE_INDICATOR:
-        indicator_name = params.get("indicator", "").lower()
-        if not indicator_name:
-            errors.append(f"{prefix}: 'indicator' parameter required")
 
     elif action_type == AIChartActionType.SET_VISIBLE_RANGE:
         start = params.get("start")
@@ -126,7 +135,10 @@ def _validate_single_action(action: AIChartAction, index: int) -> List[str]:
             elif start >= end:
                 errors.append(f"{prefix}: 'start' must be before 'end'")
 
-    elif action_type == AIChartActionType.HIGHLIGHT_REGION:
+    elif action_type in {
+        AIChartActionType.HIGHLIGHT_REGION,
+        AIChartActionType.HIGHLIGHT_AREA,
+    }:
         price_top = params.get("price_top")
         price_bottom = params.get("price_bottom")
         if price_top is not None and price_bottom is not None:
@@ -143,12 +155,66 @@ def _validate_single_action(action: AIChartAction, index: int) -> List[str]:
             elif time_start >= time_end:
                 errors.append(f"{prefix}: 'time_start' must be before 'time_end'")
 
+    elif action_type == AIChartActionType.HIGHLIGHT_CANDLE:
+        candle_time = params.get("time")
+        if not isinstance(candle_time, (int, float)):
+            errors.append(f"{prefix}: numeric 'time' parameter required")
+
+    elif action_type == AIChartActionType.HIGHLIGHT_INDICATOR:
+        indicator_name = params.get("indicator", "").lower()
+        if not indicator_name:
+            errors.append(f"{prefix}: 'indicator' parameter required")
+        elif indicator_name not in KNOWN_INDICATORS:
+            errors.append(f"{prefix}: Unknown indicator '{indicator_name}'")
+        if "point_index" in params and not isinstance(params["point_index"], int):
+            errors.append(f"{prefix}: 'point_index' must be an integer")
+
     elif action_type == AIChartActionType.DRAW_TRENDLINE:
         for point_key in ("start_point", "end_point"):
             point = params.get(point_key)
             if point and isinstance(point, dict):
                 if "time" not in point or "price" not in point:
                     errors.append(f"{prefix}: '{point_key}' must have 'time' and 'price'")
+            else:
+                errors.append(f"{prefix}: '{point_key}' parameter required")
+
+    elif action_type == AIChartActionType.DRAW_TOOL:
+        tool = params.get("tool")
+        points = params.get("points")
+        if tool not in VALID_DRAWING_TOOLS:
+            errors.append(f"{prefix}: unsupported drawing tool")
+        if not isinstance(points, list) or not points:
+            errors.append(f"{prefix}: non-empty 'points' array required")
+
+    elif action_type == AIChartActionType.TOGGLE_TIMEFRAME:
+        timeframe = params.get("timeframe")
+        if timeframe not in VALID_TIMEFRAMES:
+            errors.append(f"{prefix}: valid 'timeframe' parameter required")
+
+    elif action_type == AIChartActionType.TOGGLE_CHART:
+        chart_type = params.get("chart_type")
+        if chart_type not in VALID_CHART_TYPES:
+            errors.append(f"{prefix}: valid 'chart_type' parameter required")
+
+    elif action_type == AIChartActionType.TOGGLE_MARKET:
+        symbol = str(params.get("symbol", "")).upper()
+        if not symbol or not SYMBOL_RE.match(symbol):
+            errors.append(f"{prefix}: valid 'symbol' parameter required")
+
+    elif action_type == AIChartActionType.MOVE_RESIZE_CHART:
+        if "pane_id" not in params:
+            errors.append(f"{prefix}: 'pane_id' parameter required")
+        for key in ("x", "y", "width", "height"):
+            if key in params and not isinstance(params[key], (int, float)):
+                errors.append(f"{prefix}: '{key}' must be numeric")
+
+    elif action_type == AIChartActionType.REPLAY_CHART:
+        start_time = params.get("start_time")
+        speed = params.get("speed", 1)
+        if not isinstance(start_time, (int, float)):
+            errors.append(f"{prefix}: numeric 'start_time' parameter required")
+        if not isinstance(speed, (int, float)) or speed <= 0:
+            errors.append(f"{prefix}: positive numeric 'speed' parameter required")
 
     elif action_type == AIChartActionType.ADD_NOTE:
         text = params.get("text", "")

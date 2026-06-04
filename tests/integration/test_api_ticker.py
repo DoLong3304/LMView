@@ -119,3 +119,28 @@ class TestTickerEndpoint:
                 resp = await ac.get("/api/ticker")
             assert resp.status_code == 200
             assert resp.json() == []
+
+    @pytest.mark.asyncio
+    async def test_get_all_tickers_sorts_by_activity(self):
+        """Returns highest-activity markets first."""
+        mock_r = _make_mock_redis(
+            ticker_data={
+                "ticker:latest:binance:AAAUSDT": {
+                    "price": "1.0", "change24h": "0",
+                    "bid": "0", "ask": "0", "volume": "10", "event_time": "1",
+                },
+                "ticker:latest:binance:ZZZUSDT": {
+                    "price": "1.0", "change24h": "8",
+                    "bid": "0", "ask": "0", "volume": "1000", "event_time": "1",
+                },
+            },
+            keys=["ticker:latest:binance:AAAUSDT", "ticker:latest:binance:ZZZUSDT"],
+        )
+        with patch("backend.api.ticker.get_redis", return_value=mock_r):
+            transport = ASGITransport(app=app)
+            async with AsyncClient(transport=transport, base_url="http://test") as ac:
+                resp = await ac.get("/api/ticker")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data[0]["symbol"] == "ZZZUSDT"
+        assert data[0]["activity_score"] > data[1]["activity_score"]

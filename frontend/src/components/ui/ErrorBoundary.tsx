@@ -28,7 +28,9 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   t(key: TranslationKey): string {
     try {
       const lang = localStorage.getItem("app_lang") || "en";
-      const langTranslations = translations[lang as keyof typeof translations];
+      const langTranslations = translations[
+        lang as keyof typeof translations
+      ] as Partial<Record<TranslationKey, string>> | undefined;
       return langTranslations?.[key] || translations.en[key] || key;
     } catch {
       return translations.en[key] || key;

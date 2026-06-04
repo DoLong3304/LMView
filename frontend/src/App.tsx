@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import Header from "@/components/layout/Header";
 import LeftSidebar from "@/components/layout/LeftSidebar";
 import AuthModal from "@/features/auth/AuthModal";
+import { useAuth } from "@/features/auth/AuthContext";
 import SettingsModal from "@/features/settings/SettingsModal";
 import { CandlestickChart } from "@/features/chart";
 import ChartOverlay from "@/features/drawing/components/ChartOverlay";
@@ -12,6 +13,7 @@ import RightPanel from "@/features/watchlist/components/RightPanel";
 import NewsPage from "@/pages/NewsPage";
 import { FALLBACK_SYMBOLS } from "@/constants/market";
 import { fetchTickers, fetchSymbols } from "@/services/marketDataService";
+import { fetchUserSettings } from "@/services/settingsService";
 import { loadFromStorage, saveToStorage } from "@/utils/storageHelpers";
 import { loadDrawings, saveDrawings, deleteDrawings } from "@/services/chartStorageService";
 import { useChartKeyboardShortcuts } from "@/hooks/useChartKeyboardShortcuts";
@@ -32,6 +34,8 @@ interface WatchlistItemData {
   symbol: string;
   price: number;
   change: number;
+  activityScore?: number;
+  volume?: number;
   color: "green" | "red" | "gray";
 }
 
@@ -84,6 +88,7 @@ function isEditableTarget(target: EventTarget | null): boolean {
 
 const TradingDashboard: React.FC = () => {
   const { t } = useI18n();
+  const { user, changePassword, logout } = useAuth();
   const chartContainerRef = useRef<HTMLDivElement | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme);
   const [isDesktop, setIsDesktop] = useState(isDesktopLayout);
@@ -170,6 +175,10 @@ const TradingDashboard: React.FC = () => {
                 ...item,
                 price: tick.price,
                 change: tick.change24h != null ? tick.change24h : item.change,
+                activityScore:
+                  tick.activity_score ??
+                  ((tick.volume ?? item.volume ?? 0) * (1 + Math.abs(tick.change24h ?? item.change ?? 0) / 100)),
+                volume: tick.volume ?? item.volume,
                 color:
                   tick.price > 0
                     ? (tick.change24h ?? 0) >= 0
@@ -407,6 +416,34 @@ const TradingDashboard: React.FC = () => {
   const handleToggleTheme = useCallback(() => {
     setThemeMode((current) => (current === "dark" ? "light" : "dark"));
   }, []);
+
+  useEffect(() => {
+    if (!user?.id || user.must_change_password) return;
+    let cancelled = false;
+    fetchUserSettings()
+      .then((payload) => {
+        if (cancelled) return;
+        const defaults = payload.customization_defaults;
+        if (defaults.theme === "dark" || defaults.theme === "light") {
+          setThemeMode(defaults.theme);
+        }
+        if (VALID_TIMEFRAMES.includes(defaults.default_timeframe as TimeframeKey)) {
+          setCurrentTimeframe(defaults.default_timeframe as TimeframeKey);
+        }
+        if (VALID_CHART_TYPES.includes(defaults.default_chart_type as ChartType)) {
+          setChartType(defaults.default_chart_type as ChartType);
+        }
+        if (defaults.default_symbol.endsWith("USDT")) {
+          setSelectedSymbol(defaults.default_symbol);
+        }
+      })
+      .catch(() => {
+        // User defaults are optional; local storage still provides anonymous defaults.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, user?.must_change_password]);
 
   const handleThemeModeChange = useCallback((mode: ThemeMode) => {
     setThemeMode(mode);
@@ -822,6 +859,12 @@ const TradingDashboard: React.FC = () => {
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
       />
+      {user?.must_change_password && (
+        <ForcedPasswordChangeModal
+          onSubmit={changePassword}
+          onLogout={logout}
+        />
+      )}
       <SettingsModal
         isOpen={isSettingsModalOpen}
         initialTab={settingsInitialTab}
@@ -840,5 +883,81 @@ const TradingDashboard: React.FC = () => {
     </div>
   );
 };
+
+function ForcedPasswordChangeModal({
+  onSubmit,
+  onLogout,
+}: {
+  onSubmit: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  onLogout: () => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    if (newPassword !== confirmPassword) {
+      setError(t("passwordsMismatch"));
+      return;
+    }
+    setLoading(true);
+    const result = await onSubmit(currentPassword, newPassword);
+    setLoading(false);
+    setError(result.success ? "" : result.error || t("error"));
+  };
+
+  return (
+    <div className="fixed inset-0 z-[700] flex items-center justify-center bg-black/75 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-sm rounded border border-gray-700 bg-gray-900 p-4 shadow-2xl">
+        <h2 className="text-sm font-semibold text-white">{t("forcePasswordChangeTitle")}</h2>
+        <p className="mt-2 text-sm leading-6 text-gray-400">{t("forcePasswordChangeBody")}</p>
+        <div className="mt-4 space-y-3">
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            placeholder={t("currentPassword")}
+            className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+          />
+          <input
+            type="password"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            placeholder={t("newPassword")}
+            className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+          />
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            placeholder={t("confirmPassword")}
+            className="w-full rounded border border-gray-700 bg-gray-950 px-3 py-2 text-sm text-white outline-none focus:border-blue-500"
+          />
+          {error && <p className="text-xs text-red-300">{error}</p>}
+          <div className="flex justify-between gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => void onLogout()}
+              className="rounded border border-gray-700 px-3 py-1.5 text-xs font-medium text-gray-300 hover:bg-gray-800 hover:text-white"
+            >
+              {t("logout")}
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={submit}
+              className="rounded bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-70"
+            >
+              {loading ? t("loading") : t("updatePassword")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default TradingDashboard;
