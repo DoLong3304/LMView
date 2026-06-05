@@ -7,6 +7,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Documentation audit refresh** - Updated `docs/SYSTEM.md`, `AGENTS.md`, `README.md`, and `.env.example` comments to match the current 0.15.3 codebase, including auth/settings/admin APIs, Phase 0 AI foundation, current frontend layout, compose profile counts, and known pipeline caveats.
+
 ## [0.15.3] - 2026-06-05 - Phase 0 readiness and admin account controls
 
 ### Added
