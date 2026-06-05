@@ -3,3 +3,4 @@ requests==2.32.*
 websocket-client==1.8.*
 fastavro==1.9.*
 lz4
+prometheus-client==0.21.*

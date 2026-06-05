@@ -2,7 +2,7 @@
 Dagster Assets for Medallion Architecture & News Sentiment
 Orchestrates Bronze → Silver → Gold transformations
 """
-from dagster import asset, AssetExecutionContext, schedule, define_asset_job, ScheduleDefinition
+from dagster import asset, AssetExecutionContext, schedule, define_asset_job, Definitions
 from pyspark.sql import SparkSession
 import sys
 import os
@@ -14,10 +14,6 @@ sys.path.insert(0, str(PROJECT_DIR / "src"))
 
 from lakehouse.silver.transformations import SilverTickerTransformation, SilverKlineAggregation
 from lakehouse.gold.aggregations import GoldMarketOverview, GoldSymbolStatistics, GoldSectorPerformance
-from news.multi_source_scraper import MultiSourceNewsScraper
-from news.sentiment_analyzer import SentimentAnalyzer
-from common.kafka_client import get_kafka_producer
-from common.avro_serializer import AvroSerializer
 import logging
 
 logger = logging.getLogger(__name__)
@@ -195,6 +191,11 @@ def news_sentiment_multi_source(context: AssetExecutionContext):
     - Bitcoin Magazine, CryptoSlate, BeInCrypto, NewsBTC, U.Today
     - Bitcoinist, CryptoNews
     """
+    from news.enhanced_scraper import MultiSourceNewsScraper
+    from news.sentiment_analyzer import SentimentAnalyzer
+    from common.kafka_client import get_kafka_producer
+    from common.avro_serializer import AvroSerializer
+
     # Initialize scraper
     api_key = os.getenv("CRYPTOPANIC_API_KEY")
     scraper = MultiSourceNewsScraper(cryptopanic_api_key=api_key)
@@ -386,3 +387,33 @@ gold_advanced_job = define_asset_job(
 )
 def gold_advanced_schedule():
     return {}
+
+
+defs = Definitions(
+    assets=[
+        silver_ticker_unified,
+        silver_kline_5m,
+        silver_kline_15m,
+        silver_kline_1h,
+        silver_kline_4h,
+        silver_kline_1d,
+        silver_kline_1w,
+        gold_market_overview,
+        gold_symbol_statistics,
+        gold_sector_performance,
+        news_sentiment_multi_source,
+        gold_market_dominance,
+        gold_volatility_ranking,
+        gold_movers_ranking,
+        gold_momentum_indicators,
+    ],
+    schedules=[
+        silver_transformation_schedule,
+        gold_aggregation_schedule,
+        daily_aggregation_schedule,
+        news_sentiment_schedule,
+        gold_advanced_schedule,
+    ],
+)
+
+

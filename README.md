@@ -19,6 +19,7 @@ Real-time cryptocurrency technical-analysis platform built on Lambda Architectur
 - **Exchange abstraction** with Binance as primary path and OKX integration under active hardening.
 - **Lambda Architecture**: speed layer (Flink), batch/lakehouse layer (Spark/Iceberg), serving layer (FastAPI).
 - **High availability infrastructure**: 3 Kafka brokers and Redis Sentinel with 1 master, 2 replicas, 3 Sentinels.
+- **Resilience bypass path**: Direct WebSocket → Redis writes when Kafka/Flink is down (ENABLE_DIRECT_REDIS=true).
 - **Market overview and news**: gold-table metrics, heatmaps, rankings, multi-source news and sentiment cache.
 - **Trading UI**: lightweight-charts v5.2.0, drawing tools, replay mode, i18n, mock/API data mode.
 - **Observability**: Prometheus, Grafana, Loki, exporters, 11 dashboards, alert rules.
@@ -105,6 +106,21 @@ Optional backfill:
 ```bash
 docker compose run --rm influx-backfill python /app/src/batch/backfill.py --mode populate --days 90
 ```
+
+---
+
+## Direct Redis Bypass (Resilience)
+
+When Kafka or Flink is down, the API fallback falls back to Redis cache — but Redis may also be empty. Enable the **Direct Redis Bypass** to have WebSocket streams write directly to Redis as a backup path.
+
+```bash
+# In docker-compose.yml, producer service:
+ENABLE_DIRECT_REDIS: "true"
+```
+
+This writes to the same Redis keys as Flink (ticker, candle, trade, orderbook) with matching TTLs. API fallback will still work even when the speed layer is degraded.
+
+For details, see [Section 17.7 in SYSTEM.md](docs/SYSTEM.md#177-direct-redis-bypass-resilience-path).
 
 ---
 

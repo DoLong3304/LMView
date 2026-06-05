@@ -10,6 +10,8 @@ RUN python3 -m ensurepip --upgrade 2>/dev/null || true && \
         dagster==1.8.* \
         dagster-webserver==1.8.* \
         dagster-postgres \
+        kafka-python \
+        feedparser \
         requests \
         pyarrow \
         vaderSentiment==3.3.2 && \

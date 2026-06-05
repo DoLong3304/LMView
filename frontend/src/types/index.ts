@@ -174,6 +174,15 @@ export interface IndicatorSettings {
   [key: string]: unknown;
 }
 
+/** Latest indicator snapshot from backend WebSocket stream. */
+export interface IndicatorStreamSnapshot {
+  symbol: string;
+  exchange: string;
+  interval: string;
+  timestamp?: number | null;
+  indicators: Record<string, number>;
+}
+
 /** Point on the chart canvas for drawing tools (pixel space - for rendering only) */
 export interface DrawingPoint {
   x: number;

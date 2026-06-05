@@ -41,6 +41,7 @@ class IndicatorSnapshot(BaseModel):
     """Latest indicator values for a symbol."""
     symbol: str
     exchange: str = "binance"
+    interval: str = "1m"
     indicators: Dict[str, Optional[float]] = Field(default_factory=dict)
     timestamp: Optional[int] = None  # epoch ms
     source: str = "unknown"
@@ -60,6 +61,7 @@ class IndicatorSummary(BaseModel):
     """Compact indicator summary for AI context."""
     symbol: str
     exchange: str = "binance"
+    interval: str = "1m"
     available: List[str] = Field(default_factory=list)
     latest_values: Dict[str, Optional[float]] = Field(default_factory=dict)
     signals: Dict[str, str] = Field(default_factory=dict)  # indicator -> signal

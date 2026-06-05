@@ -48,9 +48,11 @@ services:
     restart: unless-stopped
     ports:
       - "2181:2181"
+      - "7071:7071"
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_JMX_OPTS: "-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.port=7071 -Dcom.sun.management.jmxremote.authenticate=false -Dcom.sun.management.jmxremote.ssl=false"
     volumes:
       - zookeeper-data:/var/lib/zookeeper/data
     networks:
@@ -514,15 +516,16 @@ services:
     ports:
       - "8081:8081" # Flink Web UI
     command: jobmanager
-    mem_limit: 2560m
-    mem_reservation: 2048m
     deploy:
       resources:
         limits:
-          memory: 2560m
+          memory: 2G
+        reservations:
+          memory: 1G
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
       FLINK_PROPERTIES: "taskmanager.numberOfTaskSlots: 12"
+      FLINK_CHECKPOINT_DIR: s3a://flink-checkpoints/flink-checkpoints
       KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
@@ -567,16 +570,17 @@ services:
     hostname: flink-taskmanager
     restart: unless-stopped
     command: taskmanager
-    mem_limit: 10240m
-    mem_reservation: 8192m
     deploy:
       resources:
         limits:
-          memory: 10G
+          memory: 4G
+        reservations:
+          memory: 2G
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
       FLINK_TASKMANAGER_SLOTS: 12
       FLINK_PROPERTIES: "taskmanager.numberOfTaskSlots: 12"
+      FLINK_CHECKPOINT_DIR: s3a://flink-checkpoints/flink-checkpoints
       KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
@@ -640,7 +644,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1G
+          memory: 2G
+        reservations:
+          memory: 512M
     depends_on:
       minio:
         condition: service_healthy
@@ -658,8 +664,8 @@ services:
     environment:
       SPARK_MODE: worker
       SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_WORKER_MEMORY: 4G
-      SPARK_WORKER_CORES: 4
+      SPARK_WORKER_MEMORY: 2G
+      SPARK_WORKER_CORES: 2
       SPARK_WORKER_WEBUI_PORT: 8084
       SPARK_CONF_DIR: /opt/spark/conf
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
@@ -678,9 +684,69 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 2G
     depends_on:
       - spark-master
+
+  spark-worker-2:
+    profiles: ["dev", "prod"]
+    build:
+      context: .
+      dockerfile: docker/spark/Dockerfile
+    container_name: spark-worker-2
+    hostname: spark-worker-2
+    restart: unless-stopped
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_MEMORY: 2G
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_WEBUI_PORT: 8085
+      SPARK_CONF_DIR: /opt/spark/conf
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_BUCKET: ${INFLUX_BUCKET}
+    volumes:
+      - ./:/app
+      - spark-events:/opt/spark-events
+      - ./config/spark/metrics.properties:/opt/spark/conf/metrics.properties:ro
+    networks:
+      - crypto-net
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    depends_on:
+      - spark-master
+
+  job-watchdog:
+    profiles: ["dev", "prod"]
+    image: docker:27.0-cli
+    container_name: job-watchdog
+    restart: unless-stopped
+    entrypoint:
+      - sh
+      - -c
+      - |
+        apk add --no-cache bash curl python3 >/dev/null && python3 /app/scripts/job_watchdog.py
+    environment:
+      FLINK_HEALTH_URL: http://flink-jobmanager:8081
+      SPARK_HEALTH_URL: http://spark-master:8080
+      JOB_WATCHDOG_INTERVAL_SEC: 300
+    volumes:
+      - ./:/app:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - crypto-net
+    depends_on:
+      flink-jobmanager:
+        condition: service_started
+      spark-master:
+        condition: service_started
 
   auto-submit-jobs:
     profiles: ["dev", "prod"]
@@ -691,8 +757,43 @@ services:
       - sh
       - -c
       - |
-        apk add --no-cache bash curl >/dev/null && \
-        bash /app/scripts/auto_submit_jobs.sh
+        set -e
+        apk add --no-cache bash curl >/dev/null 2>&1
+        echo "=== Waiting for Flink ==="
+        until curl -sf http://flink-jobmanager:8081 > /dev/null; do printf '.'; sleep 5; done
+        echo " Flink ready!"
+        sleep 10
+        echo "=== Recreating deps.zip ==="
+        docker exec flink-jobmanager python3 - <<'PYEOF'
+        import zipfile, os
+        with zipfile.ZipFile('/tmp/deps.zip', 'w') as zf:
+            for root, dirs, files in os.walk('/app/src/common'):
+                for file in files:
+                    if file.endswith('.py'):
+                        filepath = os.path.join(root, file)
+                        zf.write(filepath, filepath)
+            for root, dirs, files in os.walk('/app/src/processing/writers'):
+                for file in files:
+                    if file.endswith('.py'):
+                        filepath = os.path.join(root, file)
+                        zf.write(filepath, 'writers/' + file)
+        print('deps.zip created')
+        PYEOF
+        echo "=== Submitting Flink job ==="
+        docker exec flink-jobmanager bash -c "cd /app/src/processing && flink run -d -py pipeline.py --pyFiles /tmp/deps.zip"
+        echo "Flink submitted."
+        echo "=== Waiting for Spark ==="
+        until curl -sf http://spark-master:8080 > /dev/null; do printf '.'; sleep 5; done
+        echo " Spark ready!"
+        echo "=== Submitting Spark job ==="
+        docker exec -d spark-master /opt/spark/bin/spark-submit \
+          --master spark://spark-master:7077 \
+          --total-executor-cores 2 \
+          --packages "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2,org.apache.iceberg:iceberg-aws-bundle:1.5.2,org.apache.hadoop:hadoop-aws:3.3.4,org.postgresql:postgresql:42.7.2,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.5,org.apache.spark:spark-avro_2.12:3.5.5" \
+          --conf spark.driver.memory=1g \
+          --conf spark.executor.memory=1g \
+          /app/src/lakehouse/pipeline.py
+        echo "Both jobs submitted!"
     environment:
       FLINK_HEALTH_URL: http://flink-jobmanager:8081
       SPARK_HEALTH_URL: http://spark-master:8080
@@ -1058,6 +1159,8 @@ services:
       KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
       KLINE_INTERVAL: "1s"
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+      ENABLE_OKX: "false"
+      ENABLE_DIRECT_REDIS: "false"
     volumes:
       - ./:/app
     networks:

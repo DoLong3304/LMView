@@ -1,0 +1,87 @@
+{
+  "title": "Spark Logs",
+  "tags": [
+    "spark",
+    "batch",
+    "logs"
+  ],
+  "description": "Logs for Spark master and worker nodes",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "title": "Log Level Breakdown (Last 1h)",
+      "type": "barchart",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "targets": [
+        {
+          "expr": "count_over_time({service=~\"spark-master|spark-worker\"} [$__interval])",
+          "legendFormat": "{{log_level}}",
+          "queryType": "range"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "title": "Error Rate (5m windows)",
+      "type": "timeseries",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate({service=~\"spark-master|spark-worker\",log_level=\"ERROR\"} [5m]))",
+          "legendFormat": "ERROR rate",
+          "queryType": "range"
+        }
+      ]
+    },
+    {
+      "title": "Log Stream (Last 15m)",
+      "type": "logs",
+      "gridPos": {
+        "h": 16,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "datasource": {
+        "type": "loki",
+        "uid": "Loki"
+      },
+      "targets": [
+        {
+          "expr": "{service=~\"spark-master|spark-worker\"} | json",
+          "legendFormat": "",
+          "queryType": "range"
+        }
+      ],
+      "options": {
+        "showLabels": true,
+        "showTime": true,
+        "wrapLogMessage": true
+      }
+    }
+  ]
+}
