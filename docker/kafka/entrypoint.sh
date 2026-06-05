@@ -43,7 +43,7 @@ else
   echo "ZK mode already configured, skipping."
 fi
 
-# Build KAFKA_OPTS with JMX agent
-export KAFKA_OPTS="-javaagent:${JMX_JAR}=9999:${JMX_DIR}/kafka-17x.yaml"
+# Build KAFKA_OPTS with JMX agent and heap settings
+export KAFKA_OPTS="-Xmx1g -Xms1g -javaagent:${JMX_JAR}=9999:${JMX_DIR}/kafka-17x.yaml"
 
 exec /opt/kafka/bin/kafka-server-start.sh /opt/kafka/config/server.properties

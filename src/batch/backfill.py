@@ -383,7 +383,7 @@ def ensure_iceberg_table(spark):
     spark.sql(f"CREATE DATABASE IF NOT EXISTS {ICEBERG_CATALOG}.{ICEBERG_DB}")
     spark.sql(f"""
         CREATE TABLE IF NOT EXISTS {ICEBERG_TABLE_KLINES} (
-            event_time      BIGINT, symbol STRING,
+            event_time      BIGINT, symbol STRING, exchange STRING,
             kline_start     BIGINT, kline_close BIGINT,
             interval        STRING,
             open DOUBLE, high DOUBLE, low DOUBLE, close DOUBLE,
@@ -430,6 +430,7 @@ def process_and_write_chunk(spark, rows: list, symbol: str, chunk_start_ms: int)
     kline_schema = StructType([
         StructField("event_time",  LongType(),    False),
         StructField("symbol",     StringType(),   False),
+        StructField("exchange",   StringType(),   False),
         StructField("kline_start", LongType(),    False),
         StructField("kline_close", LongType(),    False),
         StructField("interval",   StringType(),   False),
@@ -497,7 +498,7 @@ def write_symbol_iceberg(spark, symbol: str, start_ms: int, end_ms: int) -> int:
         for k in klines:
             open_ms = int(k[0])
             chunk_buffer.append([
-                open_ms, symbol, open_ms, int(k[6]),
+                open_ms, symbol, "binance", open_ms, int(k[6]),
                 "1m",
                 float(k[1]), float(k[2]), float(k[3]), float(k[4]),
                 float(k[5]), float(k[7]), int(k[8]),

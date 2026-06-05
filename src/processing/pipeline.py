@@ -21,10 +21,12 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 from pyflink.common import Configuration, Types
 from pyflink.datastream import CheckpointingMode, StreamExecutionEnvironment
+from pyflink.common.restart_strategy import RestartStrategies
 from pyflink.table import StreamTableEnvironment
 
 # Import from writers package (uploaded via --pyFiles)
 from writers.keydb_ticker import KeyDBWriter
+from writers.keydb_trades import KeyDBTradeWriter
 from writers.keydb_kline import KeyDBKlineWriter
 from writers.keydb_depth import DepthWriter
 from writers.influxdb_ticker import InfluxDBWriter
@@ -70,9 +72,16 @@ def run():
     env.configure(s3_config)
 
     env.get_checkpoint_config().set_checkpoint_storage_dir(
-        "file:///tmp/flink-checkpoints"
+        "s3://flink-checkpoints/flink-checkpoints"
     )
     env.enable_checkpointing(120_000)
+    env.set_restart_strategy(
+        RestartStrategies.failure_rate_restart(
+            5,
+            600000,
+            10000,
+        )
+    )
     chk = env.get_checkpoint_config()
     chk.set_checkpointing_mode(CheckpointingMode.EXACTLY_ONCE)
     chk.enable_unaligned_checkpoints()
@@ -196,7 +205,7 @@ def run():
     # Branch 2: in-flight 1s→1m aggregation (dedup + gap-fill)
     ds_1m_candles = (
         ds_kline_dict
-        .key_by(lambda v: json.loads(v)["symbol"])
+        .key_by(lambda v: json.loads(v).get("exchange","binance") + ":" + json.loads(v)["symbol"])
         .process(KlineWindowAggregator(), output_type=Types.STRING())
     )
     ds_1m_candles.flat_map(
@@ -254,8 +263,60 @@ def run():
         DepthWriter(), output_type=Types.STRING()
     ).name("Write_Depth_To_KeyDB")
 
+
+    # --------------------------------------------------------------------------
+    # Trade pipeline: crypto_trades -> KeyDB (hot cache)
+    # --------------------------------------------------------------------------
+
+    t_env.execute_sql(f"""
+        CREATE TABLE kafka_trades (
+            event_time      BIGINT,
+            symbol          STRING,
+            exchange        STRING,
+            agg_trade_id    BIGINT,
+            price           DOUBLE,
+            quantity        DOUBLE,
+            trade_time      BIGINT,
+            is_buyer_maker  BOOLEAN
+        ) WITH (
+            'connector'                    = 'kafka',
+            'topic'                        = 'crypto_trades',
+            'properties.bootstrap.servers' = '{KAFKA_BOOTSTRAP}',
+            'properties.group.id'          = 'flink_crypto_trades_v1',
+            'scan.startup.mode'            = 'latest-offset',
+            'format'                       = 'avro-confluent',
+            'avro-confluent.url'           = '{SCHEMA_REGISTRY_URL}'
+        )
+    """)
+
+    trades_table = t_env.sql_query("""
+        SELECT
+            event_time, symbol, exchange, agg_trade_id,
+            price, quantity, trade_time, is_buyer_maker
+        FROM kafka_trades
+    """)
+    ds_trades_row = t_env.to_data_stream(trades_table)
+
+    def trade_row_to_dict(row):
+        return json.dumps({
+            "event_time":       row[0],
+            "symbol":           row[1],
+            "exchange":         row[2],
+            "agg_trade_id":     row[3],
+            "price":            row[4],
+            "quantity":         row[5],
+            "trade_time":       row[6],
+            "is_buyer_maker":   row[7],
+        })
+
+    ds_trades_dict = ds_trades_row.map(trade_row_to_dict, output_type=Types.STRING())
+    ds_trades_dict.flat_map(
+        KeyDBTradeWriter(), output_type=Types.STRING()
+    ).name("Write_Trades_To_KeyDB")
+
     env.execute("Crypto_MultiStream_Kafka_to_KeyDB_InfluxDB")
 
 
 if __name__ == "__main__":
     run()
+

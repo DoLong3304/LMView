@@ -5,6 +5,7 @@ Implements the ExchangeClient interface for OKX's REST and WebSocket APIs.
 All OKX-specific URLs, endpoints, and protocols are encapsulated here.
 """
 
+import json
 import logging
 import time
 
@@ -222,3 +223,55 @@ class OKXClient(ExchangeClient):
 
     def map_depth(self, raw: dict) -> dict:
         return mappers.map_depth(raw)
+
+    # --- Subscription frame builder (OKX protocol) ---
+
+    def build_subscribe_frame(self, channels: list[dict], op: str = "subscribe") -> str:
+        """Build an OKX WebSocket subscription/unsubscription frame.
+
+        Args:
+            channels: List of {channel, instId} dicts, e.g. [{"channel": "tickers", "instId": "BTC-USDT"}]
+            op: "subscribe" or "unsubscribe"
+
+        Returns:
+            JSON string to send on the WebSocket after connection opens.
+        """
+        args = []
+        for ch in channels:
+            arg = {"channel": ch["channel"]}
+            if "instId" in ch:
+                arg["instId"] = ch["instId"]
+            args.append(arg)
+        return json.dumps({"op": op, "args": args})
+
+    @property
+    def uses_subscription_frames(self) -> bool:
+        return True
+
+    @property
+    def exchange_name(self) -> str:
+        """Return the exchange identifier for this client."""
+        return "okx"
+
+    def build_ticker_channels(self, symbols: list[str]) -> list[dict]:
+        """Build ticker channel subscriptions for the given symbols.
+
+        OKX uses 'tickers' (plural). instId format: 'BTC-USDT'.
+        """
+        return [{"channel": "tickers", "instId": f"{s[:-4]}-{s[-4:]}"} for s in symbols]
+
+    def build_trade_channels(self, symbols: list[str]) -> list[dict]:
+        """Build trade channel subscriptions for the given symbols."""
+        return [{"channel": "trades", "instId": f"{s[:-4].upper()}-{s[-4:].upper()}"} for s in symbols]
+
+    def build_kline_channels(self, symbols: list[str], interval: str = "1m") -> list[dict]:
+        """Build kline channel subscriptions for the given symbols."""
+        # OKX candle channel names: candle1s, candle1m, candle1H, candle1D
+        okx_bar = interval.replace("h", "H").replace("d", "D").replace("w", "1W")
+        return [{"channel": f"candle{okx_bar}", "instId": f"{s[:-4].upper()}-{s[-4:].upper()}"} for s in symbols]
+
+    def build_depth_channels(self, symbols: list[str], level: str = "5") -> list[dict]:
+        """Build depth channel subscriptions for the given symbols."""
+        # OKX books5, books50, etc.
+        return [{"channel": f"books{level}", "instId": f"{s[:-4].upper()}-{s[-4:].upper()}"} for s in symbols]
+

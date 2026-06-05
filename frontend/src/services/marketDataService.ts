@@ -4,7 +4,7 @@ import { apiGet, buildQuery, getWsBaseUrl } from "@/services/apiClient";
 import { isUnavailableApiPayload } from "@/services/apiMetadata";
 import { makeClientCacheKey, withClientCache } from "@/services/clientCache";
 import { getMockDataAdapter } from "@/services/dataSourceAdapter";
-import type { Candle, SymbolInfo, Ticker, Trade } from "@/types";
+import type { Candle, IndicatorStreamSnapshot, SymbolInfo, Ticker, Trade } from "@/types";
 
 export { TIMEFRAMES };
 
@@ -86,7 +86,7 @@ export function subscribeCandle(
   const interval = normalizeTimeframe(timeframe);
 
   if (DATA_SOURCE === "api") {
-    const wsUrl = `${getWsBaseUrl()}/stream?${buildQuery({ symbol, interval, exchange })}`;
+    const wsUrl = `${getWsBaseUrl()}/stream/${interval}?${buildQuery({ symbol, exchange })}`;
     const ws = new WebSocket(wsUrl);
     ws.onmessage = (e: MessageEvent) => {
       const k: RawKline = JSON.parse(e.data as string);
@@ -105,6 +105,14 @@ interface MultiTimeframeOptions {
   symbol: string;
   exchange?: string;
   onCandle: TimeframeCallback;
+  onError?: (error: Event) => void;
+}
+
+interface IndicatorStreamOptions {
+  symbol: string;
+  timeframe: string;
+  exchange?: string;
+  onIndicator: (snapshot: IndicatorStreamSnapshot) => void;
   onError?: (error: Event) => void;
 }
 
@@ -127,6 +135,32 @@ export function subscribeAllTimeframes(options: MultiTimeframeOptions): () => vo
   }
 
   return mockDataAdapter.subscribeAllTimeframes(symbol, onCandle);
+}
+
+export function subscribeIndicatorStream(options: IndicatorStreamOptions): () => void {
+  const {
+    symbol,
+    timeframe,
+    exchange = "binance",
+    onIndicator,
+    onError,
+  } = options;
+  const interval = normalizeTimeframe(timeframe);
+
+  if (DATA_SOURCE === "api") {
+    const wsUrl = `${getWsBaseUrl()}/stream/indicators/${interval}?${buildQuery({ symbol, exchange })}`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onmessage = (e: MessageEvent) => {
+      const payload: IndicatorStreamSnapshot = JSON.parse(e.data as string);
+      onIndicator(payload);
+    };
+
+    ws.onerror = onError || ((err) => console.error("[WS indicators error]", err));
+    return () => ws.close();
+  }
+
+  return () => {};
 }
 
 export async function fetchSymbols(): Promise<SymbolInfo[]> {

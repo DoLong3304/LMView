@@ -19,8 +19,10 @@ Real-time cryptocurrency technical-analysis platform built on Lambda Architectur
 - **Exchange abstraction** with Binance as primary path and OKX present but still experimental.
 - **Lakehouse analytics** with Spark, Iceberg on MinIO, PostgreSQL catalog, and Trino.
 - **High availability infrastructure**: 3 Kafka brokers and Redis Sentinel with 1 master, 2 replicas, 3 Sentinels.
-- **Trading UI**: lightweight-charts v5.2.0, drawing tools, replay mode, i18n, auth, settings, notifications, market/news views.
-- **Phase 0 AI foundation**: authenticated AI routes, PostgreSQL chat/session persistence, chart context, action validation, deterministic mock responses.
+- **Resilience bypass path**: Direct WebSocket → Redis writes when Kafka/Flink is down (`ENABLE_DIRECT_REDIS=true`).
+- **Market overview and news**: gold-table metrics, heatmaps, rankings, multi-source news and sentiment cache.
+- **Trading UI**: lightweight-charts v5.2.0, drawing tools, replay mode, i18n, auth, settings, notifications, market/news views, and mock/API data mode.
+- **Phase 1 AI Ask Mode**: real LLM inference pipeline, provider routing, pgvector-powered RAG knowledge base, prompt builder, output guard, context-service, and 50 golden evaluation questions.
 - **Observability**: Prometheus, Grafana, Loki, exporters, 11 dashboards, and alert rules.
 
 ---
@@ -110,6 +112,21 @@ docker compose run --rm influx-backfill python /app/src/batch/backfill.py --mode
 
 ---
 
+## Direct Redis Bypass (Resilience)
+
+When Kafka or Flink is down, the API fallback falls back to Redis cache — but Redis may also be empty. Enable the **Direct Redis Bypass** to have WebSocket streams write directly to Redis as a backup path.
+
+```bash
+# In docker-compose.yml, producer service:
+ENABLE_DIRECT_REDIS: "true"
+```
+
+This writes to the same Redis keys as Flink (ticker, candle, trade, orderbook) with matching TTLs. API fallback will still work even when the speed layer is degraded.
+
+For details, see [Section 17.7 in SYSTEM.md](docs/SYSTEM.md#177-direct-redis-bypass-resilience-path).
+
+---
+
 ## Testing
 
 Python:
@@ -164,5 +181,5 @@ Built and maintained by D22 Fintech, PTIT students:
 ---
 
 Status: Active development
-Version: 0.15.3
+Version: 0.18.0
 License: Not specified in this repository

@@ -45,6 +45,9 @@ class KlineWindowAggregator(KeyedProcessFunction):
         self._symbol = runtime_context.get_state(
             ValueStateDescriptor("symbol", Types.STRING())
         )
+        self._exchange = runtime_context.get_state(
+            ValueStateDescriptor("exchange", Types.STRING())
+        )
 
     def process_element(self, value, ctx: 'KeyedProcessFunction.Context'):
         candle = json.loads(value) if isinstance(value, str) else value
@@ -57,6 +60,9 @@ class KlineWindowAggregator(KeyedProcessFunction):
 
         if self._symbol.value() is None:
             self._symbol.update(candle["symbol"])
+
+        if self._exchange.value() is None:
+            self._exchange.update(candle.get("exchange", "binance"))
 
         # Upsert into state (dedup)
         self._candles.put(kline_start, json.dumps({
@@ -124,9 +130,11 @@ class KlineWindowAggregator(KeyedProcessFunction):
         sorted_candles = [window_candles[k] for k in sorted(window_candles)]
 
         symbol = self._symbol.value() or "unknown"
+        exchange = self._exchange.value() or "unknown"
         agg = {
             "event_time":   int(time.time() * 1000),
             "symbol":       symbol,
+            "exchange":     exchange,
             "kline_start":  window_start,
             "kline_close":  window_start + 59_999,
             "interval":     "1m",
@@ -145,6 +153,6 @@ class KlineWindowAggregator(KeyedProcessFunction):
             self._candles.remove(ts)
 
         real_count = sum(1 for c in sorted_candles if c["v"] > 0)
-        log.info("[Window] %s 1s→1m window %d  real=%d/60",
-                 symbol, window_start, real_count)
+        log.info("[Window] %s/%s 1s→1m window %d  real=%d/60",
+                 exchange, symbol, window_start, real_count)
         return json.dumps(agg)

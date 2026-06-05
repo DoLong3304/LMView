@@ -53,6 +53,16 @@ SYMBOLS_PER_CONNECTION = int(os.environ.get("SYMBOLS_PER_CONNECTION", "25"))
 SYMBOLS_PER_DEPTH_CONN = int(os.environ.get("SYMBOLS_PER_DEPTH_CONN", "15"))
 MAX_SYMBOLS            = int(os.environ.get("MAX_SYMBOLS", "200"))
 TICKER_HEARTBEAT_SEC   = 5.0
+ENABLE_OKX             = os.environ.get("ENABLE_OKX", "false").lower() == "true"
+
+# ── Direct Redis Bypass ──
+ENABLE_DIRECT_REDIS      = os.environ.get("ENABLE_DIRECT_REDIS", "false").lower() == "true"
+
+# ── Health Check / Auto-failover ──
+HEALTH_CHECK_INTERVAL_SEC = int(os.environ.get("HEALTH_CHECK_INTERVAL_SEC", "30"))
+FAILOVER_THRESHOLD_SEC   = int(os.environ.get("FAILOVER_THRESHOLD_SEC", "60"))
+RECOVERY_THRESHOLD_SEC   = int(os.environ.get("RECOVERY_THRESHOLD_SEC", "120"))
+FLINK_JM_URL             = os.environ.get("FLINK_JM_URL", "http://flink-jobmanager:8081")
 
 # ── Backfill ─────────────────────────────────────────────────────────────────
 MAX_RETRIES          = 5
@@ -80,3 +90,7 @@ ICEBERG_TABLES = [
     f"{ICEBERG_CATALOG}.{ICEBERG_DB}.coin_klines",
     f"{ICEBERG_CATALOG}.{ICEBERG_DB}.coin_klines_hourly",
 ]
+
+# ── Indicator history / hot cache ───────────────────────────────────────────
+INDICATOR_HISTORY_TTL_SEC = int(os.environ.get("INDICATOR_HISTORY_TTL_SEC", "604800"))
+INDICATOR_HISTORY_MAX_ENTRIES = int(os.environ.get("INDICATOR_HISTORY_MAX_ENTRIES", "10080"))

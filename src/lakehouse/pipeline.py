@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Spark Structured Streaming pipeline: Kafka → Iceberg tables.
+Spark Structured Streaming pipeline: Kafka â†’ Iceberg tables.
 
 Reads Avro-encoded messages from Kafka topics (ticker, trades, klines),
 deserializes them, and writes to Iceberg tables partitioned by day.
@@ -30,12 +30,12 @@ from common.config import (
     MINIO_SECRET_KEY,
 )
 
-# ── Checkpoint locations ─────────────────────────────────────────────────────
-CHECKPOINT_TICKER = "s3a://cryptoprice/checkpoints/crypto_ticker_v1"
-CHECKPOINT_TRADES = "s3a://cryptoprice/checkpoints/crypto_trades_v1"
-CHECKPOINT_KLINES = "s3a://cryptoprice/checkpoints/crypto_klines_v1"
+# â”€â”€ Checkpoint locations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+CHECKPOINT_TICKER = "s3://cryptoprice/checkpoints/crypto_ticker_v1"
+CHECKPOINT_TRADES = "s3://cryptoprice/checkpoints/crypto_trades_v1"
+CHECKPOINT_KLINES = "s3://cryptoprice/checkpoints/crypto_klines_v1"
 
-# ── Load Avro schemas from canonical schema files ────────────────────────────
+# â”€â”€ Load Avro schemas from canonical schema files â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 SCHEMA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "schemas")
 
 
@@ -86,6 +86,9 @@ def build_spark() -> SparkSession:
         .config("spark.hadoop.fs.s3a.aws.credentials.provider",
                 "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
         .config("spark.sql.defaultCatalog", "iceberg_catalog")
+        .config("spark.streaming.stopGracefullyOnShutdown", "true")
+        .config("spark.streaming.backpressure.enabled", "true")
+        .config("spark.task.maxFailures", "4")
         .config("spark.cores.max", "2")
         .getOrCreate()
     )
@@ -116,13 +119,14 @@ def run():
     spark = build_spark()
     spark.sparkContext.setLogLevel("WARN")
 
-    # ── Ensure Iceberg database + tables exist ───────────────────────────────
+    # â”€â”€ Ensure Iceberg database + tables exist â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     spark.sql("CREATE DATABASE IF NOT EXISTS iceberg_catalog.crypto_lakehouse")
 
     spark.sql(f"""
         CREATE TABLE IF NOT EXISTS {ICEBERG_TABLE_TICKER} (
             event_time          BIGINT,
             symbol              STRING,
+            exchange            STRING,
             close               DOUBLE,
             bid                 DOUBLE,
             ask                 DOUBLE,
@@ -145,6 +149,7 @@ def run():
         CREATE TABLE IF NOT EXISTS {ICEBERG_TABLE_TRADES} (
             event_time      BIGINT,
             symbol          STRING,
+            exchange        STRING,
             agg_trade_id    BIGINT,
             price           DOUBLE,
             quantity        DOUBLE,
@@ -162,6 +167,7 @@ def run():
         CREATE TABLE IF NOT EXISTS {ICEBERG_TABLE_KLINES} (
             event_time      BIGINT,
             symbol          STRING,
+            exchange        STRING,
             kline_start     BIGINT,
             kline_close     BIGINT,
             interval        STRING,
@@ -180,7 +186,7 @@ def run():
         PARTITIONED BY (days(kline_timestamp))
     """)
 
-    # ── Ticker stream ────────────────────────────────────────────────────────
+    # â”€â”€ Ticker stream â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     ticker_df = (
         read_kafka(spark, "crypto_ticker", TICKER_AVRO_SCHEMA)
         .filter(col("event_time").isNotNull())
@@ -190,14 +196,16 @@ def run():
         .dropDuplicates(["symbol", "event_timestamp"])
     )
 
-    ticker_df.writeStream \
-        .format("iceberg") \
-        .outputMode("append") \
-        .trigger(processingTime="1 minute") \
-        .option("checkpointLocation", CHECKPOINT_TICKER) \
+    ticker_query = (
+        ticker_df.writeStream
+        .format("iceberg")
+        .outputMode("append")
+        .trigger(processingTime="1 minute")
+        .option("checkpointLocation", CHECKPOINT_TICKER)
         .toTable(ICEBERG_TABLE_TICKER)
+    )
 
-    # ── Trades stream ────────────────────────────────────────────────────────
+    # â”€â”€ Trades stream â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     trades_df = (
         read_kafka(spark, "crypto_trades", TRADES_AVRO_SCHEMA)
         .filter(col("event_time").isNotNull())
@@ -206,14 +214,16 @@ def run():
         .withColumn("ingested_at", current_timestamp())
     )
 
-    trades_df.writeStream \
-        .format("iceberg") \
-        .outputMode("append") \
-        .trigger(processingTime="1 minute") \
-        .option("checkpointLocation", CHECKPOINT_TRADES) \
+    trades_query = (
+        trades_df.writeStream
+        .format("iceberg")
+        .outputMode("append")
+        .trigger(processingTime="1 minute")
+        .option("checkpointLocation", CHECKPOINT_TRADES)
         .toTable(ICEBERG_TABLE_TRADES)
+    )
 
-    # ── Klines stream ────────────────────────────────────────────────────────
+    # â”€â”€ Klines stream â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     klines_df = (
         read_kafka(spark, "crypto_klines", KLINES_AVRO_SCHEMA)
         .filter(col("kline_start").isNotNull())
@@ -222,18 +232,20 @@ def run():
         .withColumn("kline_timestamp", (col("kline_start") / 1000).cast("timestamp"))
         .withColumn("ingested_at", current_timestamp())
         .withWatermark("kline_timestamp", "2 minutes")
-        .dropDuplicates(["symbol", "kline_start"])
+        .dropDuplicates(["exchange", "symbol", "kline_start"])
     )
 
-    klines_df.writeStream \
-        .format("iceberg") \
-        .outputMode("append") \
-        .trigger(processingTime="1 minute") \
-        .option("checkpointLocation", CHECKPOINT_KLINES) \
+    klines_query = (
+        klines_df.writeStream
+        .format("iceberg")
+        .outputMode("append")
+        .trigger(processingTime="1 minute")
+        .option("checkpointLocation", CHECKPOINT_KLINES)
         .toTable(ICEBERG_TABLE_KLINES)
+    )
 
+    # Block indefinitely so the JVM stays alive and processes records
     spark.streams.awaitAnyTermination()
-
 
 if __name__ == "__main__":
     run()

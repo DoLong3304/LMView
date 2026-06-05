@@ -32,7 +32,7 @@ class TestTradesEndpoint:
     async def test_get_trades_found(self):
         """Returns formatted trade data from KeyDB sorted set."""
         mock_r = _make_mock_redis(trade_data={
-            "ticker:history:BTCUSDT": [
+            "ticker:history:binance:BTCUSDT": [
                 ("50100.0:1.5", 1700000003000),
                 ("50050.0:2.0", 1700000002000),
                 ("50000.0:1.0", 1700000001000),
@@ -43,7 +43,7 @@ class TestTradesEndpoint:
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/trades/BTCUSDT?limit=3")
             assert resp.status_code == 200
-            data = resp.json()
+            data = resp.json()["trades"]
             assert len(data) == 3
             # Reversed to chronological order
             assert data[0]["time"] == 1700000001000
@@ -54,7 +54,7 @@ class TestTradesEndpoint:
     async def test_get_trades_side_detection(self):
         """Side is inferred from price movement (buy=up, sell=down)."""
         mock_r = _make_mock_redis(trade_data={
-            "ticker:history:ETHUSDT": [
+            "ticker:history:binance:ETHUSDT": [
                 ("3010.0:1.0", 1700000003000),  # down from previous → sell
                 ("3020.0:1.0", 1700000002000),  # up from previous → buy
                 ("3000.0:1.0", 1700000001000),  # first (from most recent) → buy
@@ -64,7 +64,7 @@ class TestTradesEndpoint:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/trades/ETHUSDT?limit=3")
-            data = resp.json()
+            data = resp.json()["trades"]
             # After reversal: chronological order
             # The side logic operates on reversed data before chronological sort
             assert all(t["side"] in ("buy", "sell") for t in data)

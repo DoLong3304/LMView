@@ -33,7 +33,7 @@ class TestAppStartup:
             "/api/trades/{symbol}",
             "/api/symbols",
             "/api/indicators/{symbol}",
-            "/api/stream",
+            "/api/stream/all",
         ]
         for path in expected_paths:
             assert path in route_paths, f"Missing route: {path}"
@@ -41,8 +41,8 @@ class TestAppStartup:
     @pytest.mark.asyncio
     async def test_app_metadata(self):
         """Application metadata is correctly configured."""
-        assert app.title == "CryptoDashboard API"
-        assert app.version == "1.0.0"
+        assert app.title == "LMView API"
+        assert app.version == "0.18.0"
 
     @pytest.mark.asyncio
     async def test_openapi_schema_accessible(self):
@@ -52,7 +52,7 @@ class TestAppStartup:
             resp = await ac.get("/openapi.json")
         assert resp.status_code == 200
         schema = resp.json()
-        assert schema["info"]["title"] == "CryptoDashboard API"
+        assert schema["info"]["title"] == "LMView API"
 
     @pytest.mark.asyncio
     async def test_docs_endpoint(self):

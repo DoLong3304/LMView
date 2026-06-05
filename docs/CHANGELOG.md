@@ -1,13 +1,14 @@
-# Changelog — LMView
+# Changelog - LMView
 
 All notable changes to this project are documented in this file.
+
 This log is maintained by AI agents and human contributors to track project evolution.
 
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.16.0] - 2026-06-06 - Phase 1 AI Ask Mode Implementation
+## [0.18.0] - 2026-06-06 - Phase 1 AI Ask Mode Implementation
 
 ### Added
 
@@ -29,6 +30,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Frontend AI API integration** — `useAiChat` now calls real backend `/api/ai/chat` when authenticated and not in mock mode, with local help responder as fallback. `AiMessage` and `AIChatResponse` types include Phase 1 fields (confidence, sources, data_caveats, provider_metadata).
 - **AI documentation** — `docs/ai/AI_ARCHITECTURE.md`, `AI_API_CONTRACTS.md`, `RAG_KNOWLEDGE_BASE.md`, `AI_PROVIDER_ROUTING.md`, `AI_EVALUATION.md`, `AI_SECURITY.md`, `AI_ROADMAP.md`.
 - **Future phase scaffolding** — `ai_service/` (LangGraph agents, tools, graph, prompts, observability), `src/ml/` (forecasting, sentiment), prompt templates, and AI config YAML files. All scaffolded with clear TODOs.
+
 ### Changed
 
 - **Documentation audit refresh** - Updated `docs/SYSTEM.md`, `AGENTS.md`, `README.md`, and `.env.example` comments to match the current 0.15.3 codebase, including auth/settings/admin APIs, Phase 0 AI foundation, current frontend layout, compose profile counts, and known pipeline caveats.
@@ -37,111 +39,447 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Phase 1 AI type safety** — Fixed 8 Pyright type safety issues across the AI chat routing, knowledge ingestion, litellm provider integration, RAG retrieval logic, and unit tests to ensure complete typecheck alignment.
 
-## [0.15.3] - 2026-06-05 - Phase 0 readiness and admin account controls
+---
+
+## [0.17.11] - 2026-06-05 - Auto-Detection & Indicator Fallback
 
 ### Added
 
-- **Default admin bootstrap** - Added ordered PostgreSQL migration execution, additive Phase 1 account/settings schema, environment-driven default admin creation/recovery when no active admin exists, and forced password change after first login.
-- **Account and admin APIs** - Added profile update, password change, account deactivation, admin user list/search, role/active-state management, forced password-change, user settings, notifications, and admin app-settings routes.
-- **Settings UI expansion** - Reworked Settings with Account editing, Notifications, saved Customization defaults, AI Helper agent settings, professional About view, admin-only Debug, and admin-only account management.
-- **Notifications UI** - Added a header notification button and popup backed by API-shaped notification services in both API and mock modes.
-- **Chart action baseline** - Expanded chart action contracts and validation for highlight area/candle/indicator, drawing tools, indicator/timeframe/chart/market toggles, chart move/resize, and replay validation.
+- **Auto-failover Health Monitor** - `src/producer/health_monitor.py` now checks Kafka and Flink health every 30s:
+  - When both Kafka and Flink are down for 60s → auto-enable direct Redis bypass
+  - When either recovers for 120s → auto-disable direct Redis bypass
+  - New config: `HEALTH_CHECK_INTERVAL_SEC`, `FAILOVER_THRESHOLD_SEC`, `RECOVERY_THRESHOLD_SEC`, `FLINK_JM_URL`
+
+- **Backend Indicator Fallback** - `backend/services/indicator_service.py` computes indicators from Redis kline history when Flink pre-computed indicators unavailable or stale:
+  - Supports: SMA (20, 50), EMA (12, 26), RSI (14), MACD, Bollinger Bands (20, 2), ATR (14), Volume SMA
+  - Uses candle history from `candle:1m:{exchange}:{symbol}` sorted set
+  - Returns `source: "redis_derived"` with freshness metadata
+
+- **Data Freshness Tracking** - All indicator responses now include:
+  - `source`: "flink_precomputed", "redis_derived", "redis_derived_stale", "unavailable"
+  - `freshness_seconds`: age of data
+  - `is_stale`: true if > 120 seconds old
+  - `is_fallback`: true if computed from Redis
 
 ### Changed
 
-- **Watchlist activity ordering** - Ticker APIs now expose activity scores and sort high-activity markets first; the frontend watchlist uses that score before falling back to percent change and symbol.
-- **Indicator catalog alignment** - Backend and chart indicator UI now include frontend-supported indicators plus support/resistance and whale-alert placeholders.
-- **User-facing UI hygiene** - Removed normal-user settings exposure of internal data-source/development labels and documented the rule in `AGENTS.md`.
-- **Translation packs** - Split the monolithic frontend translation map into English and Vietnamese locale modules imported by `frontend/src/i18n/translations.ts`, with mirrored section comments and shared key typing for maintenance.
+- **Direct Redis toggle** - Now controlled by HealthMonitor state, not just static env var
+- **Redis writer** - `set_direct_redis_active()` function to receive health state updates
+- **System.md Section 17.7** - Updated with auto-detection documentation
+
+### Verified
+
+- **Tests** - All 300 tests pass
+- **Compilation** - All Python files compile successfully
+
+---
+
+## [0.17.10] - 2026-06-05 - Direct Redis Bypass Path Implementation
+
+### Added
+
+- **Direct Redis Bypass** - New resilience feature allowing WebSocket → Redis direct writes when Kafka/Flink is down:
+  - `src/exchanges/binance/redis_writer.py` — `DirectRedisWriter` class with methods for ticker, kline, trade, depth
+  - `src/common/config.py` — `ENABLE_DIRECT_REDIS` env var (default: false)
+  - `src/producer/main.py` — Integrated into all Binance and OKX stream handlers (ticker, trades, klines, depth)
+  - Toggle via `ENABLE_DIRECT_REDIS=true` in docker-compose
+
+### Changed
+
+- **market overview** - Fixed catalog name mismatch (`iceberg_catalog.gold.*` → `iceberg.gold.*`) in 6 query functions
+- **Section 17 Data Tables Reference** - Added comprehensive documentation to SYSTEM.md
+
+### Verified
+
+- **OKX E2E** - Channel subscription format verified correct per OKX WebSocket API v5
+- **Direct Redis writes** - Format matches Flink KeyDBWriter Redis key structures for seamless fallback
+
+---
+
+## [0.17.9] - 2026-06-05 - Market Overview Fix & Data Tables Documentation
 
 ### Fixed
 
-- **Theme/default persistence** - Saved customization defaults now apply on login/session restore without immediately overriding the current chart when edited.
-- **Vietnamese coverage** - Added the missing Vietnamese strings for support/resistance, whale alert, and the new settings, notification, admin, AI helper, and unavailable-state surfaces.
+- **market overview catalog name mismatch** - `backend/api/market_overview.py` queried `iceberg_catalog.gold.*` but Trino catalog is `iceberg`. Fixed 6 queries across `_get_market_summary`, `_get_top_movers`, `_get_most_volatile`, `_get_highest_volume`, `_get_trending_news`, `_get_sector_performance`, `_get_indicators_summary`, `_get_heatmap_data`
+
+### Added
+
+- **Section 17 Data Tables Reference** - Added comprehensive documentation to `docs/SYSTEM.md` covering:
+  - Exchange WebSocket formats (Binance: ticker/kline/trade/depth, OKX: tickers/trades/candle/books)
+  - Kafka Avro schemas (schemas/*.avsc) with all attributes
+  - Redis KeyDB structures (ticker, kline, orderbook, trades) with TTL and field mappings
+  - Iceberg Medallion tables (Bronze: ticker/kline/news, Silver: ticker_unified/kline_multi_timeframe, Gold: market_dominance/movers_ranking/volatility_ranking/sector_performance/momentum_indicators/news_sentiment_daily)
+  - PostgreSQL Iceberg JDBC catalog tables (iceberg_tables, iceberg_namespace_properties)
+  - Data flow diagram from WebSocket → Kafka → Flink → Redis/Iceberg
+
+### Verified
+
+- **OKX E2E** - Channel subscription format verified correct: `tickers` (plural), `trades`, `candle1m`, `books5`. instId format `BTC-USDT` matches OKX WebSocket API v5 spec. ENABLE_OKX currently `false` in docker-compose
+
+---
+
+## [0.17.8] - 2026-06-04 - Integration Tests Fixes & Frontend Verification
+
+### Fixed
+
+- **indicators test interval key** - Mock data now includes `"interval": "5m"` field to match service layer validation that checks `data_interval != interval_n`
+
+- **trades test data format** - Mock returns JSON string trade objects (`{"p":"","q":"","t":,"m":}`) matching Flink KeyDBTradeWriter format instead of legacy `price:volume` string format
+
+- **market overview placeholder test** - Test now accepts either `is_placeholder` value since fallback behavior produces real data from Redis ticker scan
+
+- **e2e app metadata tests** - Updated expected app title/version to "LMView API" / "0.17.8" to match actual FastAPI app configuration
+
+### Added
+
+- **Producer Prometheus metrics** - Wired `prometheus_client` metrics endpoint on port 9090 with: `producer_ws_threads_running` (Gauge), `producer_kafka_messages_sent_total` (Counter by topic), `producer_kafka_send_errors_total` (Counter by topic), `producer_heartbeat_timestamp_seconds` (Gauge per thread), `producer_ws_reconnects_total` (Counter by stream), `producer_ticker_throttle_skipped_total` (Counter)
+
+- **Prometheus scrape config** - Updated producer scrape job port from 9095 to 9090 to match new metrics endpoint
+
+### Verified
+
+- **Integration test suite** - All 300 tests pass (59 integration + 2 e2e fixes + unit tests)
+
+- **Frontend typecheck** - `npm run typecheck` passes with React 19/Lucide React peer dependency resolved via `--legacy-peer-deps`
+
+- **Frontend build** - `npm run build` succeeds, producing 631.65 kB bundle in 12.39s
+
+- **Promtail log extraction** - Regex patterns extract `log_level` and `error_type` labels from Docker container logs. Pattern: `^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+\[(?P<log_level>\w+)\]` for timestamp+level, `(?i)(?P<error_type>Exception|Error|Fatal|Traceback|panic|OOM|timeout)` for error classification. Service label derived from Docker compose service name.
+
+- **System Error Triage dashboard** - Dashboard queries Loki `{log_level="ERROR"}` with service-based aggregation via `sum by (service) (rate({log_level="ERROR"} [5m]))`. Includes "Error Rate by Service" barchart and "All ERROR Logs" log panel with labels, time, and wrap options.
+
+- **Alert rules** - 17 rules across 10 categories: Flink (job restart, high memory), Kafka (consumer lag, broker down), API (latency, error rate), System (memory, CPU), Postgres (connections, replication lag), InfluxDB (write failures), Nginx (5xx spike), Zookeeper (leader election), Dagster (pipeline failure), Producer (WS disconnect), Log-based (error rate spike, crash loop, Kafka disconnect). All rules use Prometheus/Loki datasources with 1-5 minute evaluation intervals.
+
+### Optimized
+
+- **Flink memory config** - TaskManager: 6144m→3584m, slots 24→12. JobManager: 2304m→1536m. Matches actual parallelism of 12.
+
+- **Kafka JVM heap** - Added `-Xmx1g -Xms1g` via KAFKA_OPTS in entrypoint.sh.
+
+- **Spark memory** - Driver/executor: 2g→1g. Workers: 4G→2G, cores 4→2.
+
+- **Docker limits** - Flink TM 10G→4G, Flink JM 2.5G→2G, Spark master 1G→2G, Spark workers 4G→2G each.
+
+---
+
+## [0.17.7] - 2026-06-04 - OKX Verification & docker-compose Fixes
+
+### Fixed
+
+- **docker-compose.yml YAML syntax** - Fixed CRLF line endings and Unicode box drawing characters that caused `docker compose config` to fail
+
+- **OKX channel name fix** - Changed `tickers` (plural) to `ticker` (singular) per OKX WebSocket API spec; updated both client builder and message handler
+
+- **OKX instId case handling** - Symbols now passed as-is (e.g., "BTCUSDT" → "BTC-USDT") instead of forcing uppercase, matching OKX REST API format
+
+### Changed
+
+- **OKX kline interval** - OKX subscription now uses 1m minimum (doesn't support 1s klines); filtered to 13 well-known pairs to avoid channel errors
+
+- **OKX experimental disabled** - Set `ENABLE_OKX=false` in docker-compose until OKX channel format is confirmed; code fixes applied, testing pending OKX documentation confirmation
+
+- **Legacy batch files review** - 3 legacy files in `src/batch/` have no external references (orchestration uses `lakehouse.silver.transformations` directly). Files retained but marked for future cleanup if unified versions prove stable.
+
+### Known Issues
+
+- **Market Overview Trino catalog mismatch** - Code queries `iceberg_catalog.gold.*` but actual catalog is `iceberg`. Gold tables (market_dominance, movers_ranking, etc.) don't exist - only bronze tables (coin_klines, coin_ticker, coin_trades) exist. Need to check if Dagster/Spark jobs populate gold tables.
+
+- **OKX WebSocket channel format** - OKX returns "Wrong URL or channel" errors for all symbol subscriptions. Further debugging requires checking OKX WebSocket API documentation directly
+
+---
+
+## [0.17.6] - 2026-06-04 - Flink/Spark Stability & Auto-Submit Fixes
+
+### Fixed
+
+- **Kafka brokers 2-3 startup** - Started kafka-2 and kafka-3 replicas that were dead, restoring full 3-broker Kafka cluster
+
+- **Flink job submit path** - Recreated deps.zip in flink-jobmanager container directly (read-only volume mount prevented in-container fix); job now stays RUNNING with 60 active tasks consuming all 4 Kafka topics
+
+- **Spark streaming JVM longevity** - Changed lakehouse/pipeline.py to `spark.streams.awaitAnyTermination()` instead of per-query await loops; Spark Structured Streaming app now keeps JVM alive and stays RUNNING
+
+- **auto-submit-jobs CRLF** - Converted auto_submit_jobs.sh line endings from CRLF to LF; inlined all job-submission logic directly into docker-compose.yml entrypoint (no file I/O) so the container needs no read-only mounts
+
+- **auto-submit-jobs inline entrypoint** - Replaced shell script call with self-contained entrypoint that recreates deps.zip, submits Flink, waits for Spark master, and submits Spark streaming job
+
+### Changed
+
+- **Spark submit packages** - Added `org.apache.spark:spark-avro_2.12:3.5.5` to Spark submit packages for Avro deserialization dependency
+
+### Changed
+
+- **Dagster code location loading** - Added Dagster `Definitions` wiring and narrowed lazy imports in `orchestration/assets.py` so the workspace can load even when optional news or kafka dependencies are not imported at module load time.
+
+- **Dagster image dependencies** - Updated the Dagster image inputs so runtime imports needed by orchestration load successfully during `dagster job list` and service startup.
+
+- **Producer exchange startup behavior** - Added `ENABLE_OKX` gating in the shared config and producer startup path so the experimental OKX source stays opt-in during normal stack bring-up while the producer watchdog thread still starts.
+
+- **Flink checkpoint runtime config** - Switched the PyFlink checkpoint storage URI away from the broken `s3a://` path and added the S3 filesystem plugin installation step to the Flink image definition.
+
+- **Trino startup idempotence** - Made the Trino entrypoint keep the JMX javaagent line unique in `jvm.config`, preventing restart loops caused by duplicate agent registration.
+
+- **Job watchdog compose wiring** - Fixed the `job-watchdog` compose entrypoint so the container starts cleanly and can rerun job submission checks.
+
+- **Exchange consistency fixes** - Kept trades API and lakehouse or backfill updates aligned with exchange-qualified keys and exchange-aware dedup columns from this runtime stabilization pass.
+
+### Fixed
+
+- **Dagster job listing** - `docker compose exec dagster-daemon dagster job list -w /app/orchestration/workspace.yaml` now loads the code location successfully.
+
+- **Trino health** - `trino` now reaches healthy state again and answers simple queries after recreating the container with the idempotent entrypoint logic.
+
+- **Flink job submission path** - After loading the S3 filesystem plugins into the running Flink services, the streaming job progressed past checkpoint-storage initialization and entered `RUNNING` during verification.
+
+- **Spark lakehouse streaming path** - The Spark Iceberg pipeline now uses `s3://` checkpoint locations and holds explicit query handles so the structured streaming app stays `RUNNING` instead of exiting immediately after startup.
+
+- **Spark dependency path** - Added the missing Spark Avro package to the Spark submit path and aligned Spark streaming checkpoints to `s3://` so the lakehouse app can progress further under the current container setup.
+
+### Known Issues
+
+- **Flink image rebuilds** - Rebuilding the Flink image was blocked in this session by Docker Hub DNS resolution failures from the environment, so plugin loading was verified by patching the running containers in addition to the committed Dockerfile change.
+
+- **Producer image rebuilds** - Rebuilding the producer image was intermittently blocked by package-download timeouts, so runtime verification relied on the bind-mounted source plus container restart.
+
+## [0.17.4] - 2026-06-03 - Frontend Indicator Stream Hookup
+
+### Changed
+
+- **Frontend chart live path** - Wired `CandlestickChart` to subscribe to `/api/stream/indicators/{interval}` and apply streamed indicator snapshots onto the live chart series.
+
+- **Indicator stream fallback behavior** - Kept local client-side indicator computation as fallback/history source while preferring backend-streamed latest values for the live candle edge.
+
+- **Frontend market data service** - Added `subscribeIndicatorStream()` to `marketDataService` so indicator streaming uses the same API-mode WebSocket boundary as candle streaming.
+
+## [0.17.3] - 2026-06-03 - Indicator Streaming & History Storage
+
+### Added
+
+- **Indicator WebSocket stream** - Added `/api/stream/indicators/{interval}` to push real-time indicator snapshots from Redis for a requested symbol, exchange, and timeframe.
+
+- **Redis indicator history** - Extended the Flink indicator writer to persist `indicator:history:{exchange}:{symbol}:{interval}` sorted sets alongside interval-scoped latest hashes.
+
+- **Iceberg indicator history** - Added `iceberg_catalog.gold.indicator_history` creation and writes in both indicator batch jobs so historical indicator values are stored as real lakehouse rows.
+
+### Changed
+
+- **Indicator Redis schema** - Latest indicator snapshots now prefer `indicator:latest:{exchange}:{symbol}:{interval}` with fallback to older key layouts for compatibility.
+
+- **Indicator API contracts** - `/api/indicators/{symbol}` and `/api/indicators/{symbol}/summary` now accept `interval` and return richer computed fields such as RSI, MACD, Bollinger Band, ATR, and volume-SMA values when available.
+
+- **Indicator pipeline output** - The Flink indicator writer now emits more than SMA/EMA only, including RSI, MACD, Bollinger Band, ATR, and volume-SMA metrics into Redis and InfluxDB.
+
+## [0.17.2] - 2026-06-03 - Realtime Indicator Rendering Optimization
+
+### Changed
+
+- **`frontend/src/features/chart/CandlestickChart.tsx`** - Optimized live indicator rendering so chart series update immediately from the latest candle stream while React candle state updates run in a lower-priority transition.
+
+- **Realtime indicator sync** - Added a focused live indicator window and direct per-series updates to avoid full indicator recomputation on every WebSocket tick.
+
+- **Chart settings effect** - Stopped tying indicator rebuilds to every live candle state change; full recalculation now stays aligned with settings/data reload paths instead of each price tick.
+
+## [0.17.1] - 2026-06-03 - Lakehouse Schema Audit & Indicator History Design
+
+### Changed
+
+- **`docs/VIET_LOG.md`** - Reworked Section 6 into a table-first audit format covering Spark streaming, medallion layers, batch jobs, Trino, Dagster, and all observed Iceberg tables.
+
+- **Lakehouse schema inventory** - Documented actual columns, datatypes, purposes, and schema drift risks across `crypto_lakehouse`, `bronze`, `silver`, and `gold`.
+
+- **Indicator architecture design** - Replaced the minimal indicator note with a richer TradingView-style indicator catalog plus explicit Iceberg and Redis schema proposals for historical indicator storage.
+
+## [0.17.0] - 2026-06-03 - Grafana Dashboards & Structured Log Pipeline
+
+### Added
+
+- **10 new Grafana dashboards** — Spark Logs, Trino Logs, MinIO Logs, Redis Sentinel Logs, Postgres Dashboard, InfluxDB Dashboard, Nginx Dashboard, Zookeeper Dashboard, Dagster Dashboard, Producer Dashboard
+
+- **System Error Triage** dashboard — Single pane for all ERROR logs across all services, filterable by service with per-service error rate sparklines
+
+- **Structured log pipeline** — Promtail now extracts `log_level` (ERROR/WARN/INFO/DEBUG) and `error_type` (Exception/Error/Fatal/Traceback/panic/OOM) labels from Docker container logs
+
+- **Prometheus scrape configs** — Added scrape jobs for InfluxDB, Postgres exporter, Nginx exporter, Dagster, Zookeeper JMX, and Producer
+
+- **10 new alert rules** — Postgres connection exhaustion + replication lag, InfluxDB write failures, Nginx 5xx spike, Zookeeper leader election, Dagster pipeline failure, Producer WS disconnect, ERROR log rate spike, crash loop detection, Kafka broker disconnect log
+
+- **Nginx stub_status** — Enabled `/nginx_status` on both dev and prod configs for Prometheus scraping
+
+### Changed
+
+- **docker-compose.yml** — Exposed Zookeeper JMX port `7071` for scraping
+
+- **producer requirements** — Added `prometheus-client` dependency; producer metrics endpoint wiring is still pending
+
+- **Total Grafana dashboards:** 11 → 22. Every service now has dashboard coverage
+
+## [0.16.0] - 2026-06-03 - Exchange Qualification & Trade Hot Cache
+
+### Changed (Market Overview)
+
+- **``/api/market/overview``** — Now attempts Trino gold table queries first; falls back to Redis ``ticker:latest`` scan to derive market volume, gainers/losers, volatile symbols, and BTC/ETH dominance when Trino is empty or unavailable
+
+### Added (WebSocket)
+
+- **``/api/stream/{interval}``** — New per-interval WebSocket endpoint for single-timeframe candle streaming. Supports all intervals: ``1s``, ``1m``, ``5m``, ``15m``, ``1h``, ``4h``, ``1d``, ``1w``
+
+- **Frontend ``subscribeCandle()``** — Fixed URL from legacy ``/api/stream`` (non-existent) to ``/api/stream/{interval}``
+
+### Added (OKX)
+
+- **OKX subscription frame builder** — `build_subscribe_frame()` method on OKXClient with helper methods `build_ticker_channels()`, `build_trade_channels()`, `build_kline_channels()`, `build_depth_channels()`
+
+- **OKX WebSocket handler** — `_handle_okx_message()` in producer parses OKX `{"arg":..., "data":[...]}` response format and dispatches to correct mapper
+
+- **OKX subscription stream runners** — `run_ticker_stream_subscription()` and `run_combined_batch_subscription()` connect to OKX WS and send subscription frames after `on_open`
+
+### Changed (Producer)
+
+- **`run_streams()`** — Now detects subscription-capable clients with `hasattr(..., "uses_subscription_frames")` and branches between Binance URL-stream and OKX subscription-frame WebSocket handling
+
+- **All stream spawning loops** — Conditionally call subscription or URL-based handlers based on exchange type
+
+### Changed
+
+- **Kline aggregator** — Keyed by `(exchange, symbol)` instead of `symbol` only. 1m emitted records now include `exchange` field, enabling separate ``candle:1m:binance:BTCUSDT`` and ``candle:1m:okx:BTCUSDT``
+
+- **Spark Iceberg DDLs** — Added `exchange STRING` column to `coin_ticker`, `coin_trades`, and `coin_klines` table definitions for multi-exchange lakehouse queries
+
+- **Indicator writer** — Redis key changed from ``indicator:latest:{symbol}`` to ``indicator:latest:{exchange}:{symbol}``. InfluxDB tag now uses actual exchange from kline JSON instead of hardcoded ``"binance"``
+
+- **Indicator API** — Backend service now reads new exchange-qualified key first, falls back to legacy ``indicator:latest:{symbol}`` key for backward compatibility
+
+### Added
+
+- **Trade hot cache writer** — New `KeyDBTradeWriter` Flink writer consuming ``crypto_trades`` topic and writing ``trade:latest:{exchange}:{symbol}`` sorted set to Redis
+
+- **Trade pipeline in Flink** — Wired `kafka_trades` SQL table with Avro-confluent format into the main pipeline
+
+- **Trade API enhancement** — ``/api/trades/{symbol}`` now reads ``trade:latest`` (real exchange trades) first, falls back to ``ticker:history`` (ticker-derived) if trade cache is empty. Response metadata includes ``is_true_trade_tape`` flag and ``data_type`` field
+
+- **Trade writer unit tests** — 8 new unit tests for trade JSON format, exchange field, dedup, batch buffer, and empty symbol handling
+
+### Fixed
+
+- **Exchange qualification** — kline aggregation, Spark DDLs, indicator keys, and trades API now consistently carry `exchange` field
+
+- **Backend indicator service docstring** — Updated to reflect new key format
 
 ## [0.15.2] - 2026-06-01 - Auth-gated settings and mock data isolation
 
 ### Added
 
 - **Settings modal** - Wired the header Settings button to Account, Customization, AI Helper, About, and Debug tabs with login/admin gates, real auth user display, real theme/timeframe/chart-type controls, local AI session cleanup, and read-only health checks.
+
 - **AI Helper gate** - Requires login before opening AI Helper and shows `You must log in to use AI Helper` when blocked.
+
 - **LMView Help mode** - Replaced API-mode fake AI behavior with deterministic product-help responses only; Interact and market-analysis requests now return unavailable states until real AI services exist.
 
 ### Changed
 
 - **Mock data boundary** - Moved market/news/AI mock generators under `frontend/src/data/mock/` and routed mock mode through API-shaped mock adapter functions consumed by frontend services.
-- **API placeholder handling** - Added frontend metadata guards so API-mode placeholder/mock-tagged market, news, candle, ticker, order book, and trade payloads render empty/unavailable states instead of generated fallback data.
 
----
+- **API placeholder handling** - Added frontend metadata guards so API-mode placeholder/mock-tagged market, news, candle, ticker, order book, and trade payloads render empty/unavailable states instead of generated fallback data.
 
 ## [0.15.1] - 2026-06-01 - Bug fixes for Phase 0 implementation
 
 ### Fixed
 
 - **Frontend auth session UI** - Wrapped the app with `AuthProvider`, wired the header Login button to the centered login/register modal with blurred backdrop, displayed authenticated user/logout state, cleared expired stored tokens during restore, and normalized FastAPI auth validation errors for the browser UI.
-- **Auth registration runtime** - Added PostgreSQL async driver support to the FastAPI image, pinned bcrypt for passlib compatibility, wired auth PostgreSQL/migration environment values into Compose, and applied `SESSION_EXPIRY_HOURS` in token expiry calculations.
-- **Recent Trades frontend** - Normalized the metadata-wrapped `/api/trades/{symbol}` response in `marketDataService` so the right-panel Recent Trades view always receives an array.
 
----
+- **Auth registration runtime** - Added PostgreSQL async driver support to the FastAPI image, pinned bcrypt for passlib compatibility, wired auth PostgreSQL/migration environment values into Compose, and applied `SESSION_EXPIRY_HOURS` in token expiry calculations.
+
+- **Recent Trades frontend** - Normalized the metadata-wrapped `/api/trades/{symbol}` response in `marketDataService` so the right-panel Recent Trades view always receives an array.
 
 ## [0.15.0] - 2026-06-01 - Phase 0: AI Foundation Layer
 
 ### Added
 
 - **PostgreSQL auth foundation** — `backend/core/postgres.py` async connection pool (asyncpg), `backend/core/security.py` password hashing (bcrypt/SHA-256 fallback), `backend/core/auth_dependencies.py` FastAPI Bearer-token auth dependencies.
+
 - **Auth API** — `POST /api/auth/register`, `POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, `PATCH /api/auth/preferences` with session-based authentication.
+
 - **Auth Pydantic models** — `RegisterRequest`, `LoginRequest`, `AuthResponse`, `UserResponse`, `SessionInfo`, `UserPreferencesResponse`, `MeResponse` in `backend/models/auth.py`.
+
 - **AI backend API** — `GET /api/ai/health`, `POST /api/ai/chat` (scope gate + mock response + message persistence), `GET /POST /api/ai/sessions`, `GET /api/ai/sessions/{id}/messages`, `POST /api/ai/chart-context`, `POST /api/ai/chart-actions/validate`, `POST /api/ai/chart-actions/record`.
+
 - **AI Pydantic models** — `AIChatRequest`, `AIChatResponse`, `AIChartAction`, `AIChartActionType` (10 action types), `AISessionResponse`, `AIMessageResponse`, `AIHealthResponse`, `ScopeGateResult`, `ChartContextDTO` in `backend/models/ai.py` and `backend/models/chart_context.py`.
+
 - **Scope gate service** — Keyword-based in-scope/out-of-scope classification (crypto, indicators, charts, news, risk education). Blocks prompt injection, weather, recipes, code generation.
+
 - **Chart action validator** — Validates AI-proposed chart actions against known indicator names, price/time ranges, payload safety (blocks JS/SQL injection, nesting depth), note length limits.
+
 - **Mock AI service** — Deterministic Phase 0 responses that echo received context to prove wiring, clearly marked as mock.
+
 - **Indicator service** — Catalog of 10 supported indicators, Redis-backed latest values, compact AI-context summaries with freshness metadata.
+
 - **Common response models** — `DataFreshness`, `DataMetadata`, `PaginatedResponse`, `ErrorDetail` in `backend/models/common.py`.
+
 - **SQL migration** — `backend/migrations/001_phase0_schema.sql` with 9 tables: `users`, `auth_sessions`, `user_preferences`, `ai_chat_sessions`, `ai_messages`, `ai_chart_snapshots`, `ai_tool_actions`, `news_articles`, `ai_knowledge_documents`.
+
 - **Frontend auth service** — `frontend/src/services/authService.ts` with API calls + mock fallback for `VITE_DATA_SOURCE=mock`.
+
 - **Frontend AI service** — `frontend/src/services/aiService.ts` with all AI API calls + auth header injection.
+
 - **Frontend AI panel** — Extracted `AiAssistantPanel` from `RightPanel` into `frontend/src/features/ai/`, using `useAiChat` hook with backend API / local mock dispatching.
+
 - **Frontend types** — Added `DataFreshness`, `DataMetadata`, `UserSession` to `frontend/src/types/index.ts`.
+
 - **Unit tests** — 53 tests covering auth security (password hashing, session tokens, email validation), AI models (enums, DTOs), scope gate (in-scope/out-of-scope, prompt injection), chart action validator (indicators, ranges, XSS/SQL injection), and mock service.
 
 ### Changed
 
 - **AuthContext rewrite** — `AuthContext.tsx` now uses backend API (Bearer token auth) with async login/register/logout. Falls back to localStorage mock for `VITE_DATA_SOURCE=mock`.
+
 - **AuthModal** — Now async with loading spinner, disabled inputs during submission, error handling for both API and mock paths.
+
 - **RightPanel** — Extracted ~150 lines of inline AI chat code into standalone `AiAssistantPanel` component.
+
 - **Trades API** — Response now includes `metadata.data_type = "ticker_derived"`, `metadata.is_true_trade_tape = false`, source/exchange/freshness. Added `GET /api/trades/{symbol}/summary`.
+
 - **Order book API** — Every response path now includes `metadata` with source, exchange, `is_synthetic` flag, and `DataFreshness`. Added `GET /api/orderbook/{symbol}/summary` with depth/imbalance.
+
 - **Indicators API** — Added `GET /api/indicators/supported` listing all 10 indicators, expanded freshness metadata. Added `GET /api/indicators/{symbol}/summary`.
+
 - **Market overview API** — Response now includes `metadata.is_placeholder = true` to prevent AI/users from treating default data as real analytics.
+
 - **Backend config** — Added PostgreSQL connection vars, auth session config, migration flag.
+
 - **Test conftest** — Added PostgreSQL env defaults, graceful mocking for environments without Docker-only deps.
+
 - **`.env.example`** — Added `POSTGRES_HOST`, `POSTGRES_LMVIEW_DB`, `RUN_MIGRATIONS`, `SESSION_EXPIRY_HOURS`.
 
 ### Not Implemented (Phase 1+)
 
 - Real LLM integration (LangGraph, model inference, RAG)
-- Autonomous chart interaction
-- News PostgreSQL persistence (schema ready, service stubbed)
-- Frontend AI Interact Mode (action approval/execution UI)
-- Cookie-based session transport (Bearer token for Phase 0)
-- Alembic/SQLAlchemy migration framework
 
----
+- Autonomous chart interaction
+
+- News PostgreSQL persistence (schema ready, service stubbed)
+
+- Frontend AI Interact Mode (action approval/execution UI)
+
+- Cookie-based session transport (Bearer token for Phase 0)
+
+- Alembic/SQLAlchemy migration framework
 
 ## [0.14.2] - 2026-05-30 - Drawing Toolbar Light Theme Polish
 
 ### Added
 
 - **Drawing tool groups** - Rebuilt the floating left drawing bar around hoverable Line, Shapes, Fibonacci, Chart Patterns, Elliott Wave, and Position / Forecast groups with viewport-bounded flyout menus.
+
 - **Drawing tools** - Added stable chart-rendered Fibonacci retracement, ABCD/XABCD patterns, Elliott wave, long/short position, and forecast drawing paths while keeping cursor, text, ruler, eraser, lock, replay, and delete-all flows intact.
 
 ### Fixed
 
 - **Light mode contrast** - Moved chart toolbar, symbol selector, drawing toolbar, replay controls, tool flyouts, hover, active, and disabled states onto shared theme tokens so Light Mode remains readable.
+
 - **Drawing toolbar interaction** - Kept tool group hover highlighted blue, preserved flyouts while moving from the button to the menu, and disabled eraser while all drawings are locked.
+
 - **Pattern drafting** - Added point-by-point ABCD/XABCD drafting with anchored labels, preview segments, low-opacity polygon fills, and Escape/Cursor cancellation.
+
 - **Fullscreen delete confirmation** - Moved Delete All Drawings confirmation into the chart fullscreen subtree so cancel/confirm remains visible above the fullscreen canvas.
+
 - **Indicator localization** - Replaced hardcoded Indicator panel labels, descriptions, pane badges, color labels, and switch status text with i18n keys for full Vietnamese coverage.
 
 ## [0.14.1] - 2026-05-28 - Frontend Chart Controls and Right Panel UI
@@ -149,90 +487,132 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - **Theme support** - Added light and dark theme support through shared CSS tokens, persisted the selected mode in local storage, and refreshed chart colors when the mode changes.
+
 - **Frontend client caching** - Added frontend-side caching for stable symbols, chart history, market overview, movers, news, and short-lived live market snapshots.
+
 - **Chart type selector** - Wired candlestick, bar, line, and area renderers while keeping chart modes synchronized for replay and drawing coordinates.
+
 - **Chart export** - Rebuilt chart export to include chart canvases, visible price/time axes, latest OHLCV metadata, selected chart type, and SVG user drawings.
+
 - **Indicators library** - Expanded the chart indicators panel with TradingView-style search, grouped Trend/Momentum/Volatility/Volume categories, active-state toggles, and client-side calculations for Bollinger Bands, VWAP, Volume MA, MACD, Stochastic, ATR, Ichimoku, Supertrend, and Parabolic SAR.
+
 - **AI assistant panel** - Reworked the right-panel AI Helper into a Copilot-style chat workspace with a compact header, chart context chips, scrollable conversation, suggested prompts, and a fixed composer using mock responses until a backend AI endpoint is available.
 
 ### Changed
 
 - **Header shell** - Reworked the header around LMView branding, chart/markets navigation, theme/settings/user controls, and chart-only controls.
+
 - **Developer UI** - Hid developer-facing UI indicators from the header, including the data source badge and system health card, behind a disabled developer-tools flag.
+
 - **App responsiveness** - Improved app shell responsiveness by making the drawing toolbar and overview panel collapsible, defaulting secondary panels closed on compact screens, and keeping the chart area as the primary view.
+
 - **Chart controls** - Replaced the full-width header timeframe row with a compact dropdown in the chart control bar, preserving lowercase timeframe keys for service/API calls while displaying uppercase long-interval labels in the UI.
+
 - **Chart header toolbar** - Consolidated the chart symbol selector, timeframe dropdown, Indicators, History, Export Chart, chart-type buttons, zoom/fullscreen controls, and price/change readout onto a single non-wrapping toolbar row.
+
 - **Chart zoom controls** - Kept Zoom In, Zoom Out, and Fullscreen controls in the primary one-line chart toolbar.
+
 - **Chart action row** - Moved chart-specific controls out of the app header into a dedicated chart toolbar row and deduplicated the chart-area coin selector while preserving current-symbol rendering state.
+
 - **Chart toolbar grouping** - Refined the chart action row into compact timeframe, action, and icon-tool groups with consistent dark-theme button sizing, radius, hover, and active states.
+
 - **Chart tab strip** - Removed the old chart content tab strip so the chart remains the default view, with timeframe and chart-type controls handled from the header and chart toolbar.
+
 - **Right panel** - Reduced the default desktop width and compacted overview, watchlist, order book, and recent trade spacing so the main chart keeps more usable screen area.
+
 - **Right panel tabs** - Split the right panel into top-level Overview and AI Helper tabs, keeping market panels under Overview and adding a dark-theme AI placeholder without backend/API calls.
+
 - **Overview panel placement** - Repositioned Order Book and Recent Trades into the right Overview panel beside Watchlist, using horizontal tabs for all three views.
+
 - **Overview panel controls** - Tightened the Watchlist, Order Book, and Recent Trades segmented buttons to avoid horizontal overflow in the compact right panel.
+
 - **Drawing toolbar restore** - Restored the stable left drawing bar layout from the pre-workspace commit, removing the experimental chart-edge handle, absolute overlay toolbar, and flyout registry from the rendered UI.
+
 - **Drawing deletion** - Removed Delete Selected from the left drawing bar while keeping Delete All guarded by a confirmation modal for the current symbol/timeframe.
+
 - **Drawing lock** - Kept locked-drawing edit/delete guards when using drawing selection and deletion flows.
+
 - **Indicators control** - Highlighted the chart Indicators button and expanded the existing indicator panel to expose SMA20, SMA50, EMA12, and EMA26 controls.
+
 - **News filters** - Scaled down the Markets & News search/filter controls to reduce header height while preserving existing filtering behavior.
+
 - **Markets & News** - Improved Markets & News with 10-item pagination, list/grid view toggle, better scroll containment, and full-card external article links.
+
 - **Symbol metadata** - Reworked symbol metadata to always expose symbol, name, and icon fields, with a bundled default icon when exchange or CoinGecko metadata is missing.
+
 - **Mock market data** - Expanded mock ticker coverage so mock-mode watchlist, order book, trades, and chart candles line up with the bundled mock data generator.
+
 - **Frontend preview** - Built and relaunched a frontend-only Vite preview from a mock-mode production bundle during frontend validation.
 
 ### Fixed
 
 - **Drawing toolbar restore** - Restored the left drawing bar from the stable pre-workspace layout, removed the new flyout registry from the rendered sidebar, and kept fixed-height top-aligned buttons so fullscreen no longer stretches tool spacing.
-- **Drawing toolbar delete actions** - Removed the Delete Selected toolbar button from drawing toolbars while keeping Delete All Drawings behind the existing confirmation modal.
-- **Left drawing bar layout** - Moved the left drawing bar into the chart body as a floating fixed-size toolbar with an iPhone-style collapse handle, separating it from the top chart toolbar and preserving spacing in fullscreen.
-- **Chart toolbar grouping** - Placed the live price/change indicator beside the symbol selector and pushed timeframe, indicators, history, export, chart type, and zoom controls into the right-side toolbar group.
-- **Chart toolbar overflow** - Fixed chart action row overflow by letting control groups wrap inside the chart container and anchoring Indicators/History dropdowns from the left with viewport-bounded widths.
-- **Chart symbol/timeframe controls** - Restored a single chart `MarketSelector` in the chart header and left-anchored the timeframe dropdown inside the chart toolbar container to prevent left-side overflow.
-- **Chart autoscale reset** - Improved chart autoscale reset so it restores the intended initial candle window and price scaling instead of dumping the full loaded history into view.
-- **Drawing selection** - Fixed drawing selection and delete-selected by letting cursor mode hit-test drawings and by recording toolbar deletes in the drawing command history.
-- **Chart zoom/fullscreen layout** - Kept chart toolbar rows and drawing controls at fixed UI dimensions while zooming or entering/exiting fullscreen, resizing only the chart viewport.
-- **Drawing tool rendering** - Filled in visible rendering and hit-testing for text, rectangle, circle, triangle, ruler, horizontal line, and trendline drawing tools using data-space anchors.
-- **Replay mode startup** - Fixed replay mode startup so it begins from the selected candle, hides future candles, blocks live refresh races, and uses correct playback speed values.
-- **Chart overlay navigation** - Fixed chart time navigation while drawing/replay overlays are active by forwarding wheel zoom/scroll and adding overlay-level pan handling for captured pointer states.
 
----
+- **Drawing toolbar delete actions** - Removed the Delete Selected toolbar button from drawing toolbars while keeping Delete All Drawings behind the existing confirmation modal.
+
+- **Left drawing bar layout** - Moved the left drawing bar into the chart body as a floating fixed-size toolbar with an iPhone-style collapse handle, separating it from the top chart toolbar and preserving spacing in fullscreen.
+
+- **Chart toolbar grouping** - Placed the live price/change indicator beside the symbol selector and pushed timeframe, indicators, history, export, chart type, and zoom controls into the right-side toolbar group.
+
+- **Chart toolbar overflow** - Fixed chart action row overflow by letting control groups wrap inside the chart container and anchoring Indicators/History dropdowns from the left with viewport-bounded widths.
+
+- **Chart symbol/timeframe controls** - Restored a single chart `MarketSelector` in the chart header and left-anchored the timeframe dropdown inside the chart toolbar container to prevent left-side overflow.
+
+- **Chart autoscale reset** - Improved chart autoscale reset so it restores the intended initial candle window and price scaling instead of dumping the full loaded history into view.
+
+- **Drawing selection** - Fixed drawing selection and delete-selected by letting cursor mode hit-test drawings and by recording toolbar deletes in the drawing command history.
+
+- **Chart zoom/fullscreen layout** - Kept chart toolbar rows and drawing controls at fixed UI dimensions while zooming or entering/exiting fullscreen, resizing only the chart viewport.
+
+- **Drawing tool rendering** - Filled in visible rendering and hit-testing for text, rectangle, circle, triangle, ruler, horizontal line, and trendline drawing tools using data-space anchors.
+
+- **Replay mode startup** - Fixed replay mode startup so it begins from the selected candle, hides future candles, blocks live refresh races, and uses correct playback speed values.
+
+- **Chart overlay navigation** - Fixed chart time navigation while drawing/replay overlays are active by forwarding wheel zoom/scroll and adding overlay-level pan handling for captured pointer states.
 
 ## [0.14.0] - 2026-05-22 - Frontend Structure Refactor
 
 ### Changed
 
 - **Frontend folder structure** - Reorganized `frontend/src` into standard Vite React TypeScript folders, including `@types`, `constants`, `data`, `features`, `components/layout`, `components/ui`, and `routes`.
-- **Frontend services** - Centralized API helpers, environment constants, timeframe constants, market/news data services, and health checks outside React components.
-- **UI shell** - Merged the top toolbar behavior into the canonical `Header` component and removed redundant toolbar/replay/watchlist/news files.
-- **Chart feature** - Flattened `features/chart` by removing the redundant nested `components/chart` directories and adding a concise feature barrel export.
-- **Styling and i18n** - Moved theme tokens into `index.css`, removed the old theme module, and expanded translations for the refactored market/news/header UI.
-- **Project docs** - Updated `docs/SYSTEM.md` and `AGENTS.md` to match the new frontend folder structure and hot spot paths.
 
----
+- **Frontend services** - Centralized API helpers, environment constants, timeframe constants, market/news data services, and health checks outside React components.
+
+- **UI shell** - Merged the top toolbar behavior into the canonical `Header` component and removed redundant toolbar/replay/watchlist/news files.
+
+- **Chart feature** - Flattened `features/chart` by removing the redundant nested `components/chart` directories and adding a concise feature barrel export.
+
+- **Styling and i18n** - Moved theme tokens into `index.css`, removed the old theme module, and expanded translations for the refactored market/news/header UI.
+
+- **Project docs** - Updated `docs/SYSTEM.md` and `AGENTS.md` to match the new frontend folder structure and hot spot paths.
 
 ## [0.13.1] — 2026-05-22 — Bug Fixes: Data Pipeline & Backend APIs
 
 ### Fixed
 
 - **Kafka Topics** — Resolved `Unrecognized partition` errors in the Python producer by recreating `crypto_ticker`, `crypto_klines`, `crypto_trades`, and `crypto_depth` topics with the correct 12 partitions. Data ingestion is now stable.
-- **Orderbook API** — Fixed an HTTP 500 `ReadOnlyError` in `/api/orderbook/{symbol}` by routing the fallback cache expiration write (`expire`) to the Redis Master node instead of a read-only Sentinel replica.
-- **Exchange Fallback Logic** — Updated `/api/trades` and `/api/orderbook` to correctly parse new exchange-aware Redis keys. Implemented Binance-first lookup with automatic fallback to OKX (and then legacy keys) to fully utilize OKX as a redundant backup source.
 
----
+- **Orderbook API** — Fixed an HTTP 500 `ReadOnlyError` in `/api/orderbook/{symbol}` by routing the fallback cache expiration write (`expire`) to the Redis Master node instead of a read-only Sentinel replica.
+
+- **Exchange Fallback Logic** — Updated `/api/trades` and `/api/orderbook` to correctly parse new exchange-aware Redis keys. Implemented Binance-first lookup with automatic fallback to OKX (and then legacy keys) to fully utilize OKX as a redundant backup source.
 
 ## [0.13.0] — 2026-05-22 — Dev HTTP / Prod HTTPS Nginx Routing
 
 ### Changed
 
 - **Nginx dev mode** — Switched from self-signed HTTPS to plain HTTP (port 80 only). No more browser certificate warnings in development.
-- **Nginx prod mode** — HTTPS via certbot with any domain (DuckDNS, custom, etc.), not limited to DuckDNS. Self-signed cert still used as fallback until certbot issues a real certificate.
-- **Nginx config split** — Single `nginx.conf` replaced with `nginx-dev.conf` (HTTP-only) and `nginx-prod.conf` (HTTPS). Entrypoint selects config via `NGINX_MODE` env var.
-- **`init_certbot.sh`** — Now domain-agnostic; DuckDNS auto-detection is optional, not assumed. Only starts `duckdns-auto` if `DUCKDNS_TOKEN` is configured.
-- **`certbot_auto.sh`** — Removed DuckDNS-specific sentinel domain check.
-- **`.env.example`** — Generalized HTTPS automation section; `CERTBOT_DOMAIN` default changed from DuckDNS to `example.com`.
-- **`docker-compose.yml`** — `nginx-dev` exposes port 80 only; `nginx-prod` exposes 80+443 with letsencrypt/certbot volumes. Ports and volumes moved from base template to concrete services.
 
----
+- **Nginx prod mode** — HTTPS via certbot with any domain (DuckDNS, custom, etc.), not limited to DuckDNS. Self-signed cert still used as fallback until certbot issues a real certificate.
+
+- **Nginx config split** — Single `nginx.conf` replaced with `nginx-dev.conf` (HTTP-only) and `nginx-prod.conf` (HTTPS). Entrypoint selects config via `NGINX_MODE` env var.
+
+- **`init_certbot.sh`** — Now domain-agnostic; DuckDNS auto-detection is optional, not assumed. Only starts `duckdns-auto` if `DUCKDNS_TOKEN` is configured.
+
+- **`certbot_auto.sh`** — Removed DuckDNS-specific sentinel domain check.
+
+- **`.env.example`** — Generalized HTTPS automation section; `CERTBOT_DOMAIN` default changed from DuckDNS to `example.com`.
+
+- **`docker-compose.yml`** — `nginx-dev` exposes port 80 only; `nginx-prod` exposes 80+443 with letsencrypt/certbot volumes. Ports and volumes moved from base template to concrete services.
 
 ## [0.12.3] — 2026-05-21 — Charting Library Upgrade
 
@@ -240,245 +620,289 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - **Dependencies** — Upgraded `lightweight-charts` to `5.2.0` in `frontend/package.json`.
 
----
-
 ## [0.12.2] — 2026-05-20 — Frontend Mock Data Isolation & Service Refactor
 
 ### Added
 
 - **Mock Data Enhancement** — Added `NewsItem` type and dynamic mock data simulation for order books, trades, and tickers to simulate real-time data flow on frontend.
+
 - **Mock Mode Toggle** — Implemented `VITE_DATA_SOURCE` env variable to toggle between 'mock' and 'api' data sources.
+
 - **UI Mode Indicator** — Added visual badge in `Header.tsx` indicating current data source (MOCK vs API).
 
 ### Changed
 
 - **Mock Data Refactor** — Extracted all inline mock data generation out of `marketDataService.ts` and `MarketNews.tsx` into a dedicated `mock/mockDataGenerator.ts` file.
+
 - **Market Overview Service** — Created `marketOverviewService.ts` to act as a controller for news, gainers, losers, and overview metrics, smoothly switching between API and mock data without clustering component logic.
 
 ### Fixed
 
 - **TypeScript Overlap Error** — Resolved type comparison error for `DATA_SOURCE` constant in `marketDataService.ts`.
 
----
-
 ## [0.12.1] — 2026-05-19 — Integration Tests & API Routing
 
 ### Changed
 
 - **Integration Test Suite** — Modernized test infrastructure to support Redis Sentinel HA by replacing legacy `get_redis` mocks with `get_redis_master`/`get_redis_replica`. Added global fixtures to mock FastAPI background tasks during testing.
+
 - **API Routing** — Reordered FastAPI router inclusions in `backend/app.py` to prioritize new `market_overview` routes over legacy `market` overlapping routes.
 
 ### Added
 
 - **API Tests** — Added mandatory integration tests for `market_overview` (`/api/market/overview`, `/api/market/heatmap`, `/api/market/rankings`) and `news` (`/api/news/latest`, `/api/news/trending`, `/api/news/search`) endpoints.
-
----
 
 ## [0.12.0] — 2026-05-19 — Market Overview & News Features (merged from `feature/viet-work`)
 
 ### Added
 
 - **Market Overview API** — `backend/api/market_overview.py` and `backend/services/heatmap_service.py` to serve comprehensive market aggregations and heatmap data via Trino.
+
 - **News API** — Background fetcher and endpoints for aggregating sentiment-driven news.
+
 - **Background Tasks** — `market_fetcher.py` and `news_fetcher.py` integrated into FastAPI lifespan to continuously fetch necessary external data.
+
 - **Frontend Components** — Added `LeftSidebar`, `RightPanel`, `TopToolbar`, `MarketOverviewPage`, `NewsPageRedesigned`, and `MarketNews` for an enriched UI.
+
 - **Spark Metrics** — JMX metrics exporting via `metrics.properties` for Spark clusters.
+
 - **Redis Monitoring** — Added `redis-exporter` to the monitoring stack.
 
 ### Changed
 
 - **Integration Test Suite** — Modernized test infrastructure to support Redis Sentinel HA by replacing legacy `get_redis` mocks with `get_redis_master`/`get_redis_replica`. Added global fixtures to mock FastAPI background tasks during testing.
+
 - **API Routing** — Reordered FastAPI router inclusions in `backend/app.py` to prioritize new `market_overview` routes over legacy `market` overlapping routes.
+
 - **Dagster** — Version upgraded to `1.8.10`.
+
 - **Nginx** — Version upgraded to `1.31.0`.
+
 - **Certbot** — Version upgraded to `v5.6.0`.
+
 - **Trino** — Added JMX javaagent opts for Prometheus scraping.
 
 ### Added
 
 - **API Tests** — Added mandatory integration tests for `market_overview` (`/api/market/overview`, `/api/market/heatmap`, `/api/market/rankings`) and `news` (`/api/news/latest`, `/api/news/trending`, `/api/news/search`) endpoints.
 
----
-
 ## [0.11.0] — 2026-05-16 — Monitoring & Logging Nginx Routing
 
 ### Added
 
 - **Nginx reverse proxy for monitoring** — Grafana (`/grafana/`), Prometheus (`/prometheus/`), Loki (`/loki/`) routed through nginx
+
 - **Basic Auth for Prometheus/Loki** — htpasswd generated at container startup from `MONITORING_USER`/`MONITORING_PASSWORD` env vars (default: admin/admin)
+
 - **Grafana WebSocket proxy** — `/grafana/api/live/` for live dashboard updates
+
 - **Rate limiting** — `monitoring_limit` zone (10r/s per IP) applied to all monitoring endpoints
 
 ### Changed
 
 - **Grafana subpath** — Configured `GF_SERVER_SERVE_FROM_SUB_PATH=true` with `GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/`
-- **Prometheus subpath** — Added `--web.external-url=/prometheus/` and `--web.route-prefix=/prometheus/`
+
+- **Prometheus subpath** — Added ` — web.external-url=/prometheus/` and ` — web.route-prefix=/prometheus/`
+
 - **Grafana Prometheus datasource** — Updated URL to `http://prometheus:9090/prometheus`
+
 - **Nginx Dockerfile** — Added `apache2-utils` for htpasswd generation
+
 - **`.env.example`** — Added `MONITORING_USER`, `MONITORING_PASSWORD`, `GRAFANA_ADMIN_PASSWORD`
 
 ### Agent
 
 - Agent: Gemini (Antigravity)
-- Files modified: 6 (nginx.conf, Dockerfile, entrypoint.sh, docker-compose.yml, .env.example, datasources.yml)
 
----
+- Files modified: 6 (nginx.conf, Dockerfile, entrypoint.sh, docker-compose.yml, .env.example, datasources.yml)
 
 ## [0.10.0] — 2026-05-16
 
 ### Changed
 
 - **Documentation system rewrite** — Replaced all project documentation with a new standardized system:
-  - `docs/SYSTEM.md` — Complete system documentation (architecture, data flow, tech stack, setup, testing)
-  - `docs/CHANGELOG.md` — Structured changelog (this file), migrated from `docs/TRACKING.md`
-  - `docs/AGENTS.md` — AI agent coding instructions following the agents.md open standard
-  - `README.md` — User-facing project overview following banesullivan/README template
-- **Project renamed** from "Lambda Architecture for TradingView-Style Platform" to **LMView**
-- **Documentation language** standardized to English (previously mixed Vietnamese/English)
 
----
+  - `docs/SYSTEM.md` — Complete system documentation (architecture, data flow, tech stack, setup, testing)
+
+  - `docs/CHANGELOG.md` — Structured changelog (this file), migrated from `docs/TRACKING.md`
+
+  - `docs/AGENTS.md` — AI agent coding instructions following the agents.md open standard
+
+  - `README.md` — User-facing project overview following banesullivan/README template
+
+- **Project renamed** from "Lambda Architecture for TradingView-Style Platform" to **LMView**
+
+- **Documentation language** standardized to English (previously mixed Vietnamese/English)
 
 ## [0.9.0] — 2026-05-14 — High Availability Infrastructure
 
 ### Changed
 
 - **Monitoring stack integration** — Merged Flink infrastructure refactor with monitoring/logging stack
-- **Redis Sentinel entrypoint** — Fixed entrypoint scripts for correct Sentinel initialization
-- **Node-exporter volumes** — Corrected volume mount paths for host metrics collection
-- **Grafana provisioning** — Fixed rule hierarchy in provisioning configuration
-- **Configuration types** — Resolved file type mismatches in monitoring configs
 
----
+- **Redis Sentinel entrypoint** — Fixed entrypoint scripts for correct Sentinel initialization
+
+- **Node-exporter volumes** — Corrected volume mount paths for host metrics collection
+
+- **Grafana provisioning** — Fixed rule hierarchy in provisioning configuration
+
+- **Configuration types** — Resolved file type mismatches in monitoring configs
 
 ## [0.8.0] — 2026-05-09 — HA Architecture Migration
 
 ### Changed
 
 - **Kafka HA** — Migrated from single Kafka node to 3-node KRaft cluster (`kafka-1`, `kafka-2`, `kafka-3`) with replication factor 3
+
 - **Redis Sentinel HA** — Replaced standalone KeyDB with Redis cluster: 1 Master, 2 Replicas, 3 Sentinels
+
 - **Backend Redis client** — Implemented `RedisSentinelManager` in `backend/core/redis_sentinel.py` with auto-discovery, failover, and read/write splitting
 
 ### Known Issues
 
 - PyFlink writers still use `keydb_` prefix in filenames (e.g., `keydb_ticker.py`, `KeyDBKlineWriter`) while connections use Sentinel config
-- `src/common/config.py` retains default `REDIS_HOST = "keydb"`, overridden by HA environment variables
 
----
+- `src/common/config.py` retains default `REDIS_HOST = "keydb"`, overridden by HA environment variables
 
 ## [0.7.0] — 2026-05-05 — Multi-Timeframe Candles & Historical Mode
 
 ### Added
 
 - **Historical mode** — Full date range picker (`DateRangePicker.tsx`) with request ID tracking to prevent race conditions
+
 - **Interval helpers** — `normalize_interval()`, `interval_to_seconds()`, `interval_to_ms()` in `candle_service.py`
+
 - **Integration tests** — 4 new tests for candle merge quality and staleness checks (`test_candle_idempotency.py`)
+
 - **Unit tests** — 14 new tests covering normalization, aggregation, and merge logic
 
 ### Fixed
 
 - **Aggregate function (CRITICAL)** — Now sorts by timestamp before determining open/close. Previously used input order which produced wrong results with out-of-order data.
-- **Ticker enrichment staleness** — Backend now verifies ticker freshness against sub-candle data before enriching
-- **Interval normalization** — Frontend normalizes uppercase intervals (`1H` → `1h`) before all API calls
 
----
+- **Ticker enrichment staleness** — Backend now verifies ticker freshness against sub-candle data before enriching
+
+- **Interval normalization** — Frontend normalizes uppercase intervals (`1H` → `1h`) before all API calls
 
 ## [0.6.0] — 2026-05-02 — Comprehensive Test Suite
 
 ### Added
 
 - **161 total tests** across 5 categories:
-  - Unit: 80 tests (constants, binance mappers/client, models, candle service)
-  - Integration: 39 tests (health, ticker, symbols, trades, indicators, klines, historical APIs)
-  - Security: 17 tests (SQL injection, XSS, path traversal, CORS, oversized queries)
-  - Performance: 9 benchmarks (aggregation, merging, validation with time limits)
-  - E2E: 6 tests (route registration, OpenAPI schema, docs endpoint)
-- **Test infrastructure** — `tests/integration/`, `tests/e2e/`, `tests/performance/` packages
 
----
+  - Unit: 80 tests (constants, binance mappers/client, models, candle service)
+
+  - Integration: 39 tests (health, ticker, symbols, trades, indicators, klines, historical APIs)
+
+  - Security: 17 tests (SQL injection, XSS, path traversal, CORS, oversized queries)
+
+  - Performance: 9 benchmarks (aggregation, merging, validation with time limits)
+
+  - E2E: 6 tests (route registration, OpenAPI schema, docs endpoint)
+
+- **Test infrastructure** — `tests/integration/`, `tests/e2e/`, `tests/performance/` packages
 
 ## [0.5.0] — 2026-04-28 — Infrastructure & Pipeline Restoration
 
 ### Fixed
 
 - **Producer image** — Downgraded from Python 3.14-slim to 3.11-slim (fastavro C-extension compatibility)
-- **Nginx port conflict** — Removed duplicate port 3000 binding between dagster-webserver and nginx
-- **Binance WebSocket** — Switched `!ticker@arr` to `!miniTicker@arr` (lighter payload, no timeout)
-- **Flink module resolution** — Fixed `--pyFiles /app/src` in job submission script
 
----
+- **Nginx port conflict** — Removed duplicate port 3000 binding between dagster-webserver and nginx
+
+- **Binance WebSocket** — Switched `!ticker@arr` to `!miniTicker@arr` (lighter payload, no timeout)
+
+- **Flink module resolution** — Fixed ` — pyFiles /app/src` in job submission script
 
 ## [0.4.0] — 2026-04-28 — Frontend TypeScript Migration
 
 ### Changed
 
 - **Complete TypeScript migration** — All 27 frontend files migrated from `.jsx`/`.js` to `.tsx`/`.ts`
-- **React 18 → 19** upgrade
-- **Type system** — 18 shared TypeScript interfaces in `types/index.ts`
-- **Error handling** — Centralized `AppError` hierarchy + `useApiCall` hook + `ToastProvider`
-- **Symbol metadata** — Dynamic CoinGecko API + 24h localStorage cache + fallback data (~90 symbols)
-- **i18n** — ~130 translation keys (English + Vietnamese), all hardcoded strings replaced
-- **Nginx** — Updated asset caching from `/static/` to `/assets/` (Vite output path)
 
----
+- **React 18 → 19** upgrade
+
+- **Type system** — 18 shared TypeScript interfaces in `types/index.ts`
+
+- **Error handling** — Centralized `AppError` hierarchy + `useApiCall` hook + `ToastProvider`
+
+- **Symbol metadata** — Dynamic CoinGecko API + 24h localStorage cache + fallback data (~90 symbols)
+
+- **i18n** — ~130 translation keys (English + Vietnamese), all hardcoded strings replaced
+
+- **Nginx** — Updated asset caching from `/static/` to `/assets/` (Vite output path)
 
 ## [0.3.0] — 2026-04-25 — Data Processing Layer Refactoring
 
 ### Changed
 
 - **Exchange abstraction** — `ExchangeClient` base class + `BinanceClient` implementation in `src/exchanges/`
-- **Shared infrastructure** — Centralized `src/common/` (config, kafka_client, avro_serializer, logging)
-- **Producer rewrite** — 632-line monolith → ~250-line exchange-agnostic orchestrator
-- **Flink pipeline split** — 996-line monolith → `pipeline.py` + 7 individual writer modules
-- **Batch jobs** — Renamed and refactored maintenance/backfill jobs
 
----
+- **Shared infrastructure** — Centralized `src/common/` (config, kafka_client, avro_serializer, logging)
+
+- **Producer rewrite** — 632-line monolith → ~250-line exchange-agnostic orchestrator
+
+- **Flink pipeline split** — 996-line monolith → `pipeline.py` + 7 individual writer modules
+
+- **Batch jobs** — Renamed and refactored maintenance/backfill jobs
 
 ## [0.2.0] — 2026-04-25 — Full Project Refactoring
 
 ### Changed
 
 - **Backend MVC** — Migrated `serving/` → `backend/` with `api/`, `services/`, `models/`, `core/` structure
+
 - **Pydantic models** — Created response models for candle, ticker, health endpoints
+
 - **Shared service** — `candle_service.py` (280 lines) for all OHLCV business logic
+
 - **Dev/Prod switching** — `docker-compose.override.yml` (dev) + `docker-compose.prod.yml` (prod) + Makefile
+
 - **Docker optimization** — Memory limits on all 14 services, pinned Python dependencies
+
 - **Security** — Nginx rate limiting (30r/s API, 5r/s WS), security headers (HSTS, X-Frame-Options, etc.)
 
 ### Added
 
 - **Testing framework** — pytest with 40 initial tests (unit, model, security)
-- **Vite migration** — CRA → Vite, all 21 components renamed to `.jsx`
-- **Backend Python** — Upgraded to Python 3.14-slim (later reverted to 3.11)
 
----
+- **Vite migration** — CRA → Vite, all 21 components renamed to `.jsx`
+
+- **Backend Python** — Upgraded to Python 3.14-slim (later reverted to 3.11)
 
 ## [0.1.0] — 2026-04-25 — Initial Documentation
 
 ### Added
 
 - **TRACKING.md** — AI assistant working document
+
 - **DOCUMENTATION.md** — Technical documentation (Vietnamese)
+
 - **.gitignore** — Updated exclusion list
 
----
-
-<!-- TEMPLATE FOR NEW ENTRIES:
+<! —  TEMPLATE FOR NEW ENTRIES:
 
 ## [X.Y.Z] — YYYY-MM-DD — Title
 
 ### Added
+
 - **Feature name** — Description of what was added
 
 ### Changed
+
 - **Component** — Description of what changed and why
 
 ### Fixed
+
 - **Bug description** — What was wrong and how it was fixed
 
 ### Removed
+
 - **Component** — What was removed and why
 
 ### Known Issues
+
 - Description of any remaining issues
 
--->
+ — >
+

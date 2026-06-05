@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
-    col, avg, stddev, lag, when, expr, current_timestamp, to_date, desc
+    col, avg, stddev, lag, when, expr, current_timestamp, to_date, desc, lit
 )
 from pyspark.sql.window import Window
 import logging
@@ -48,7 +48,7 @@ def create_spark_session():
 
 
 def create_indicators_table(spark: SparkSession):
-    """Create momentum_indicators table"""
+    """Create momentum_indicators and indicator_history tables."""
     spark.sql("""
         CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.momentum_indicators (
             symbol STRING NOT NULL,
@@ -76,6 +76,39 @@ def create_indicators_table(spark: SparkSession):
         )
     """)
     logger.info("Created gold.momentum_indicators table")
+
+    spark.sql("""
+        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.indicator_history (
+            exchange STRING NOT NULL,
+            symbol STRING NOT NULL,
+            interval STRING NOT NULL,
+            candle_time BIGINT NOT NULL,
+            candle_timestamp TIMESTAMP NOT NULL,
+            close_price DOUBLE,
+            volume DOUBLE,
+            rsi_14 DOUBLE,
+            macd DOUBLE,
+            macd_signal DOUBLE,
+            macd_histogram DOUBLE,
+            bb_upper DOUBLE,
+            bb_middle DOUBLE,
+            bb_lower DOUBLE,
+            bb_width DOUBLE,
+            volume_sma_20 DOUBLE,
+            price_sma_20 DOUBLE,
+            price_sma_50 DOUBLE,
+            price_ema_12 DOUBLE,
+            price_ema_26 DOUBLE,
+            computed_at TIMESTAMP NOT NULL,
+            _partition_date DATE NOT NULL
+        ) USING iceberg
+        PARTITIONED BY (_partition_date, interval, exchange)
+        TBLPROPERTIES (
+            'write.format.default' = 'parquet',
+            'write.parquet.compression-codec' = 'snappy'
+        )
+    """)
+    logger.info("Created gold.indicator_history table")
 
 
 def calculate_rsi(df, price_col="close_price", period=14):
@@ -204,6 +237,34 @@ def main():
         logger.info("Calculating SMAs...")
         df = calculate_sma(df, periods=[20, 50])
 
+        history_df = df.select(
+            lit("aggregated").alias("exchange"),
+            col("symbol"),
+            lit("1h").alias("interval"),
+            col("event_time").alias("candle_time"),
+            (col("event_time") / 1000).cast("timestamp").alias("candle_timestamp"),
+            col("close_price"),
+            col("volume"),
+            col("rsi_14"),
+            col("macd"),
+            col("macd_signal"),
+            col("macd_histogram"),
+            col("bb_upper"),
+            col("bb_middle"),
+            col("bb_lower"),
+            col("bb_width"),
+            col("volume_sma_20"),
+            col("price_sma_20"),
+            col("price_sma_50"),
+            col("ema_12").alias("price_ema_12"),
+            col("ema_26").alias("price_ema_26"),
+            current_timestamp().alias("computed_at"),
+            to_date((col("event_time") / 1000).cast("timestamp")).alias("_partition_date"),
+        )
+
+        logger.info("Writing to gold.indicator_history...")
+        history_df.writeTo("iceberg_catalog.gold.indicator_history").append()
+
         # Get latest values per symbol
         logger.info("Extracting latest indicators per symbol...")
         window_latest = Window.partitionBy("symbol").orderBy(desc("event_time"))
@@ -241,11 +302,13 @@ def main():
             .saveAsTable("iceberg_catalog.gold.momentum_indicators")
 
         count = result_df.count()
+        history_count = history_df.count()
 
         # Summary
         logger.info("=" * 80)
         logger.info("Unified Technical Indicators completed successfully")
         logger.info(f"  Calculated indicators for {count} symbols")
+        logger.info(f"  Wrote {history_count} indicator history rows")
         logger.info("=" * 80)
 
         # Show sample

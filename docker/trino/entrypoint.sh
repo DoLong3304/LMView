@@ -18,11 +18,16 @@ if [ -f "$CATALOG" ]; then
     "$CATALOG"
 fi
 
-# Append JMX agent to jvm.config (Trino reads JVM opts from this file, not CLI args)
+# Ensure the JMX agent appears exactly once in jvm.config.
 JVM_CONFIG="/etc/trino/jvm.config"
 if [ -f "$JMX_JAR" ] && [ -f "$JMX_CFG" ]; then
   JMX_PORT="${JMX_EXPORTER_PORT:-9404}"
-  echo "-javaagent:${JMX_JAR}=${JMX_PORT}:${JMX_CFG}" >> "$JVM_CONFIG"
+  JMX_LINE="-javaagent:${JMX_JAR}=${JMX_PORT}:${JMX_CFG}"
+  TMP_JVM_CONFIG="$(mktemp)"
+  grep -Fvx -- "$JMX_LINE" "$JVM_CONFIG" > "$TMP_JVM_CONFIG" || true
+  printf '%s\n' "$JMX_LINE" >> "$TMP_JVM_CONFIG"
+  cat "$TMP_JVM_CONFIG" > "$JVM_CONFIG"
+  rm -f "$TMP_JVM_CONFIG"
   echo "JMX Prometheus agent enabled on port ${JMX_PORT}"
 fi
 

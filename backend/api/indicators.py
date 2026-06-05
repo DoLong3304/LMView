@@ -30,6 +30,7 @@ async def list_supported_indicators():
 async def get_indicators(
     symbol: str,
     exchange: str = Query("binance", description="Exchange name"),
+    interval: str = Query("1m", description="Indicator timeframe"),
 ):
     """
     Get latest indicator values for a symbol.
@@ -38,7 +39,7 @@ async def get_indicators(
     Extended indicators (RSI, MACD, etc.) are listed as unavailable
     until the pipeline computes them.
     """
-    snapshot = await get_indicator_snapshot(symbol, exchange)
+    snapshot = await get_indicator_snapshot(symbol, exchange, interval)
 
     if snapshot.source == "unavailable":
         raise HTTPException(404, f"No indicator data for {symbol}")
@@ -50,7 +51,8 @@ async def get_indicators(
 async def get_indicator_summary_endpoint(
     symbol: str,
     exchange: str = Query("binance", description="Exchange name"),
+    interval: str = Query("1m", description="Indicator timeframe"),
 ):
     """Compact indicator summary for AI context."""
-    summary = await get_indicator_summary(symbol, exchange)
+    summary = await get_indicator_summary(symbol, exchange, interval)
     return summary.model_dump()

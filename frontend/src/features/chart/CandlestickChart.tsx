@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import {
   createChart,
   CrosshairMode,
@@ -28,6 +28,7 @@ import { useChartZoom } from "@/hooks/useChartZoom";
 import {
   fetchCandles,
   fetchHistoricalCandles,
+  subscribeIndicatorStream,
   subscribeAllTimeframes,
   TIMEFRAMES as SERVICE_TIMEFRAMES,
 } from "@/services/marketDataService";
@@ -56,7 +57,14 @@ import {
 import IndicatorPanel from "./IndicatorPanel";
 import MarketSelector from "./MarketSelector";
 import OHLCVBar from "./OHLCVBar";
-import type { Candle, ChartType, IndicatorSettings, HistoricalRange, TimeframeKey } from "@/types";
+import type {
+  Candle,
+  ChartType,
+  HistoricalRange,
+  IndicatorSettings,
+  IndicatorStreamSnapshot,
+  TimeframeKey,
+} from "@/types";
 import type { TranslationKey } from "@/i18n/translations";
 
 const CHART_TYPE_ORDER: ChartType[] = ["candles", "bars", "line", "area"];
@@ -180,6 +188,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const noMoreDataRef = useRef(false);
   const scrollCooldownRef = useRef(0);
   const unsubscribeRef = useRef<(() => void) | null>(null);
+  const indicatorUnsubscribeRef = useRef<(() => void) | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const historicalRequestIdRef = useRef(0);
   const seriesControllerRef = useRef<any>(null);
@@ -275,6 +284,16 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     lineRef.current?.update(closePoint);
     areaRef.current?.update(closePoint);
   }, []);
+
+  const commitCandlesState = useCallback(
+    (next: Candle[]) => {
+      startTransition(() => {
+        setCandles(next);
+        if (onCandlesChange) onCandlesChange(next);
+      });
+    },
+    [onCandlesChange],
+  );
 
   const setInitialVisibleRange = useCallback(
     (data: Candle[]) => {
@@ -884,6 +903,176 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     mfiSeriesRef.current?.setData(calcMFI(data, Number(indSettings.mfi.period ?? 14)));
   }, [indSettings]);
 
+  const getLiveIndicatorWindow = useCallback(
+    (data: Candle[]) => {
+      const visibleWindows = [
+        indSettings.sma20.visible ? Number(indSettings.sma20.period ?? 20) : 0,
+        indSettings.sma50.visible ? Number(indSettings.sma50.period ?? 50) : 0,
+        indSettings.ema12.visible ? Number(indSettings.ema12.period ?? 12) : 0,
+        indSettings.ema26.visible ? Number(indSettings.ema26.period ?? 26) : 0,
+        indSettings.bb.visible ? Number(indSettings.bb.period ?? 20) : 0,
+        indSettings.volumeMa.visible ? Number(indSettings.volumeMa.period ?? 20) : 0,
+        indSettings.macd.visible
+          ? Number(indSettings.macd.slowPeriod ?? 26) + Number(indSettings.macd.signalPeriod ?? 9)
+          : 0,
+        indSettings.stochastic.visible ? Number(indSettings.stochastic.period ?? 14) : 0,
+        indSettings.atr.visible ? Number(indSettings.atr.period ?? 14) : 0,
+        indSettings.ichimoku.visible
+          ? Number(indSettings.ichimoku.spanPeriod ?? 52) + Number(indSettings.ichimoku.displacement ?? 26)
+          : 0,
+        indSettings.supertrend.visible ? Number(indSettings.supertrend.period ?? 10) * 4 : 0,
+        indSettings.psar.visible ? 100 : 0,
+        indSettings.rsi.visible ? Number(indSettings.rsi.period ?? 14) : 0,
+        indSettings.mfi.visible ? Number(indSettings.mfi.period ?? 14) : 0,
+        indSettings.vwap.visible ? 300 : 0,
+      ];
+      const maxWindow = Math.max(120, ...visibleWindows) + 32;
+      return data.slice(-maxWindow);
+    },
+    [indSettings],
+  );
+
+  const syncLatestIndicatorData = useCallback(
+    (data: Candle[]) => {
+      if (data.length === 0) return;
+
+      const windowed = getLiveIndicatorWindow(data);
+      const cfg20 = indSettings.sma20;
+      const cfg50 = indSettings.sma50;
+      const cfgE12 = indSettings.ema12;
+      const cfgE26 = indSettings.ema26;
+      const cfgBb = indSettings.bb;
+      const cfgVolumeMa = indSettings.volumeMa;
+      const cfgMacd = indSettings.macd;
+      const cfgStochastic = indSettings.stochastic;
+      const cfgAtr = indSettings.atr;
+      const cfgIchimoku = indSettings.ichimoku;
+      const cfgSupertrend = indSettings.supertrend;
+      const cfgPsar = indSettings.psar;
+
+      const sma20 = calcSMA(windowed, Number(cfg20.period ?? 20));
+      const sma50 = calcSMA(windowed, Number(cfg50.period ?? 50));
+      const ema12 = calcEMA(windowed, Number(cfgE12.period ?? 12));
+      const ema26 = calcEMA(windowed, Number(cfgE26.period ?? 26));
+      const bb = calcBollingerBands(
+        windowed,
+        Number(cfgBb.period ?? 20),
+        Number(cfgBb.multiplier ?? 2),
+      );
+      const vwap = calcVWAP(windowed);
+      const volumeMa = calcVolumeMA(windowed, Number(cfgVolumeMa.period ?? 20));
+      const macd = calcMACD(
+        windowed,
+        Number(cfgMacd.fastPeriod ?? 12),
+        Number(cfgMacd.slowPeriod ?? 26),
+        Number(cfgMacd.signalPeriod ?? 9),
+      );
+      const stochastic = calcStochastic(
+        windowed,
+        Number(cfgStochastic.period ?? 14),
+        Number(cfgStochastic.signalPeriod ?? 3),
+      );
+      const atr = calcATR(windowed, Number(cfgAtr.period ?? 14));
+      const ichimoku = calcIchimoku(
+        windowed,
+        Number(cfgIchimoku.conversionPeriod ?? 9),
+        Number(cfgIchimoku.basePeriod ?? 26),
+        Number(cfgIchimoku.spanPeriod ?? 52),
+        Number(cfgIchimoku.displacement ?? 26),
+      );
+      const supertrend = calcSupertrend(
+        windowed,
+        Number(cfgSupertrend.period ?? 10),
+        Number(cfgSupertrend.multiplier ?? 3),
+      );
+      const psar = calcParabolicSAR(
+        windowed,
+        Number(cfgPsar.step ?? 0.02),
+        Number(cfgPsar.maxStep ?? 0.2),
+      );
+      const rsi = calcRSI(windowed, Number(indSettings.rsi.period ?? 14));
+      const mfi = calcMFI(windowed, Number(indSettings.mfi.period ?? 14));
+
+      const updateLast = (series: any, points: Array<{ time: number; value: number }>) => {
+        const point = points[points.length - 1];
+        if (series && point) series.update(point);
+      };
+
+      updateLast(sma20Ref.current, sma20);
+      updateLast(sma50Ref.current, sma50);
+      updateLast(ema12Ref.current, ema12);
+      updateLast(ema26Ref.current, ema26);
+      updateLast(bbUpperRef.current, bb.upper);
+      updateLast(bbBasisRef.current, bb.middle);
+      updateLast(bbLowerRef.current, bb.lower);
+      updateLast(vwapRef.current, vwap);
+      updateLast(volumeMaRef.current, volumeMa);
+      updateLast(macdLineRef.current, macd.macd);
+      updateLast(macdSignalRef.current, macd.signal);
+      const macdLast = macd.histogram[macd.histogram.length - 1];
+      if (macdHistogramRef.current && macdLast) {
+        macdHistogramRef.current.update({
+          ...macdLast,
+          color: macdLast.value >= 0 ? themeRef.current.volumeUp : themeRef.current.volumeDown,
+        });
+      }
+      updateLast(stochasticKRef.current, stochastic.k);
+      updateLast(stochasticDRef.current, stochastic.d);
+      updateLast(atrRef.current, atr);
+      updateLast(ichimokuConversionRef.current, ichimoku.conversion);
+      updateLast(ichimokuBaseRef.current, ichimoku.base);
+      updateLast(ichimokuSpanARef.current, ichimoku.spanA);
+      updateLast(ichimokuSpanBRef.current, ichimoku.spanB);
+      const laggingLast = ichimoku.lagging[ichimoku.lagging.length - 1];
+      if (ichimokuLaggingRef.current && laggingLast) {
+        ichimokuLaggingRef.current.update(laggingLast);
+      }
+      updateLast(supertrendRef.current, supertrend);
+      updateLast(psarRef.current, psar);
+      updateLast(rsiSeriesRef.current, rsi);
+      updateLast(mfiSeriesRef.current, mfi);
+    },
+    [getLiveIndicatorWindow, indSettings],
+  );
+
+  const applyStreamedIndicatorSnapshot = useCallback(
+    (snapshot: IndicatorStreamSnapshot) => {
+      if (!snapshot?.timestamp) return;
+      const time = Math.floor(snapshot.timestamp / 1000);
+      const values = snapshot.indicators || {};
+
+      const updateLine = (series: any, key: string) => {
+        const value = values[key];
+        if (series && typeof value === "number") {
+          series.update({ time, value });
+        }
+      };
+
+      updateLine(sma20Ref.current, "sma20");
+      updateLine(sma50Ref.current, "sma50");
+      updateLine(ema12Ref.current, "ema12");
+      updateLine(ema26Ref.current, "ema26");
+      updateLine(bbUpperRef.current, "bb_upper");
+      updateLine(bbBasisRef.current, "bb_middle");
+      updateLine(bbLowerRef.current, "bb_lower");
+      updateLine(volumeMaRef.current, "volume_sma20");
+      updateLine(macdLineRef.current, "macd");
+      updateLine(macdSignalRef.current, "macd_signal");
+      updateLine(atrRef.current, "atr14");
+      updateLine(rsiSeriesRef.current, "rsi14");
+
+      const histogram = values.macd_histogram;
+      if (macdHistogramRef.current && typeof histogram === "number") {
+        macdHistogramRef.current.update({
+          time,
+          value: histogram,
+          color: histogram >= 0 ? themeRef.current.volumeUp : themeRef.current.volumeDown,
+        });
+      }
+    },
+    [],
+  );
+
   // Helper: load more historical data when scrolling left
   const loadMoreHistoricalData = useCallback(async () => {
     if (isLoadingMoreRef.current || noMoreDataRef.current || !candleRef.current || historicalRange) return;
@@ -935,7 +1124,6 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
       // Apply to chart series
       setAllPriceSeriesData(merged);
-      if (onCandlesChange) onCandlesChange(merged);
 
       // Restore visible range offset (older data shifts indices)
       if (ts && visibleRange) {
@@ -960,14 +1148,14 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       syncIndicatorData(merged);
 
       // Update React state last (avoid triggering re-renders mid-update)
-      setCandles(merged);
+      commitCandlesState(merged);
       scrollCooldownRef.current = Date.now();
       isLoadingMoreRef.current = false;
     } catch (error) {
       console.error('Failed to load more historical data:', error);
       isLoadingMoreRef.current = false;
     }
-  }, [symbol, timeframe, historicalRange, onCandlesChange, setAllPriceSeriesData, syncIndicatorData]);
+  }, [symbol, timeframe, historicalRange, commitCandlesState, setAllPriceSeriesData, syncIndicatorData]);
 
   // Subscribe to scroll/zoom events to load more historical data
   useEffect(() => {
@@ -995,14 +1183,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const applyDataToChart = useCallback(
     (data: Candle[]) => {
       if (!candleRef.current) return;
-      setCandles(data);
       candlesRef.current = data;
       if (data.length > 0) {
         earliestTimestampRef.current = data[0].time;
         noMoreDataRef.current = false;
         scrollCooldownRef.current = 0;
       }
-      if (onCandlesChange) onCandlesChange(data);
       setNoData(data.length === 0);
       setAllPriceSeriesData(data);
       const vs = volumeRef.current;
@@ -1018,8 +1204,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       setInitialVisibleRange(data);
       if (data.length > 0)
         setTooltip({ ...data[data.length - 1], timeLabel: "" });
+      commitCandlesState(data);
     },
-    [onCandlesChange, setAllPriceSeriesData, setInitialVisibleRange, syncIndicatorData],
+    [commitCandlesState, setAllPriceSeriesData, setInitialVisibleRange, syncIndicatorData],
   );
 
   // Historical mode handlers
@@ -1208,8 +1395,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
             // Update in-place
             const next = [...prev.slice(0, -1), candle];
             candlesRef.current = next;
-            setCandles(next);
-            if (onCandlesChange) onCandlesChange(next);
+            syncLatestIndicatorData(next);
+            commitCandlesState(next);
           } else {
             // New second → add new candle
             updateAllPriceSeries(candle);
@@ -1222,8 +1409,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
             }
             const next = [...prev.slice(-(maxBars - 1)), candle];
             candlesRef.current = next;
-            setCandles(next);
-            if (onCandlesChange) onCandlesChange(next);
+            syncLatestIndicatorData(next);
+            commitCandlesState(next);
           }
           setTooltip((tip) =>
             tip ? { ...tip, ...candle, timeLabel: tip.timeLabel } : null,
@@ -1247,8 +1434,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
             const next = [...prev];
             next[next.length - 1] = candle;
             candlesRef.current = next;
-            setCandles(next);
-            if (onCandlesChange) onCandlesChange(next);
+            syncLatestIndicatorData(next);
+            commitCandlesState(next);
             setTooltip((tip) =>
               tip ? { ...tip, ...candle, timeLabel: tip.timeLabel } : null,
             );
@@ -1267,8 +1454,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
             }
             const next = [...prev.slice(-(maxBars - 1)), candle];
             candlesRef.current = next;
-            setCandles(next);
-            if (onCandlesChange) onCandlesChange(next);
+            syncLatestIndicatorData(next);
+            commitCandlesState(next);
             setTooltip((tip) =>
               tip ? { ...tip, ...candle, timeLabel: tip.timeLabel } : null,
             );
@@ -1278,8 +1465,19 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       },
     });
 
+    const indicatorUnsub = subscribeIndicatorStream({
+      symbol,
+      timeframe,
+      onIndicator: (snapshot) => {
+        if (cancelled) return;
+        if (normalizeTimeframe(snapshot.interval) !== normalizeTimeframe(timeframe)) return;
+        applyStreamedIndicatorSnapshot(snapshot);
+      },
+    });
+
     // Store unsubscribe function in ref
     unsubscribeRef.current = unsub;
+    indicatorUnsubscribeRef.current = indicatorUnsub;
 
     // OPTIMIZATION: Disable aggressive polling. WebSocket is now responsive (0.05s).
     // Only poll as fallback if WebSocket connection fails (passive recovery).
@@ -1292,8 +1490,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       cancelled = true;
       if (pollId) clearInterval(pollId);
       if (unsub) unsub();
+      if (indicatorUnsub) indicatorUnsub();
       pollIntervalRef.current = null;
       unsubscribeRef.current = null;
+      indicatorUnsubscribeRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -1302,7 +1502,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     isLiveMode,
     retryCount,
     applyDataToChart,
+    applyStreamedIndicatorSnapshot,
+    commitCandlesState,
     preloadInitialCandles,
+    syncLatestIndicatorData,
     updateAllPriceSeries,
     isReplayActive, // ⚠️ Re-run when replay mode changes to block/unblock WebSocket
   ]);
@@ -1314,6 +1517,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
         unsubscribeRef.current = null;
+      }
+      if (indicatorUnsubscribeRef.current) {
+        indicatorUnsubscribeRef.current();
+        indicatorUnsubscribeRef.current = null;
       }
       // Stop poll interval
       if (pollIntervalRef.current) {
@@ -1516,7 +1723,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         .applyOptions({ visible: oscillatorVisible });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [indSettings, candles, syncIndicatorData]);
+  }, [indSettings, syncIndicatorData]);
 
   const lastCandle = candles[candles.length - 1];
   const firstCandle = candles[0];
