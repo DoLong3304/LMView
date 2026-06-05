@@ -6,7 +6,7 @@ import {
   upsertLocalAiSession,
 } from "@/features/ai/localAiSessions";
 import { generateLmviewHelpResponse } from "@/features/ai/localHelpResponder";
-import { shouldUseMockAi } from "@/services/aiService";
+import { shouldUseMockAi, aiChat } from "@/services/aiService";
 import { getMockDataAdapter } from "@/services/dataSourceAdapter";
 import type {
   AiChatState,
@@ -110,7 +110,42 @@ export function useAiChat(): UseAiChatReturn {
         } else if (shouldUseMockAi()) {
           assistantMsg = mockDataAdapter.generateAiResponse(trimmed, context);
         } else {
-          assistantMsg = generateLmviewHelpResponse(trimmed, context);
+          // Phase 1: Call real backend API for Ask Mode
+          try {
+            const response = await aiChat({
+              session_id: sessionId,
+              mode: "ask",
+              message: trimmed,
+              chart_context: context as Record<string, unknown> | null,
+            });
+            assistantMsg = {
+              id: response.message_id || `api-${Date.now()}`,
+              role: "assistant",
+              content: response.content,
+              is_mock: response.is_mock,
+              provider: response.provider,
+              model_name: response.model_name,
+              created_at: response.created_at ?? new Date().toISOString(),
+              warnings: response.warnings,
+              suggested_actions: response.suggested_actions,
+              confidence: response.confidence,
+              sources: response.sources,
+              data_caveats: response.data_caveats,
+              provider_metadata: response.provider_metadata,
+            };
+            // Update session ID from backend response
+            if (response.session_id && response.session_id !== sessionId) {
+              setSessionId(response.session_id);
+            }
+          } catch (apiErr) {
+            // API failed — fall back to local help responder
+            console.warn("AI API failed, using local help:", apiErr);
+            assistantMsg = generateLmviewHelpResponse(trimmed, context);
+            assistantMsg.warnings = [
+              ...(assistantMsg.warnings || []),
+              `API unavailable — using local help mode: ${apiErr instanceof Error ? apiErr.message : "unknown error"}`,
+            ];
+          }
         }
 
         const nextMessages = [...baseMessages, assistantMsg];

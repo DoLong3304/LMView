@@ -1,0 +1,16 @@
+# AI Service — Test Mode Configuration
+# Uses mock provider only. For CI/CD and testing.
+
+mode: mock
+providers:
+  - name: mock
+    type: mock
+    priority: 1
+
+rag:
+  enabled: false
+
+inference:
+  temperature: 0.0
+  max_tokens: 512
+  timeout_seconds: 5

@@ -29,6 +29,39 @@ POSTGRES_LMVIEW_DB = os.environ.get("POSTGRES_LMVIEW_DB", "iceberg_catalog")
 SESSION_EXPIRY_HOURS = int(os.environ.get("SESSION_EXPIRY_HOURS", "168"))  # 7 days
 RUN_MIGRATIONS = os.environ.get("RUN_MIGRATIONS", "false")
 
+# ─── AI / LLM Provider ──────────────────────────────────────────────────────
+# AI_MODE: mock | api | local | auto
+#   mock  — deterministic Phase 0 responses only
+#   api   — prefer online API providers
+#   local — prefer local vLLM
+#   auto  — try local first, then api, then mock
+AI_MODE = os.environ.get("AI_MODE", "mock")
+AI_PROVIDER_ORDER = os.environ.get(
+    "AI_PROVIDER_ORDER", "local_vllm,qwen_api,llama_api,mock"
+).split(",")
+AI_TEST_PROVIDER_ORDER = os.environ.get(
+    "AI_TEST_PROVIDER_ORDER", "qwen_api,llama_api,local_vllm,mock"
+).split(",")
+AI_SERVICE_URL = os.environ.get("AI_SERVICE_URL", "http://ai-service:8001")
+AI_REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AI_REQUEST_TIMEOUT_SECONDS", "60"))
+AI_MAX_CONTEXT_TOKENS = int(os.environ.get("AI_MAX_CONTEXT_TOKENS", "12000"))
+AI_ENABLE_RAG = os.environ.get("AI_ENABLE_RAG", "true").lower() in ("1", "true", "yes")
+AI_ENABLE_REAL_LLM = os.environ.get("AI_ENABLE_REAL_LLM", "false").lower() in ("1", "true", "yes")
+AI_ENABLE_PROVIDER_FALLBACK = os.environ.get("AI_ENABLE_PROVIDER_FALLBACK", "true").lower() in ("1", "true", "yes")
+
+# LiteLLM / Provider keys (read but never logged)
+LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://litellm:4000")
+LITELLM_MASTER_KEY = os.environ.get("LITELLM_MASTER_KEY", "")
+VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://vllm:8000/v1")
+VLLM_MODEL = os.environ.get("VLLM_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+
+# RAG / Embeddings
+AI_EMBEDDING_PROVIDER = os.environ.get("AI_EMBEDDING_PROVIDER", "local")
+AI_EMBEDDING_MODEL = os.environ.get("AI_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+AI_RAG_TOP_K = int(os.environ.get("AI_RAG_TOP_K", "6"))
+AI_RAG_MIN_SCORE = float(os.environ.get("AI_RAG_MIN_SCORE", "0.25"))
+AI_KB_APPROVED_ONLY = os.environ.get("AI_KB_APPROVED_ONLY", "true").lower() in ("1", "true", "yes")
+
 # ─── CORS ───────────────────────────────────────────────────────────────────
 CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
 

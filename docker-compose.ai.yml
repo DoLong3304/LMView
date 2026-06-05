@@ -1,0 +1,110 @@
+# Docker Compose AI Services Override
+# Usage: docker compose -f docker-compose.yml -f docker-compose.ai.yml --profile ai-api up
+#
+# Profiles:
+#   ai-api:   AI service using online APIs through LiteLLM (no GPU required)
+#   ai-local: AI service using local vLLM (GPU required)
+#
+# Core LMView runs without GPU. GPU is only required by ai-local profile.
+
+services:
+  # ── AI Service (API mode) ─────────────────────────────────────────────
+  # Connects to core FastAPI backend for AI inference using online APIs.
+  # No GPU required.
+  ai-service:
+    image: python:3.11-slim
+    profiles: ["ai-api", "ai-local"]
+    container_name: lmview-ai-service
+    working_dir: /app
+    volumes:
+      - .:/app:ro
+    environment:
+      - AI_MODE=${AI_MODE:-api}
+      - AI_ENABLE_REAL_LLM=${AI_ENABLE_REAL_LLM:-true}
+      - AI_ENABLE_RAG=${AI_ENABLE_RAG:-true}
+      - QWEN_API_KEY=${QWEN_API_KEY:-}
+      - LLAMA_API_KEY=${LLAMA_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - LITELLM_BASE_URL=${LITELLM_BASE_URL:-http://litellm:4000}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-}
+      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+      - POSTGRES_USER=${POSTGRES_USER:-iceberg}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_LMVIEW_DB=${POSTGRES_LMVIEW_DB:-iceberg_catalog}
+    # TODO: Replace with actual service startup command when ai_service/app/main.py
+    # is implemented as a standalone FastAPI server.
+    command: ["echo", "AI service scaffolded — Phase 1 runs embedded in core backend"]
+    mem_limit: 2g
+    restart: "no"
+
+  # ── LiteLLM Proxy ────────────────────────────────────────────────────
+  # Unified LLM API proxy. Routes to configured providers.
+  litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    profiles: ["ai-api"]
+    container_name: lmview-litellm
+    ports:
+      - "4000:4000"
+    environment:
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master}
+      - QWEN_API_KEY=${QWEN_API_KEY:-}
+      - LLAMA_API_KEY=${LLAMA_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+    volumes:
+      - ./ai_service/configs/litellm.yaml:/app/config.yaml:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000"]
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # ── vLLM Local Inference ──────────────────────────────────────────────
+  # Local model inference server. Requires NVIDIA GPU.
+  vllm:
+    image: vllm/vllm-openai:latest
+    profiles: ["ai-local"]
+    container_name: lmview-vllm
+    ports:
+      - "8000:8000"
+    environment:
+      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
+    command:
+      - "--model"
+      - "${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "--gpu-memory-utilization"
+      - "${VLLM_GPU_MEMORY_UTILIZATION:-0.85}"
+      - "--max-model-len"
+      - "16384"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    mem_limit: 16g
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+    volumes:
+      - vllm-cache:/root/.cache
+
+volumes:
+  vllm-cache:
+    driver: local

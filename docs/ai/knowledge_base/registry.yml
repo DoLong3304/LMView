@@ -1,0 +1,68 @@
+# Knowledge Base Registry — LMView
+
+# Each source is a collection of related documents that share metadata.
+# Documents are ingested from docs/ai/knowledge_base/approved/
+# Only sources with allowed_for_rag: true and review_status: approved are
+# retrievable in production RAG queries.
+
+sources:
+
+  - id: lmview-platform
+    title: LMView Platform Documentation
+    description: How to use LMView features, capabilities, and limitations.
+    domain: platform
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    allowed_for_rag: true
+    version: "1.0.0"
+    tags: [lmview, platform, features, tutorial]
+
+  - id: technical-analysis
+    title: Technical Analysis Fundamentals
+    description: Educational notes on technical indicators, chart patterns, and analysis methods.
+    domain: technical_analysis
+    language: en
+    source_type: technical_note
+    credibility_level: verified
+    review_status: approved
+    allowed_for_rag: true
+    version: "1.0.0"
+    tags: [indicators, patterns, analysis, education]
+
+  - id: crypto-market-structure
+    title: Cryptocurrency Market Structure
+    description: Notes on crypto market mechanics, order types, exchanges, and market dynamics.
+    domain: market_structure
+    language: en
+    source_type: market_structure
+    credibility_level: reviewed
+    review_status: approved
+    allowed_for_rag: true
+    version: "1.0.0"
+    tags: [crypto, market, structure, exchanges]
+
+  - id: risk-management
+    title: Risk Management and Position Sizing
+    description: Educational notes on risk management, position sizing, and portfolio concepts.
+    domain: risk_management
+    language: en
+    source_type: risk_management
+    credibility_level: verified
+    review_status: approved
+    allowed_for_rag: true
+    version: "1.0.0"
+    tags: [risk, management, position, sizing]
+
+  - id: bilingual-glossary
+    title: Bilingual Crypto/Trading Glossary
+    description: English/Vietnamese glossary of crypto and trading terms.
+    domain: glossary
+    language: en
+    source_type: glossary
+    credibility_level: verified
+    review_status: approved
+    allowed_for_rag: true
+    version: "1.0.0"
+    tags: [glossary, bilingual, vietnamese, english]

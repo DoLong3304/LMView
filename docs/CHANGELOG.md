@@ -7,11 +7,35 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [Unreleased]
+## [0.16.0] - 2026-06-06 - Phase 1 AI Ask Mode Implementation
 
+### Added
+
+- **Phase 1 AI Ask Mode** — Real LLM inference pipeline with provider routing, RAG enrichment, prompt building, output guard, and confidence estimation. Full pipeline: scope gate → session → RAG retrieval → prompt assembly → provider routing → output guard → store message.
+- **Provider abstraction** — `BaseProvider` interface with `MockProvider`, `LiteLLMProvider`, and `ProviderRouter`. Supports local vLLM, Qwen API, Llama API, OpenAI, Gemini, DeepSeek, LiteLLM proxy. Configurable priority order with automatic fallback chain; mock always available as final fallback.
+- **RAG knowledge base** — pgvector-powered vector similarity search with `003_phase1_ai_rag.sql` migration. Knowledge sources, documents, chunks, and embeddings tables with HNSW index. Markdown ingestion with semantic chunking by headings/paragraphs/sentences. Content-hash deduplication. Retrieval with language/domain/tag/credibility filters. All retrievals logged for audit.
+- **Curated knowledge base** — 5 approved documents: LMView Platform Guide, Technical Analysis Fundamentals, Cryptocurrency Market Structure, Risk Management, and Bilingual Crypto/Trading Glossary (EN/VI). Registry with source metadata.
+- **Prompt builder** — Structured Ask Mode prompts with system instructions, chart context, RAG chunks, conversation history, data caveats, and financial safety addendum. Bilingual support.
+- **Output guard** — Validates LLM responses for financial safety (flags guaranteed predictions, removes code execution patterns), ensures educational disclaimers. Supports EN/VI.
+- **Context service** — Inspects chart context and generates data caveat warnings (placeholder market data, ticker-derived trades, stale order books, missing news, OKX experimental status).
+- **AI API modularization** — Refactored `backend/api/ai.py` into `backend/api/ai/` package with separate modules for chat, sessions, chart context, chart actions, health, and knowledge endpoints.
+- **AI model package** — Refactored `backend/models/ai.py` into `backend/models/ai/` package with separate modules for chat, chart actions, common, providers, RAG, knowledge, and evaluation models. Full backward compatibility maintained.
+- **Knowledge API endpoints** — Admin-only `/api/ai/knowledge/ingest`, authenticated `/api/ai/knowledge/search` (vector similarity), `/api/ai/knowledge/sources`, `/api/ai/knowledge/health`.
+- **Enhanced AI health** — `/api/ai/health` now reports AI mode, RAG status, pgvector readiness, available providers, and knowledge source count.
+- **Phase 1 test suite** — 36 new tests covering provider routing, prompt building, output guard, context service, knowledge chunking, scope gate safety, and model backward compatibility. All 132 unit tests pass.
+- **50 golden evaluation questions** — Covering technical indicators (10), live chart analysis (8), LMView limitations (5), RAG retrieval (5), out-of-scope refusal (8), prompt injection refusal (5), stale data warnings (3), bilingual (3), and risk disclaimers (3).
+- **AI configuration** — New env vars in `.env.example` and `backend/core/config.py`: `AI_MODE`, `AI_ENABLE_REAL_LLM`, `AI_ENABLE_RAG`, provider API keys, vLLM settings, embedding model, RAG parameters.
+- **Docker Compose AI services** — `docker-compose.ai.yml` overlay with `ai-api` (LiteLLM + online APIs, no GPU) and `ai-local` (vLLM, GPU required) profiles. LiteLLM proxy config in `ai_service/configs/litellm.yaml`.
+- **Frontend AI API integration** — `useAiChat` now calls real backend `/api/ai/chat` when authenticated and not in mock mode, with local help responder as fallback. `AiMessage` and `AIChatResponse` types include Phase 1 fields (confidence, sources, data_caveats, provider_metadata).
+- **AI documentation** — `docs/ai/AI_ARCHITECTURE.md`, `AI_API_CONTRACTS.md`, `RAG_KNOWLEDGE_BASE.md`, `AI_PROVIDER_ROUTING.md`, `AI_EVALUATION.md`, `AI_SECURITY.md`, `AI_ROADMAP.md`.
+- **Future phase scaffolding** — `ai_service/` (LangGraph agents, tools, graph, prompts, observability), `src/ml/` (forecasting, sentiment), prompt templates, and AI config YAML files. All scaffolded with clear TODOs.
 ### Changed
 
 - **Documentation audit refresh** - Updated `docs/SYSTEM.md`, `AGENTS.md`, `README.md`, and `.env.example` comments to match the current 0.15.3 codebase, including auth/settings/admin APIs, Phase 0 AI foundation, current frontend layout, compose profile counts, and known pipeline caveats.
+
+### Fixed
+
+- **Phase 1 AI type safety** — Fixed 8 Pyright type safety issues across the AI chat routing, knowledge ingestion, litellm provider integration, RAG retrieval logic, and unit tests to ensure complete typecheck alignment.
 
 ## [0.15.3] - 2026-06-05 - Phase 0 readiness and admin account controls
 

@@ -38,6 +38,20 @@ export interface AIChatResponse {
   suggested_actions?: string[] | null;
   chart_actions?: AIChartAction[] | null;
   grounded_context_used: boolean;
+  /** Phase 1: response confidence level 0-1 */
+  confidence?: number | null;
+  /** Phase 1: RAG source citations */
+  sources?: Array<{
+    chunk_id?: string;
+    title?: string;
+    source?: string;
+    score?: number;
+    heading?: string;
+  }> | null;
+  /** Phase 1: data caveat warnings */
+  data_caveats?: string[] | null;
+  /** Phase 1: provider routing metadata */
+  provider_metadata?: Record<string, unknown> | null;
 }
 
 export interface AISessionResponse {

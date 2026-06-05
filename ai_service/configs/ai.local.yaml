@@ -1,0 +1,37 @@
+# AI Service — Local Mode Configuration
+# Uses local vLLM as primary provider with API fallback.
+
+mode: local
+providers:
+  - name: local_vllm
+    type: vllm
+    base_url: http://vllm:8000/v1
+    model: Qwen/Qwen2.5-7B-Instruct
+    priority: 1
+    is_local: true
+
+  - name: qwen_api
+    type: litellm
+    model: openai/qwen-plus
+    priority: 10
+
+  - name: llama_api
+    type: litellm
+    model: openai/Llama-4-Maverick-17B-128E-Instruct-FP8
+    priority: 20
+
+  - name: mock
+    type: mock
+    priority: 999
+
+rag:
+  enabled: true
+  top_k: 6
+  min_score: 0.25
+  embedding_model: all-MiniLM-L6-v2
+
+inference:
+  temperature: 0.3
+  max_tokens: 2048
+  top_p: 0.95
+  timeout_seconds: 60
