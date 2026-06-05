@@ -44,7 +44,7 @@ async def ai_health(user: dict | None = Depends(get_optional_user)):
         auth_required=True,
         database_ready=db_ready,
         mock_mode_available=True,
-        chart_action_schema_version="1.0.0",
+        chart_action_schema_version="1.1.0",
         supported_modes=["ask", "interact"],
         supported_action_types=[t.value for t in AIChartActionType],
     )

@@ -59,8 +59,10 @@ async def get_current_user(request: Request) -> dict:
         row = await conn.fetchrow(
             """
             SELECT
-                u.id, u.email, u.display_name, u.role,
-                u.preferred_language, u.timezone, u.is_active,
+                u.id, u.email, u.username, u.display_name, u.avatar_url,
+                u.date_of_birth, u.bio, u.role, u.preferred_language,
+                u.timezone, u.is_active, u.is_verified,
+                u.must_change_password, u.password_changed_at, u.deactivated_at,
                 s.id AS session_id, s.expires_at, s.revoked_at
             FROM auth_sessions s
             JOIN users u ON u.id = s.user_id
@@ -106,10 +108,19 @@ async def get_current_user(request: Request) -> dict:
     return {
         "id": str(row["id"]),
         "email": row["email"],
+        "username": row["username"],
         "display_name": row["display_name"],
+        "avatar_url": row["avatar_url"],
+        "date_of_birth": row["date_of_birth"],
+        "bio": row["bio"],
         "role": row["role"],
         "preferred_language": row["preferred_language"],
         "timezone": row["timezone"],
+        "is_active": row["is_active"],
+        "is_verified": row["is_verified"],
+        "must_change_password": row["must_change_password"],
+        "password_changed_at": row["password_changed_at"],
+        "deactivated_at": row["deactivated_at"],
         "session_id": str(row["session_id"]),
     }
 
@@ -123,3 +134,18 @@ async def get_optional_user(request: Request) -> Optional[dict]:
         return await get_current_user(request)
     except HTTPException:
         return None
+
+
+async def require_admin(current_user: dict = Depends(get_current_user)) -> dict:
+    """Require an active admin user."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+    if current_user.get("must_change_password"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password change required before admin access",
+        )
+    return current_user

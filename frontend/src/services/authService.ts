@@ -12,12 +12,19 @@ import { API_BASE_URL, DATA_SOURCE } from "@/constants/env";
 export interface UserResponse {
   id: string;
   email: string;
+  username?: string | null;
   display_name: string;
+  avatar_url?: string | null;
+  date_of_birth?: string | null;
+  bio?: string | null;
   role: string;
   preferred_language?: string | null;
   timezone?: string | null;
   is_active: boolean;
   is_verified: boolean;
+  must_change_password: boolean;
+  password_changed_at?: string | null;
+  deactivated_at?: string | null;
   created_at?: string | null;
   last_login_at?: string | null;
 }
@@ -197,6 +204,45 @@ export async function apiUpdatePreferences(
   });
 }
 
+export async function apiUpdateProfile(
+  updates: Partial<Pick<
+    UserResponse,
+    | "display_name"
+    | "username"
+    | "avatar_url"
+    | "date_of_birth"
+    | "bio"
+    | "preferred_language"
+    | "timezone"
+  >>,
+): Promise<UserResponse> {
+  return authFetch<UserResponse>("/auth/profile", {
+    method: "PATCH",
+    body: JSON.stringify(updates),
+  });
+}
+
+export async function apiChangePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<UserResponse> {
+  return authFetch<UserResponse>("/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  });
+}
+
+export async function apiDeleteAccount(confirmation: string): Promise<void> {
+  await authFetch("/auth/account", {
+    method: "DELETE",
+    body: JSON.stringify({ confirmation }),
+  });
+  clearToken();
+}
+
 // ── Mock auth (fallback for VITE_DATA_SOURCE=mock) ───────────────────────────
 
 const MOCK_USERS_KEY = "lmview_mock_users";
@@ -204,14 +250,41 @@ const MOCK_USERS_KEY = "lmview_mock_users";
 interface MockUser {
   id: string;
   email: string;
+  username?: string | null;
   display_name: string;
+  avatar_url?: string | null;
+  date_of_birth?: string | null;
+  bio?: string | null;
   password: string;
   role: string;
+  is_active?: boolean;
+  is_verified?: boolean;
+  must_change_password?: boolean;
+  password_changed_at?: string | null;
+  created_at?: string | null;
+  last_login_at?: string | null;
 }
 
 function getMockUsers(): MockUser[] {
   try {
-    return JSON.parse(localStorage.getItem(MOCK_USERS_KEY) || "[]");
+    const users = JSON.parse(localStorage.getItem(MOCK_USERS_KEY) || "[]") as MockUser[];
+    if (users.length > 0) return users;
+    const seeded: MockUser[] = [
+      {
+        id: "mock-admin",
+        email: "admin@lmview.local",
+        username: "admin",
+        display_name: "LMView Admin",
+        password: "admin123",
+        role: "admin",
+        is_active: true,
+        is_verified: true,
+        must_change_password: true,
+        created_at: new Date().toISOString(),
+      },
+    ];
+    saveMockUsers(seeded);
+    return seeded;
   } catch {
     return [];
   }
@@ -241,6 +314,10 @@ export function mockRegister(
     display_name: name,
     password,
     role: "user",
+    is_active: true,
+    is_verified: false,
+    must_change_password: false,
+    created_at: new Date().toISOString(),
   };
   users.push(newUser);
   saveMockUsers(users);
@@ -252,6 +329,8 @@ export function mockRegister(
     role: newUser.role,
     is_active: true,
     is_verified: false,
+    must_change_password: false,
+    created_at: newUser.created_at,
   };
 
   // Store a mock token
@@ -276,8 +355,16 @@ export function mockLogin(
     email: found.email,
     display_name: found.display_name,
     role: found.role,
-    is_active: true,
-    is_verified: false,
+    is_active: found.is_active !== false,
+    is_verified: Boolean(found.is_verified),
+    username: found.username,
+    avatar_url: found.avatar_url,
+    date_of_birth: found.date_of_birth,
+    bio: found.bio,
+    must_change_password: Boolean(found.must_change_password),
+    password_changed_at: found.password_changed_at,
+    created_at: found.created_at,
+    last_login_at: new Date().toISOString(),
   };
 
   storeToken(`mock-token-${found.id}`);
@@ -300,11 +387,67 @@ export function mockGetCurrentUser(): UserResponse | null {
   return {
     id: found.id,
     email: found.email,
+    username: found.username,
     display_name: found.display_name,
+    avatar_url: found.avatar_url,
+    date_of_birth: found.date_of_birth,
+    bio: found.bio,
     role: found.role,
-    is_active: true,
-    is_verified: false,
+    is_active: found.is_active !== false,
+    is_verified: Boolean(found.is_verified),
+    must_change_password: Boolean(found.must_change_password),
+    password_changed_at: found.password_changed_at,
+    created_at: found.created_at,
+    last_login_at: found.last_login_at,
   };
+}
+
+export function mockUpdateProfile(
+  updates: Partial<UserResponse>,
+): UserResponse | null {
+  const token = getStoredToken();
+  if (!token?.startsWith("mock-token-")) return null;
+  const userId = token.replace("mock-token-", "");
+  const users = getMockUsers();
+  const index = users.findIndex((u) => u.id === userId);
+  if (index < 0) return null;
+  users[index] = { ...users[index], ...updates };
+  saveMockUsers(users);
+  return mockGetCurrentUser();
+}
+
+export function mockChangePassword(
+  currentPassword: string,
+  newPassword: string,
+): { success: boolean; error?: string; user?: UserResponse } {
+  const token = getStoredToken();
+  if (!token?.startsWith("mock-token-")) return { success: false, error: "invalidCredentials" };
+  const userId = token.replace("mock-token-", "");
+  const users = getMockUsers();
+  const index = users.findIndex((u) => u.id === userId);
+  if (index < 0 || users[index].password !== currentPassword) {
+    return { success: false, error: "invalidCredentials" };
+  }
+  users[index].password = newPassword;
+  users[index].must_change_password = false;
+  users[index].password_changed_at = new Date().toISOString();
+  saveMockUsers(users);
+  const user = mockGetCurrentUser();
+  return user ? { success: true, user } : { success: false, error: "invalidCredentials" };
+}
+
+export function mockDeleteAccount(confirmation: string): boolean {
+  if (confirmation.toUpperCase() !== "DELETE") return false;
+  const token = getStoredToken();
+  if (!token?.startsWith("mock-token-")) return false;
+  const userId = token.replace("mock-token-", "");
+  const users = getMockUsers();
+  const index = users.findIndex((u) => u.id === userId);
+  if (index < 0) return false;
+  users[index].is_active = false;
+  saveMockUsers(users);
+  clearToken();
+  return true;
 }
 
 /**

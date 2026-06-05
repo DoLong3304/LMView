@@ -1,5 +1,6 @@
 import React from "react";
 import {
+  Bell,
   CandlestickChart as CandleIcon,
   Loader2,
   LogOut,
@@ -15,6 +16,11 @@ import LanguageSwitcher from "@/components/ui/LanguageSwitcher";
 import SystemHealthCard from "@/components/ui/SystemHealthCard";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useI18n } from "@/i18n";
+import {
+  fetchNotifications,
+  markNotificationsRead,
+  type UserNotification,
+} from "@/services/settingsService";
 
 const SHOW_DEVELOPER_TOOLS = false;
 
@@ -44,6 +50,29 @@ const Header: React.FC<HeaderProps> = ({
   const { t } = useI18n();
   const { user, loading, isAuthenticated, logout } = useAuth();
   const [isLoggingOut, setIsLoggingOut] = React.useState(false);
+  const [isNotificationsOpen, setIsNotificationsOpen] = React.useState(false);
+  const [notifications, setNotifications] = React.useState<UserNotification[]>([]);
+  const [unreadCount, setUnreadCount] = React.useState(0);
+
+  const loadNotifications = React.useCallback(async () => {
+    if (!isAuthenticated) {
+      setNotifications([]);
+      setUnreadCount(0);
+      return;
+    }
+    try {
+      const payload = await fetchNotifications(10);
+      setNotifications(payload.notifications);
+      setUnreadCount(payload.unread_count);
+    } catch {
+      setNotifications([]);
+      setUnreadCount(0);
+    }
+  }, [isAuthenticated]);
+
+  React.useEffect(() => {
+    void loadNotifications();
+  }, [loadNotifications]);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -127,6 +156,69 @@ const Header: React.FC<HeaderProps> = ({
             </button>
           )}
           <LanguageSwitcher />
+          {isAuthenticated && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsNotificationsOpen((open) => !open)}
+                className="relative rounded p-1.5 text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
+                title={t("notifications")}
+              >
+                <Bell className="h-5 w-5" />
+                {unreadCount > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 min-w-4 rounded-full bg-red-600 px-1 text-[10px] font-bold leading-4 text-white">
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </span>
+                )}
+              </button>
+              {isNotificationsOpen && (
+                <div className="absolute right-0 top-full z-[500] mt-2 w-80 overflow-hidden rounded border border-gray-700 bg-gray-900 shadow-2xl">
+                  <div className="flex items-center justify-between border-b border-gray-800 px-3 py-2">
+                    <span className="text-xs font-semibold text-white">{t("notifications")}</span>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await markNotificationsRead();
+                        await loadNotifications();
+                      }}
+                      className="text-[11px] font-medium text-blue-300 hover:text-blue-200"
+                    >
+                      {t("markAllRead")}
+                    </button>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto">
+                    {notifications.length === 0 ? (
+                      <div className="px-3 py-8 text-center text-xs text-gray-500">
+                        {t("noNotifications")}
+                      </div>
+                    ) : (
+                      notifications.map((item) => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={async () => {
+                            await markNotificationsRead(item.id);
+                            await loadNotifications();
+                          }}
+                          className={`block w-full border-b border-gray-800 px-3 py-2 text-left last:border-b-0 hover:bg-gray-800 ${
+                            item.read_at ? "opacity-70" : ""
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-xs font-semibold text-white">{item.title}</span>
+                            <span className="rounded border border-gray-700 px-1.5 py-0.5 text-[10px] uppercase text-gray-400">
+                              {item.category}
+                            </span>
+                          </div>
+                          {item.body && <p className="mt-1 line-clamp-2 text-xs leading-5 text-gray-400">{item.body}</p>}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <button
             type="button"
             onClick={onSettingsClick}

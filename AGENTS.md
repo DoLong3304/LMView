@@ -8,9 +8,10 @@ Project rules for AI coding agents.
 
 - **Name:** LMView
 - **Purpose:** Real-time cryptocurrency technical-analysis platform
-- **Architecture:** Lambda Architecture: speed, batch/lakehouse, serving
-- **Core stack:** Kafka, Flink, Spark, Redis Sentinel, InfluxDB, Iceberg/MinIO, Trino, FastAPI, React 19
-- **Primary focus:** Data engineering now; AI/ML feature path later
+- **Architecture:** Lambda Architecture: speed, batch/lakehouse, serving, frontend
+- **Core stack:** Kafka, Flink, Spark, Redis Sentinel, InfluxDB, PostgreSQL, Iceberg/MinIO, Trino, FastAPI, React 19
+- **Current release:** `0.15.3` in `docs/CHANGELOG.md`
+- **Current focus:** Data engineering plus Phase 0 auth/settings/AI foundation; real LLM/ML inference remains future work
 
 ---
 
@@ -18,13 +19,14 @@ Project rules for AI coding agents.
 
 Every session starts with:
 
-1. Read `docs/SYSTEM.md`.
-2. Read the latest entries in `docs/CHANGELOG.md` (at least 3).
-3. Check `git status --short --branch`.
-4. Identify affected modules and planned files.
-5. For explicit, low-risk user requests, proceed after stating intent. Ask first for broad, destructive, ambiguous, or cross-system changes.
+1. Use `caveman` skill/plugin for agents to cut down output token usage if available.
+2. Read `docs/SYSTEM.md`.
+3. Read latest `docs/CHANGELOG.md` entries, at least 3.
+4. Check `git status --short --branch`.
+5. Identify affected modules and planned files.
+6. For explicit, low-risk requests, proceed after stating intent. Ask first for broad, destructive, ambiguous, or cross-system changes.
 
-Before editing, run `git pull --ff-only` when safe. If the worktree is dirty, do not overwrite user changes.
+Before editing, run `git pull --ff-only` when safe. If worktree is dirty, do not overwrite user changes.
 
 ---
 
@@ -32,11 +34,11 @@ Before editing, run `git pull --ff-only` when safe. If the worktree is dirty, do
 
 - Do not commit, stage, or push unless explicitly asked.
 - Do not touch `.env` or print secrets.
-- Update `docs/CHANGELOG.md` for completed feature/fix/refactor work unless the user explicitly exempts the session.
+- Update `docs/CHANGELOG.md` for completed feature/fix/refactor/docs work unless user explicitly exempts the session.
 - Keep batches small: 1-3 files when practical, then verify.
 - Prefer repo patterns over new abstractions.
 - Never revert changes you did not make.
-- Ask before destructive actions: volume deletion, checkpoint deletion, data deletion, `git reset`, schema migration.
+- Ask before destructive actions: volume deletion, checkpoint deletion, data deletion, `git reset`, schema migration, account/session purge.
 
 ---
 
@@ -47,10 +49,11 @@ Only touch these when explicitly requested:
 - `.env`
 - `docker-compose.yml`
 - `schemas/*.avsc`
+- `backend/migrations/*.sql`
 - Flink checkpoints
-- Kafka/Redis/InfluxDB/MinIO persisted data
+- Kafka/Redis/InfluxDB/MinIO/PostgreSQL persisted data
 
-Schema changes require producer, Flink, Spark, backend, and tests to change together.
+Schema changes require producer, Flink, Spark, backend, frontend types where relevant, and tests to change together.
 
 ---
 
@@ -72,16 +75,19 @@ Backend architecture:
 - `backend/api/`: thin route handlers only.
 - `backend/services/`: business logic.
 - `backend/models/`: Pydantic schemas.
-- `backend/core/`: config, constants, DB clients, Redis Sentinel.
-- Route handlers must not embed Redis/Influx/Trino-heavy business logic when a service layer is appropriate.
+- `backend/core/`: config, constants, DB clients, Redis Sentinel, auth dependencies.
+- Route handlers must not embed Redis/Influx/Trino/PostgreSQL-heavy business logic when service layer is appropriate.
+- Auth/settings/admin/AI persistence uses PostgreSQL through `backend/core/postgres.py`; never log credentials or session tokens.
+- Ordered SQL migrations run at startup only when `RUN_MIGRATIONS` is true.
 
 Data pipeline architecture:
 
 - New exchanges extend `src/exchanges/base.py`.
 - Kafka records must preserve `exchange`, `symbol`, and event timestamps.
-- PyFlink writer classes must read environment values in `open()` where serialization requires it.
-- Preserve candle dedup: `ZREMRANGEBYSCORE` before `ZADD`.
-- For multi-exchange work, key Flink state and Redis keys by `(exchange, symbol)`.
+- PyFlink writer classes should read worker-specific environment values in `open()` where serialization requires it.
+- Preserve candle dedup: remove old sorted-set score before `ZADD`.
+- For multi-exchange work, key Flink state, Redis keys, Influx tags, Iceberg DDLs, and API lookups by `(exchange, symbol)`.
+- Current caveat: Flink kline aggregation and depth processing still drop/default `exchange`; account for this before trusting OKX data.
 
 ---
 
@@ -99,15 +105,17 @@ Applies to `frontend/`.
 - Shared reusable UI/providers live in `frontend/src/components/ui/`.
 - Feature-specific UI lives in `frontend/src/features/<feature>/`.
 - Route-level screens live in `frontend/src/pages/`.
-- Static/mock data lives in `frontend/src/data/`.
+- Static/mock data and mock API adapters live in `frontend/src/data/`, especially `frontend/src/data/mock/`.
 - Env, timeframe, and market constants live in `frontend/src/constants/`.
 - User-facing strings use `useI18n()`.
+- Normal-user UI must not expose internal/development labels such as data source, API mode, mock mode, migration phase names, schema phase names, or debug diagnostics. Keep those behind admin-only Debug surfaces.
 - API calls belong in `frontend/src/services/*`, not components.
 - Use `useApiCall` for fetch flows that need retry/toast/error states.
 - Use `useSymbolMeta` for logos/names.
+- Auth, settings, notifications, admin, and AI calls must go through their service files.
 - Convert backend milliseconds to lightweight-charts seconds at service boundary.
 - UI may show `1H`, `4H`, `1D`, `1W`; API interval params must be lowercase.
-- `VITE_DATA_SOURCE=mock` uses `frontend/src/data/mockDataGenerator.ts`; default is API mode.
+- `VITE_DATA_SOURCE=mock` uses API-shaped adapters under `frontend/src/data/mock/`; default is API mode.
 
 Frontend verification:
 
@@ -129,6 +137,7 @@ npm run build
 - Services that accept connections need health checks.
 - Services need memory limits where Compose supports them.
 - Service names use kebab-case.
+- Dev Nginx serves plain HTTP on port 80. Production Nginx uses ports 80 and 443 with certbot automation.
 
 Validate Compose changes with:
 
@@ -151,6 +160,8 @@ make test-all
 make test-cov
 ```
 
+If local host has no `python` shim, use `python3` or the project virtualenv explicitly.
+
 Frontend:
 
 ```bash
@@ -167,38 +178,70 @@ New backend behavior needs unit tests. Endpoint behavior should include integrat
 
 Read `docs/SYSTEM.md` before changing these:
 
+- `backend/app.py`
 - `backend/api/klines.py`
 - `backend/services/candle_service.py`
 - `backend/api/websocket.py`
+- `backend/api/ticker.py`
+- `backend/api/orderbook.py`
+- `backend/api/trades.py`
+- `backend/api/auth.py`
+- `backend/api/ai.py`
+- `backend/api/settings.py`
+- `backend/api/admin.py`
+- `backend/core/postgres.py`
+- `backend/core/security.py`
+- `backend/migrations/*.sql`
 - `src/processing/pipeline.py`
 - `src/processing/writers/kline_aggregator.py`
 - `src/processing/writers/keydb_*`
 - `src/producer/main.py`
 - `src/exchanges/*`
 - `src/lakehouse/pipeline.py`
+- `orchestration/assets.py`
 - `frontend/src/features/chart/CandlestickChart.tsx`
+- `frontend/src/features/ai/*`
+- `frontend/src/features/settings/SettingsModal.tsx`
 - `frontend/src/services/marketDataService.ts`
+- `frontend/src/services/authService.ts`
+- `frontend/src/services/aiService.ts`
+- `frontend/src/services/settingsService.ts`
 
-Current caveats to keep in mind:
+Current caveats:
 
-- Backend exposes `/api/stream/all`; older single-stream helper paths may be stale.
-- Ticker API is exchange-aware, but order book/trade API hot paths still need exchange-qualified key alignment.
-- OKX support exists but should be treated as experimental until WebSocket subscription flow is verified.
-- `/api/market/overview` currently returns placeholder/default data; heatmap/rankings query Trino helpers.
+- Backend has one all-timeframe WebSocket route; old single-candle frontend helper is stale.
+- Ticker API is exchange-aware and can aggregate exchanges.
+- Order book API reads exchange-qualified Redis keys and has ticker/REST fallback metadata.
+- Trades API reads exchange-qualified ticker history, but data is ticker-derived and not a true trade tape.
+- OKX producer path exists but WebSocket subscription/message handling is experimental.
+- Flink kline aggregation and depth processing still drop/default `exchange`.
+- Spark streaming `coin_*` Iceberg DDLs omit `exchange`.
+- `/api/market/overview` returns placeholder/default data; heatmap/rankings query Trino helpers.
+- Dagster asset loading needs verification because `assets.py` lacks `Definitions` and references a missing scraper module path.
+- Frontend hook specs exist, but there is no frontend test script.
 
 ---
 
 ## AI Feature Guidance
 
-For future AI/ML work:
+Current Phase 0 exists:
+
+- Authenticated AI API routes are wired.
+- Chat sessions, messages, chart snapshots, and action metadata persist in PostgreSQL.
+- Scope gate and chart action validator are deterministic local services.
+- Responses are deterministic mock responses, not model output.
+- Frontend AI Helper and settings surfaces are wired.
+
+For future real AI/ML work:
 
 - Define data contracts first: input window, horizon, target, latency, freshness.
 - Store training data and labels in Iceberg, not only Redis.
 - Keep online features reproducible from offline feature logic.
 - Version model artifacts and model outputs.
 - Add model observability: freshness, latency, null rate, drift, model version.
-- Keep inference boundaries explicit: backend service for API logic, separate `src/ml` or service module for training/inference when added.
+- Keep inference boundaries explicit: backend service for API logic, separate `src/ml` or service module for training/inference.
 - Do not mix experimental model code into core candle serving without feature flags.
+- Never let AI action execution bypass validation, user approval, or audit recording.
 
 ---
 
@@ -206,7 +249,7 @@ For future AI/ML work:
 
 | File | Purpose |
 |---|---|
-| `docs/SYSTEM.md` | Full system map and caveats |
+| `docs/SYSTEM.md` | Full current system map and caveats |
 | `docs/CHANGELOG.md` | Project history |
 | `AGENTS.md` | This file |
 | `README.md` | User-facing overview |

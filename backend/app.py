@@ -3,6 +3,7 @@ FastAPI application entry point.
 """
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,7 +26,10 @@ from backend.api import (
     news,
     auth,
     ai,
+    settings,
+    admin,
 )
+from backend.services.admin_bootstrap_service import ensure_default_admin
 from backend.tasks.news_fetcher import news_fetcher
 from backend.tasks.market_fetcher import market_fetcher
 
@@ -40,17 +44,17 @@ async def lifespan(app: FastAPI):
     # Initialize PostgreSQL pool
     await init_pg_pool()
 
-    # Run Phase 0 migration if flag is set
+    # Run ordered SQL migrations if flag is set
     if os.environ.get("RUN_MIGRATIONS", "").lower() in ("1", "true", "yes"):
-        migration_path = os.path.join(
-            os.path.dirname(__file__), "migrations", "001_phase0_schema.sql"
-        )
-        if os.path.exists(migration_path):
+        migration_dir = Path(__file__).resolve().parent / "migrations"
+        for migration_path in sorted(migration_dir.glob("*.sql")):
             try:
-                await run_migration(migration_path)
-                logger.info("Phase 0 migration applied successfully")
+                await run_migration(str(migration_path))
+                logger.info("Migration applied successfully: %s", migration_path.name)
             except Exception:
-                logger.exception("Failed to apply Phase 0 migration")
+                logger.exception("Failed to apply migration: %s", migration_path.name)
+
+    await ensure_default_admin()
 
     # Start background tasks
     await news_fetcher.start()
@@ -97,5 +101,7 @@ for router_module in (
     news,
     auth,
     ai,
+    settings,
+    admin,
 ):
     app.include_router(router_module.router)

@@ -14,15 +14,21 @@ Real-time cryptocurrency technical-analysis platform built on Lambda Architectur
 
 ## Highlights
 
-- **Real-time candles** through Kafka, Flink, Redis Sentinel, FastAPI, and WebSocket.
+- **Live market data path** through exchange WebSockets, Kafka, Flink, Redis Sentinel, InfluxDB, FastAPI, and WebSocket streaming.
 - **Multi-timeframe charts**: `1s`, `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`.
-- **Exchange abstraction** with Binance as primary path and OKX integration under active hardening.
-- **Lambda Architecture**: speed layer (Flink), batch/lakehouse layer (Spark/Iceberg), serving layer (FastAPI).
+- **Exchange abstraction** with Binance as primary path and OKX present but still experimental.
+- **Lakehouse analytics** with Spark, Iceberg on MinIO, PostgreSQL catalog, and Trino.
 - **High availability infrastructure**: 3 Kafka brokers and Redis Sentinel with 1 master, 2 replicas, 3 Sentinels.
+<<<<<<< HEAD
 - **Resilience bypass path**: Direct WebSocket → Redis writes when Kafka/Flink is down (ENABLE_DIRECT_REDIS=true).
 - **Market overview and news**: gold-table metrics, heatmaps, rankings, multi-source news and sentiment cache.
 - **Trading UI**: lightweight-charts v5.2.0, drawing tools, replay mode, i18n, mock/API data mode.
 - **Observability**: Prometheus, Grafana, Loki, exporters, 11 dashboards, alert rules.
+=======
+- **Trading UI**: lightweight-charts v5.2.0, drawing tools, replay mode, i18n, auth, settings, notifications, market/news views.
+- **Phase 0 AI foundation**: authenticated AI routes, PostgreSQL chat/session persistence, chart context, action validation, deterministic mock responses.
+- **Observability**: Prometheus, Grafana, Loki, exporters, 11 dashboards, and alert rules.
+>>>>>>> a029343d120ac1f7a40aa8cc4418018d8f29dbde
 
 ---
 
@@ -36,7 +42,7 @@ Exchange WS/REST -> Producer -> Kafka -> Flink/Spark
 
 ![Data Flow Diagram](docs/crypto.png)
 
-LMView focuses on data engineering first, with a clean path for future AI/ML features: durable lakehouse data, low-latency Redis features, Trino analytics, and FastAPI serving boundaries.
+LMView focuses on data engineering first: durable lakehouse data, low-latency Redis features, Trino analytics, and clear FastAPI serving boundaries. AI/ML work is currently at foundation stage; real LLM/model inference is not production-wired.
 
 ---
 
@@ -44,7 +50,7 @@ LMView focuses on data engineering first, with a clean path for future AI/ML fea
 
 Primary app:
 
-- Dev/prod Nginx: `http://localhost` after `make dev` (port 80 redirects to HTTPS; dev cert is self-signed).
+- Dev Nginx: `http://localhost` after `make dev` (plain HTTP on port 80).
 - FastAPI docs: `http://localhost:8080/docs`.
 
 API examples:
@@ -53,7 +59,9 @@ API examples:
 curl http://localhost:8080/api/health
 curl "http://localhost:8080/api/klines?symbol=BTCUSDT&interval=1m&limit=100"
 curl "http://localhost:8080/api/ticker/BTCUSDT"
-curl "http://localhost:8080/api/news/latest?limit=10"
+curl "http://localhost:8080/api/orderbook/BTCUSDT/summary"
+curl "http://localhost:8080/api/indicators/supported"
+curl "http://localhost:8080/api/ai/health"
 ```
 
 Web UIs:
@@ -88,7 +96,7 @@ Quick start:
 git clone https://github.com/DoLong3304/LMView.git
 cd LMView
 cp .env.example .env
-# Edit .env: set INFLUX_TOKEN, passwords, API keys, monitoring credentials.
+# Edit .env: set strong tokens/passwords, API keys, monitoring credentials, and default admin values.
 make dev
 ```
 
@@ -126,11 +134,22 @@ For details, see [Section 17.7 in SYSTEM.md](docs/SYSTEM.md#177-direct-redis-byp
 
 ## Testing
 
+Python:
+
 ```bash
 make test
 make test-all
 make test-cov
 ```
+
+Direct pytest commands:
+
+```bash
+PYTHONPATH=. python -m pytest tests/ -v
+PYTHONPATH=. python -m pytest tests/ -m "unit or integration" -v
+```
+
+Use `python3` or a project virtualenv if the host has no `python` shim.
 
 Frontend checks:
 
@@ -140,7 +159,7 @@ npm run typecheck
 npm run build
 ```
 
-Current source contains 193 pytest test functions and 35 frontend hook test specs. `frontend/package.json` currently has no frontend test script.
+Current source contains 254 pytest test functions and 35 frontend hook specs. `frontend/package.json` currently has no frontend test script. During the 2026-06-05 docs audit, focused auth/AI unit tests passed; e2e collection needed missing host project dependencies.
 
 ---
 
@@ -148,9 +167,11 @@ Current source contains 193 pytest test functions and 35 frontend hook test spec
 
 | Document | Description |
 |---|---|
-| [SYSTEM.md](docs/SYSTEM.md) | Full system architecture, data flow, APIs, caveats |
+| [SYSTEM.md](docs/SYSTEM.md) | Current system architecture, data flow, APIs, caveats |
 | [CHANGELOG.md](docs/CHANGELOG.md) | Project history |
 | [AGENTS.md](AGENTS.md) | AI agent workflow and coding rules |
+
+`docs/DOCUMENTATION.md.old` is archived historical material and is not maintained as current truth.
 
 ---
 
@@ -164,6 +185,6 @@ Built and maintained by D22 Fintech, PTIT students:
 
 ---
 
-Status: Active development  
-Version: 0.13.0  
+Status: Active development
+Version: 0.15.3
 License: Not specified in this repository

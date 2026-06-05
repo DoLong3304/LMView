@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import json
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 
 from backend.core.postgres import get_pg_pool
 from backend.core.security import (
@@ -22,6 +23,36 @@ from backend.core.security import (
 )
 
 logger = logging.getLogger("backend.services.auth_service")
+
+USER_RETURNING_FIELDS = """
+    id, email, username, display_name, avatar_url, date_of_birth, bio, role,
+    preferred_language, timezone, is_active, is_verified,
+    must_change_password, password_changed_at, deactivated_at,
+    created_at, last_login_at
+"""
+
+
+def _user_dict(row: Any, last_login_at: Optional[datetime] = None) -> dict:
+    """Convert an asyncpg user row to the public user dict."""
+    return {
+        "id": str(row["id"]),
+        "email": row["email"],
+        "username": row["username"],
+        "display_name": row["display_name"],
+        "avatar_url": row["avatar_url"],
+        "date_of_birth": row["date_of_birth"],
+        "bio": row["bio"],
+        "role": row["role"],
+        "preferred_language": row["preferred_language"],
+        "timezone": row["timezone"],
+        "is_active": row["is_active"],
+        "is_verified": row["is_verified"],
+        "must_change_password": row["must_change_password"],
+        "password_changed_at": row["password_changed_at"],
+        "deactivated_at": row["deactivated_at"],
+        "created_at": row["created_at"],
+        "last_login_at": last_login_at if last_login_at is not None else row["last_login_at"],
+    }
 
 
 async def register_user(
@@ -67,8 +98,11 @@ async def register_user(
             """
             INSERT INTO users (email, display_name, password_hash, preferred_language, created_at, updated_at)
             VALUES ($1, $2, $3, $4, $5, $5)
-            RETURNING id, email, display_name, role, preferred_language, timezone,
-                      is_active, is_verified, created_at, last_login_at
+            RETURNING
+                id, email, username, display_name, avatar_url, date_of_birth,
+                bio, role, preferred_language, timezone, is_active, is_verified,
+                must_change_password, password_changed_at, deactivated_at,
+                created_at, last_login_at
             """,
             email, display_name, pwd_hash, preferred_language, now,
         )
@@ -94,20 +128,7 @@ async def register_user(
             user_id, token_hash, user_agent, ip_address, now, expires_at,
         )
 
-    user_dict = {
-        "id": str(user_row["id"]),
-        "email": user_row["email"],
-        "display_name": user_row["display_name"],
-        "role": user_row["role"],
-        "preferred_language": user_row["preferred_language"],
-        "timezone": user_row["timezone"],
-        "is_active": user_row["is_active"],
-        "is_verified": user_row["is_verified"],
-        "created_at": user_row["created_at"],
-        "last_login_at": user_row["last_login_at"],
-    }
-
-    return user_dict, raw_token, expires_at
+    return _user_dict(user_row), raw_token, expires_at
 
 
 async def login_user(
@@ -135,9 +156,10 @@ async def login_user(
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow(
             """
-            SELECT id, email, display_name, role, password_hash,
-                   preferred_language, timezone, is_active, is_verified,
-                   created_at, last_login_at
+            SELECT id, email, username, display_name, avatar_url,
+                   date_of_birth, bio, role, password_hash, preferred_language,
+                   timezone, is_active, is_verified, must_change_password,
+                   password_changed_at, deactivated_at, created_at, last_login_at
             FROM users
             WHERE email = $1
             """,
@@ -172,20 +194,7 @@ async def login_user(
             now, user_row["id"],
         )
 
-    user_dict = {
-        "id": str(user_row["id"]),
-        "email": user_row["email"],
-        "display_name": user_row["display_name"],
-        "role": user_row["role"],
-        "preferred_language": user_row["preferred_language"],
-        "timezone": user_row["timezone"],
-        "is_active": user_row["is_active"],
-        "is_verified": user_row["is_verified"],
-        "created_at": user_row["created_at"],
-        "last_login_at": now,
-    }
-
-    return user_dict, raw_token, expires_at
+    return _user_dict(user_row, last_login_at=now), raw_token, expires_at
 
 
 async def logout_session(session_id: str) -> bool:
@@ -222,11 +231,13 @@ async def get_user_with_preferences(user_id: str) -> Optional[dict]:
     async with pool.acquire() as conn:
         user_row = await conn.fetchrow(
             """
-            SELECT id, email, display_name, role, preferred_language, timezone,
-                   is_active, is_verified, created_at, last_login_at
+            SELECT id, email, username, display_name, avatar_url,
+                   date_of_birth, bio, role, preferred_language, timezone,
+                   is_active, is_verified, must_change_password,
+                   password_changed_at, deactivated_at, created_at, last_login_at
             FROM users WHERE id = $1
             """,
-            user_id if isinstance(user_id, str) is False else __import__("uuid").UUID(user_id),
+            user_id if isinstance(user_id, str) is False else uuid.UUID(user_id),
         )
         if user_row is None:
             return None
@@ -237,18 +248,7 @@ async def get_user_with_preferences(user_id: str) -> Optional[dict]:
         )
 
     result = {
-        "user": {
-            "id": str(user_row["id"]),
-            "email": user_row["email"],
-            "display_name": user_row["display_name"],
-            "role": user_row["role"],
-            "preferred_language": user_row["preferred_language"],
-            "timezone": user_row["timezone"],
-            "is_active": user_row["is_active"],
-            "is_verified": user_row["is_verified"],
-            "created_at": user_row["created_at"],
-            "last_login_at": user_row["last_login_at"],
-        },
+        "user": _user_dict(user_row),
         "preferences": None,
     }
 
@@ -283,7 +283,6 @@ async def update_preferences(user_id: str, updates: dict) -> Optional[dict]:
     if pool is None:
         return None
 
-    import uuid
     uid = uuid.UUID(user_id)
     now = datetime.now(timezone.utc)
 
@@ -342,3 +341,171 @@ async def update_preferences(user_id: str, updates: dict) -> Optional[dict]:
         "favorite_indicators": fav_indicators if isinstance(fav_indicators, list) else [],
         "ai_response_style": pref_row["ai_response_style"],
     }
+
+
+async def update_profile(user_id: str, updates: dict) -> Optional[dict]:
+    """Update mutable profile fields and return the safe user dict."""
+    pool = await get_pg_pool()
+    if pool is None:
+        raise RuntimeError("Database unavailable")
+
+    allowed_fields = {
+        "display_name",
+        "username",
+        "avatar_url",
+        "date_of_birth",
+        "bio",
+        "preferred_language",
+        "timezone",
+    }
+    filtered = {
+        key: value
+        for key, value in updates.items()
+        if key in allowed_fields and value is not None
+    }
+    if not filtered:
+        return await _get_user_only(user_id)
+
+    now = datetime.now(timezone.utc)
+    set_parts = ["updated_at = $1"]
+    values: list[Any] = [now]
+    idx = 2
+    for field, value in filtered.items():
+        if field == "username" and isinstance(value, str):
+            value = value.strip().lower()
+        set_parts.append(f"{field} = ${idx}")
+        values.append(value)
+        idx += 1
+    values.append(uuid.UUID(user_id))
+
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                UPDATE users
+                SET {', '.join(set_parts)}
+                WHERE id = ${idx}
+                RETURNING
+                    id, email, username, display_name, avatar_url,
+                    date_of_birth, bio, role, preferred_language, timezone,
+                    is_active, is_verified, must_change_password,
+                    password_changed_at, deactivated_at, created_at, last_login_at
+                """,
+                *values,
+            )
+    except Exception as exc:
+        if "users_username_key" in str(exc):
+            raise ValueError("Username already exists") from exc
+        raise
+
+    return _user_dict(row) if row else None
+
+
+async def change_password(
+    user_id: str,
+    current_password: str,
+    new_password: str,
+) -> Optional[dict]:
+    """Change password after verifying the current password."""
+    pool = await get_pg_pool()
+    if pool is None:
+        raise RuntimeError("Database unavailable")
+
+    validate_password(new_password)
+    uid = uuid.UUID(user_id)
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT password_hash FROM users WHERE id = $1 AND is_active = TRUE",
+            uid,
+        )
+        if row is None:
+            return None
+        if not verify_password(current_password, row["password_hash"]):
+            raise ValueError("Current password is incorrect")
+
+        now = datetime.now(timezone.utc)
+        updated = await conn.fetchrow(
+            """
+            UPDATE users
+            SET password_hash = $1,
+                must_change_password = FALSE,
+                password_changed_at = $2,
+                updated_at = $2
+            WHERE id = $3
+            RETURNING
+                id, email, username, display_name, avatar_url,
+                date_of_birth, bio, role, preferred_language, timezone,
+                is_active, is_verified, must_change_password,
+                password_changed_at, deactivated_at, created_at, last_login_at
+            """,
+            hash_password(new_password),
+            now,
+            uid,
+        )
+
+    return _user_dict(updated) if updated else None
+
+
+async def deactivate_account(user_id: str, confirmation: str) -> bool:
+    """Soft-deactivate the current account and revoke sessions."""
+    if confirmation.strip().upper() != "DELETE":
+        raise ValueError("Confirmation must be DELETE")
+
+    pool = await get_pg_pool()
+    if pool is None:
+        raise RuntimeError("Database unavailable")
+
+    uid = uuid.UUID(user_id)
+    now = datetime.now(timezone.utc)
+
+    async with pool.acquire() as conn:
+        user_role = await conn.fetchval("SELECT role FROM users WHERE id = $1", uid)
+        if user_role == "admin":
+            active_admins = await conn.fetchval(
+                "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = TRUE"
+            )
+            if active_admins <= 1:
+                raise ValueError("Cannot deactivate the final active admin")
+
+        result = await conn.execute(
+            """
+            UPDATE users
+            SET is_active = FALSE, deactivated_at = $1, updated_at = $1
+            WHERE id = $2 AND is_active = TRUE
+            """,
+            now,
+            uid,
+        )
+        await conn.execute(
+            """
+            UPDATE auth_sessions
+            SET revoked_at = $1
+            WHERE user_id = $2 AND revoked_at IS NULL
+            """,
+            now,
+            uid,
+        )
+
+    return "UPDATE 1" in result
+
+
+async def _get_user_only(user_id: str) -> Optional[dict]:
+    """Fetch a safe user dict without preferences."""
+    pool = await get_pg_pool()
+    if pool is None:
+        return None
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, email, username, display_name, avatar_url,
+                   date_of_birth, bio, role, preferred_language, timezone,
+                   is_active, is_verified, must_change_password,
+                   password_changed_at, deactivated_at, created_at, last_login_at
+            FROM users
+            WHERE id = $1
+            """,
+            uuid.UUID(user_id),
+        )
+    return _user_dict(row) if row else None
