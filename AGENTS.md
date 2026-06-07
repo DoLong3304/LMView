@@ -34,7 +34,8 @@ Before editing, run `git pull --ff-only` when safe. If worktree is dirty, do not
 
 - Do not commit, stage, or push unless explicitly asked.
 - Do not touch `.env` or print secrets.
-- Update `docs/CHANGELOG.md` for completed feature/fix/refactor/docs work unless user explicitly exempts the session.
+- Update `docs/CHANGELOG.md` for completed feature/fix/refactor/docs work unless user explicitly exempts the session. Resolve version conflicts when 2 users commit their stack of changes by reordering entries on how early they were made and correcting the version number based on the new order.
+- Update `README.md` and `docs/SYSTEM.md` when crucial changes were made to the project. Recheck their information every major version update. Only update this file (`AGENTS.md`) if needed.
 - Keep batches small: 1-3 files when practical, then verify.
 - Prefer repo patterns over new abstractions.
 - Never revert changes you did not make.

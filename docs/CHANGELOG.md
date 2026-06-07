@@ -8,14 +8,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.18.1] - 2026-06-07 - Update documentations
-
-### Changed
-
-- **Documentation reinspection refresh** - Reaudited current code state and updated `docs/SYSTEM.md`, `AGENTS.md`, `README.md`, and `.env.example` comments for 0.18.0 facts: Phase 1 AI Ask Mode, modular AI routes, RAG/provider caveats, current Compose/service counts, Flink trade cache, exchange propagation status, Dagster `Definitions`, lakehouse `exchange` handling, observability counts, and test inventory.
-
----
-
 ## [0.19.2] - 2026-06-07 - Phase C Runtime Completion
 
 ### Added
@@ -99,7 +91,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.18.2] - 2026-06-06 - Ticker Heartbeat Optimization
+## [0.18.3] - 2026-06-06 - Ticker Heartbeat Optimization
 
 ### Changed
 
@@ -111,7 +103,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.18.1] - 2026-06-06 - AI Real LLM Fix & Token Cost Tracking
+## [0.18.2] - 2026-06-06 - AI Real LLM Fix & Token Cost Tracking
 
 ### Fixed
 
@@ -126,6 +118,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **AI health endpoint** — Now correctly reports `real_llm_enabled: true` when Qwen API key is configured.
+
+---
+
+## [0.18.1] - 2026-06-07 - Update documentations
+
+### Changed
+
+- **Documentation reinspection refresh** - Reaudited current code state and updated `docs/SYSTEM.md`, `AGENTS.md`, `README.md`, and `.env.example` comments for 0.18.0 facts: Phase 1 AI Ask Mode, modular AI routes, RAG/provider caveats, current Compose/service counts, Flink trade cache, exchange propagation status, Dagster `Definitions`, lakehouse `exchange` handling, observability counts, and test inventory.
 
 ---
 
