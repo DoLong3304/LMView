@@ -11,7 +11,7 @@ Project rules for AI coding agents.
 - **Architecture:** Lambda Architecture: speed, batch/lakehouse, serving, frontend
 - **Core stack:** Kafka, Flink, Spark, Redis Sentinel, InfluxDB, PostgreSQL, Iceberg/MinIO, Trino, FastAPI, React 19
 - **Current release:** `0.18.0` in `docs/CHANGELOG.md`
-- **Current focus:** Data engineering plus Phase 0 auth/settings/AI foundation; real LLM/ML inference remains future work
+- **Current focus:** Data engineering plus Phase 1 AI Ask Mode; auth/settings/admin are PostgreSQL-backed; Interact Mode execution and ML forecasting remain future work
 
 ---
 
@@ -87,7 +87,8 @@ Data pipeline architecture:
 - PyFlink writer classes should read worker-specific environment values in `open()` where serialization requires it.
 - Preserve candle dedup: remove old sorted-set score before `ZADD`.
 - For multi-exchange work, key Flink state, Redis keys, Influx tags, Iceberg DDLs, and API lookups by `(exchange, symbol)`.
-- Current caveat: Flink kline aggregation and depth processing still drop/default `exchange`; account for this before trusting OKX data.
+- Current caveat: Flink kline aggregation preserves `exchange`, but depth processing still drops/defaults `exchange`; lakehouse ticker dedup also omits `exchange`.
+- OKX remains opt-in (`ENABLE_OKX=false` by default); OKX kline Kafka records still need interval normalization before production use.
 
 ---
 
@@ -186,12 +187,14 @@ Read `docs/SYSTEM.md` before changing these:
 - `backend/api/orderbook.py`
 - `backend/api/trades.py`
 - `backend/api/auth.py`
-- `backend/api/ai.py`
+- `backend/api/ai/*`
+- `backend/api/ai_legacy.py`
 - `backend/api/settings.py`
 - `backend/api/admin.py`
 - `backend/core/postgres.py`
 - `backend/core/security.py`
 - `backend/migrations/*.sql`
+- `backend/services/ai/*`
 - `src/processing/pipeline.py`
 - `src/processing/writers/kline_aggregator.py`
 - `src/processing/writers/keydb_*`
@@ -212,27 +215,29 @@ Current caveats:
 - Backend has one all-timeframe WebSocket route; old single-candle frontend helper is stale.
 - Ticker API is exchange-aware and can aggregate exchanges.
 - Order book API reads exchange-qualified Redis keys and has ticker/REST fallback metadata.
-- Trades API reads exchange-qualified ticker history, but data is ticker-derived and not a true trade tape.
-- OKX producer path exists but WebSocket subscription/message handling is experimental.
-- Flink kline aggregation and depth processing still drop/default `exchange`.
-- Spark streaming `coin_*` Iceberg DDLs omit `exchange`.
-- `/api/market/overview` returns placeholder/default data; heatmap/rankings query Trino helpers.
-- Dagster asset loading needs verification because `assets.py` lacks `Definitions` and references a missing scraper module path.
+- Trades API reads true `trade:latest:{exchange}:{symbol}` cache first, then ticker-derived fallback; summary route still reports ticker-derived metadata.
+- OKX producer path exists and has unit coverage for subscription frames/handlers, but remains disabled by default and kline interval mapping is still wrong for Kafka records.
+- Flink kline aggregation preserves `exchange`; depth processing still drops/defaults `exchange`.
+- Spark streaming `coin_*` Iceberg DDLs include `exchange`; ticker streaming dedup still omits `exchange`.
+- `/api/market/overview` tries Trino gold tables, then derives from Redis ticker cache and marks placeholder metadata; heatmap helper still has one stale `iceberg_catalog.gold` join.
+- Dagster exposes `defs = Definitions(...)`, but its Spark catalog/warehouse config differs from the main streaming lakehouse job and needs runtime verification.
 - Frontend hook specs exist, but there is no frontend test script.
 
 ---
 
 ## AI Feature Guidance
 
-Current Phase 0 exists:
+Current Phase 1 exists:
 
-- Authenticated AI API routes are wired.
-- Chat sessions, messages, chart snapshots, and action metadata persist in PostgreSQL.
-- Scope gate and chart action validator are deterministic local services.
-- Responses are deterministic mock responses, not model output.
-- Frontend AI Helper and settings surfaces are wired.
+- Authenticated AI API routes are modular under `backend/api/ai/`.
+- Chat sessions, messages, chart snapshots, action metadata, knowledge chunks/embeddings, and retrieval logs persist in PostgreSQL.
+- Scope gate, prompt builder, provider router, RAG retrieval, output guard, and chart-action validator are wired.
+- Mock provider remains default/fallback; real provider path needs `AI_ENABLE_REAL_LLM=true`, non-mock `AI_MODE`, provider keys/config, and runtime dependencies.
+- Core FastAPI requirements currently lack `litellm` and `sentence-transformers`; without those deps, providers/RAG degrade to mock/no embeddings.
+- `docker-compose.ai.yml` starts optional LiteLLM/vLLM support, but `ai-service` is scaffolded and exits after an echo command.
+- Frontend AI Helper calls backend Ask Mode in API mode and uses local/mock fallback when needed.
 
-For future real AI/ML work:
+For future AI/ML work:
 
 - Define data contracts first: input window, horizon, target, latency, freshness.
 - Store training data and labels in Iceberg, not only Redis.

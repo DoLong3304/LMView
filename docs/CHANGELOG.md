@@ -8,6 +8,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.18.1] - 2026-06-07 - Update documentations
+
+### Changed
+
+- **Documentation reinspection refresh** - Reaudited current code state and updated `docs/SYSTEM.md`, `AGENTS.md`, `README.md`, and `.env.example` comments for 0.18.0 facts: Phase 1 AI Ask Mode, modular AI routes, RAG/provider caveats, current Compose/service counts, Flink trade cache, exchange propagation status, Dagster `Definitions`, lakehouse `exchange` handling, observability counts, and test inventory.
+
+---
+
 ## [0.18.0] - 2026-06-06 - Phase 1 AI Ask Mode Implementation
 
 ### Added
@@ -33,7 +41,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **Documentation audit refresh** - Updated `docs/SYSTEM.md`, `AGENTS.md`, `README.md`, and `.env.example` comments to match the current 0.15.3 codebase, including auth/settings/admin APIs, Phase 0 AI foundation, current frontend layout, compose profile counts, and known pipeline caveats.
+- **Documentation audit refresh** - Updated `docs/SYSTEM.md`, `AGENTS.md`, `README.md`, and `.env.example` comments to match the then-current 0.15.x codebase, including auth/settings/admin APIs, Phase 0 AI foundation, frontend layout, compose profile counts, and known pipeline caveats.
 
 ### Fixed
 
@@ -905,4 +913,3 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Description of any remaining issues
 
  — >
-
