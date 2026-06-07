@@ -1,169 +1,252 @@
 """
-News service — business logic for news articles, sentiment, search.
+News service backed by PostgreSQL persistence.
+Provides latest/trending/search/sentiment queries for news endpoints.
 """
-from datetime import datetime, timedelta
-from typing import List, Optional
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
+import json
 import logging
+
+from backend.core.postgres import get_pg_pool
 
 logger = logging.getLogger(__name__)
 
 
-# In-memory cache for news (will be replaced with Redis)
-_news_cache = {
-    "articles": [],
-    "last_update": None
-}
-
-# Available news sources
-NEWS_SOURCES = [
-    {"name": "CryptoPanic", "type": "api", "language": "en", "region": "global"},
-    {"name": "CoinDesk", "type": "rss", "language": "en", "region": "global"},
-    {"name": "CoinTelegraph", "type": "rss", "language": "en", "region": "global"},
-    {"name": "Decrypt", "type": "rss", "language": "en", "region": "global"},
-    {"name": "The Block", "type": "rss", "language": "en", "region": "global"},
-    {"name": "Bitcoin Magazine", "type": "rss", "language": "en", "region": "global"},
-    {"name": "CryptoSlate", "type": "rss", "language": "en", "region": "global"},
-    {"name": "BeInCrypto", "type": "rss", "language": "en", "region": "global"},
-    {"name": "NewsBTC", "type": "rss", "language": "en", "region": "global"},
-    {"name": "U.Today", "type": "rss", "language": "en", "region": "global"},
-    {"name": "Bitcoinist", "type": "rss", "language": "en", "region": "global"},
-    {"name": "CryptoNews", "type": "rss", "language": "en", "region": "global"},
-]
+def _normalize_symbol(symbol: Optional[str]) -> Optional[str]:
+    if not symbol:
+        return None
+    cleaned = symbol.upper().replace("USDT", "").replace("USD", "")
+    return cleaned or None
 
 
-def get_latest(
+def _as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+def _row_to_article(row) -> dict[str, Any]:
+    published_at = row["published_at"].isoformat() if row["published_at"] else None
+    fetched_at = row["fetched_at"].isoformat() if row["fetched_at"] else None
+    raw_metadata = row["raw_metadata"] or {}
+    if isinstance(raw_metadata, str):
+        try:
+            raw_metadata = json.loads(raw_metadata)
+        except Exception:
+            raw_metadata = {}
+    symbols = _as_list(row["symbols"])
+    tags = _as_list(row["tags"])
+    symbols_mentioned = row["symbols_mentioned"] or []
+    return {
+        "id": str(row["id"]),
+        "source": row["source"],
+        "title": row["title"],
+        "summary": row["summary"] or row["content_snippet"] or "",
+        "url": row["url"] or "#",
+        "author": raw_metadata.get("author") if isinstance(raw_metadata, dict) else None,
+        "published_at": published_at,
+        "fetched_at": fetched_at,
+        "image_url": raw_metadata.get("image_url") if isinstance(raw_metadata, dict) else None,
+        "tags": tags,
+        "symbols": symbols,
+        "sentiment_score": float(row["sentiment_score"] or 0),
+        "sentiment_label": row["sentiment_label"] or "neutral",
+        "language": row["language"] or "en",
+        "region": raw_metadata.get("region") if isinstance(raw_metadata, dict) else None,
+        "symbolsMentioned": symbols_mentioned,
+    }
+
+
+async def get_latest(
     limit: int = 50,
     source: Optional[str] = None,
     symbol: Optional[str] = None,
     hours: int = 24,
-) -> dict:
-    """Get latest news articles with optional filters."""
-    articles = _news_cache.get("articles", [])
+) -> dict[str, Any]:
+    pool = await get_pg_pool()
+    if pool is None:
+        return {"articles": [], "count": 0, "metadata": {"source": "postgres", "is_mock": False, "has_sentiment": False}}
 
-    cutoff_time = int((datetime.now() - timedelta(hours=hours)).timestamp() * 1000)
-    filtered = [a for a in articles if a.get("published_at", 0) >= cutoff_time]
+    symbol_norm = _normalize_symbol(symbol)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    async with pool.acquire() as conn:
+        if source and symbol_norm:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM news_articles
+                WHERE published_at >= $1 AND lower(source) = lower($2) AND $3 = ANY(symbols_mentioned)
+                ORDER BY published_at DESC
+                LIMIT $4
+                """,
+                cutoff, source, symbol_norm, limit,
+            )
+        elif source:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM news_articles
+                WHERE published_at >= $1 AND lower(source) = lower($2)
+                ORDER BY published_at DESC
+                LIMIT $3
+                """,
+                cutoff, source, limit,
+            )
+        elif symbol_norm:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM news_articles
+                WHERE published_at >= $1 AND $2 = ANY(symbols_mentioned)
+                ORDER BY published_at DESC
+                LIMIT $3
+                """,
+                cutoff, symbol_norm, limit,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT * FROM news_articles
+                WHERE published_at >= $1
+                ORDER BY published_at DESC
+                LIMIT $2
+                """,
+                cutoff, limit,
+            )
 
-    if source:
-        filtered = [a for a in filtered if a.get("source", "").lower() == source.lower()]
-    if symbol:
-        symbol_upper = symbol.upper()
-        filtered = [a for a in filtered if symbol_upper in a.get("symbols", [])]
-
+    articles = [_row_to_article(row) for row in rows]
     return {
-        "total": len(filtered[:limit]),
-        "articles": filtered[:limit],
-        "last_update": _news_cache.get("last_update"),
+        "articles": articles,
+        "count": len(articles),
+        "metadata": {
+            "source": "postgres",
+            "is_mock": False,
+            "has_sentiment": any(article.get("sentiment_score") is not None for article in articles),
+        },
     }
 
 
-def get_sources() -> dict:
-    """Return list of all news sources."""
-    return {
-        "total_sources": len(NEWS_SOURCES),
-        "healthy_sources": len(NEWS_SOURCES),
-        "sources": NEWS_SOURCES,
-    }
-
-
-def get_trending(limit: int = 10) -> dict:
-    """Get trending articles and symbol mention stats."""
-    articles = _news_cache.get("articles", [])
-
-    cutoff_time = int((datetime.now() - timedelta(hours=24)).timestamp() * 1000)
-    recent = [a for a in articles if a.get("published_at", 0) >= cutoff_time]
-
-    trending = sorted(
-        recent, key=lambda x: abs(x.get("sentiment_score", 0)), reverse=True
-    )[:limit]
-
-    symbol_stats: dict = {}
-    for article in recent:
-        for sym in article.get("symbols", []):
-            if sym not in symbol_stats:
-                symbol_stats[sym] = {"count": 0, "sentiment_sum": 0}
-            symbol_stats[sym]["count"] += 1
-            symbol_stats[sym]["sentiment_sum"] += article.get("sentiment_score", 0)
-
-    trending_symbols = [
+async def get_sources() -> dict[str, Any]:
+    pool = await get_pg_pool()
+    if pool is None:
+        return {"total_sources": 0, "healthy_sources": 0, "sources": []}
+    async with pool.acquire() as conn:
+        rows = await conn.fetch("SELECT source, count(*) AS article_count, max(published_at) AS latest FROM news_articles GROUP BY source ORDER BY article_count DESC")
+    sources = [
         {
-            "symbol": sym,
-            "mention_count": s["count"],
-            "avg_sentiment": s["sentiment_sum"] / s["count"] if s["count"] > 0 else 0,
+            "name": row["source"],
+            "article_count": row["article_count"],
+            "latest_article": row["latest"].isoformat() if row["latest"] else None,
+            "health": "healthy",
         }
-        for sym, s in symbol_stats.items()
+        for row in rows
     ]
-    trending_symbols.sort(key=lambda x: x["mention_count"], reverse=True)
-
-    return {"trending_articles": trending, "trending_symbols": trending_symbols[:10]}
+    return {"total_sources": len(sources), "healthy_sources": len(sources), "sources": sources}
 
 
-def get_symbol_sentiment(symbol: str, hours: int = 24) -> dict:
-    """Get sentiment analysis for a specific symbol."""
-    articles = _news_cache.get("articles", [])
-    symbol_upper = symbol.upper()
+async def get_trending(limit: int = 10) -> dict[str, Any]:
+    pool = await get_pg_pool()
+    if pool is None:
+        return {"trending_articles": [], "trending_symbols": []}
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    async with pool.acquire() as conn:
+        article_rows = await conn.fetch(
+            """
+            SELECT * FROM news_articles
+            WHERE published_at >= $1
+            ORDER BY abs(coalesce(sentiment_score, 0)) DESC, published_at DESC
+            LIMIT $2
+            """,
+            cutoff, limit,
+        )
+        symbol_rows = await conn.fetch(
+            """
+            SELECT symbol, COUNT(*) AS mention_count, AVG(coalesce(sentiment_score, 0)) AS avg_sentiment
+            FROM (
+                SELECT unnest(symbols_mentioned) AS symbol, sentiment_score
+                FROM news_articles
+                WHERE published_at >= $1 AND symbols_mentioned IS NOT NULL
+            ) s
+            GROUP BY symbol
+            ORDER BY mention_count DESC, avg_sentiment DESC
+            LIMIT $2
+            """,
+            cutoff, limit,
+        )
+    return {
+        "trending_articles": [_row_to_article(row) for row in article_rows],
+        "trending_symbols": [
+            {
+                "symbol": row["symbol"],
+                "mention_count": row["mention_count"],
+                "avg_sentiment": float(row["avg_sentiment"] or 0),
+            }
+            for row in symbol_rows
+        ],
+    }
 
-    cutoff_time = int((datetime.now() - timedelta(hours=hours)).timestamp() * 1000)
-    filtered = [
-        a for a in articles
-        if symbol_upper in a.get("symbols", []) and a.get("published_at", 0) >= cutoff_time
-    ]
 
-    if not filtered:
-        return {
-            "symbol": symbol_upper,
-            "article_count": 0,
-            "avg_sentiment": 0,
-            "sentiment_distribution": {"positive": 0, "neutral": 0, "negative": 0},
-            "sentiment_trend": [],
-        }
+async def get_symbol_sentiment(symbol: str, hours: int = 24) -> dict[str, Any]:
+    pool = await get_pg_pool()
+    symbol_norm = _normalize_symbol(symbol)
+    if pool is None or not symbol_norm:
+        return {"symbol": symbol_norm or symbol, "article_count": 0, "avg_sentiment": 0, "sentiment_distribution": {"positive": 0, "neutral": 0, "negative": 0}, "sentiment_trend": []}
 
-    sentiments = [a.get("sentiment_score", 0) for a in filtered]
-    avg_sentiment = sum(sentiments) / len(sentiments)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT published_at, coalesce(sentiment_score, 0) AS sentiment_score, sentiment_label
+            FROM news_articles
+            WHERE published_at >= $1 AND $2 = ANY(symbols_mentioned)
+            ORDER BY published_at DESC
+            """,
+            cutoff, symbol_norm,
+        )
+    if not rows:
+        return {"symbol": symbol_norm, "article_count": 0, "avg_sentiment": 0, "sentiment_distribution": {"positive": 0, "neutral": 0, "negative": 0}, "sentiment_trend": []}
 
+    sentiments = [float(row["sentiment_score"] or 0) for row in rows]
     positive = len([s for s in sentiments if s > 0.05])
     negative = len([s for s in sentiments if s < -0.05])
     neutral = len(sentiments) - positive - negative
-
-    trend = []
-    for i in range(hours):
-        bucket_start = int((datetime.now() - timedelta(hours=hours - i)).timestamp() * 1000)
-        bucket_end = int((datetime.now() - timedelta(hours=hours - i - 1)).timestamp() * 1000)
-        bucket_articles = [
-            a for a in filtered
-            if bucket_start <= a.get("published_at", 0) < bucket_end
-        ]
-        if bucket_articles:
-            bucket_sentiment = sum(a.get("sentiment_score", 0) for a in bucket_articles) / len(bucket_articles)
-            trend.append({
-                "timestamp": bucket_start,
-                "sentiment": round(bucket_sentiment, 3),
-                "article_count": len(bucket_articles),
-            })
-
+    trend = [
+        {
+            "timestamp": row["published_at"].isoformat(),
+            "sentiment": float(row["sentiment_score"] or 0),
+            "article_count": 1,
+        }
+        for row in rows[: min(len(rows), 50)]
+    ]
     return {
-        "symbol": symbol_upper,
-        "article_count": len(filtered),
-        "avg_sentiment": round(avg_sentiment, 3),
+        "symbol": symbol_norm,
+        "article_count": len(rows),
+        "avg_sentiment": round(sum(sentiments) / len(sentiments), 3),
         "sentiment_distribution": {"positive": positive, "neutral": neutral, "negative": negative},
         "sentiment_trend": trend,
     }
 
 
-def search_news(query: str, limit: int = 50) -> dict:
-    """Search news articles by keyword."""
-    articles = _news_cache.get("articles", [])
-    query_lower = query.lower()
-    results = [
-        a for a in articles
-        if query_lower in a.get("title", "").lower()
-        or query_lower in a.get("summary", "").lower()
-        or any(query_lower in tag.lower() for tag in a.get("tags", []))
-    ][:limit]
-    return {"query": query, "total": len(results), "articles": results}
-
-
-def update_news_cache(articles: List[dict]):
-    """Update in-memory news cache (called by background task)."""
-    _news_cache["articles"] = articles
-    _news_cache["last_update"] = datetime.now().isoformat()
-    logger.info("Updated news cache with %d articles", len(articles))
+async def search_news(query: str, limit: int = 50) -> dict[str, Any]:
+    pool = await get_pg_pool()
+    if pool is None:
+        return {"query": query, "total": 0, "articles": []}
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT * FROM news_articles
+            WHERE title ILIKE $1 OR summary ILIKE $1 OR content_snippet ILIKE $1
+            ORDER BY published_at DESC
+            LIMIT $2
+            """,
+            f"%{query}%", limit,
+        )
+    articles = [_row_to_article(row) for row in rows]
+    return {"query": query, "total": len(articles), "articles": articles}

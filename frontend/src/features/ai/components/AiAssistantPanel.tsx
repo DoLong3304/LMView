@@ -233,6 +233,17 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
                   >
                     {message.content}
                   </div>
+                  {/* Token usage & cost display */}
+                  {!isUser && (message.token_input || message.token_output || message.estimated_cost_usd) && (
+                    <div className="mt-1 flex items-center gap-2 text-[9px] text-gray-600">
+                      {message.token_input && message.token_output && (
+                        <span>{message.token_input} → {message.token_output} tokens</span>
+                      )}
+                      {message.estimated_cost_usd && (
+                        <span className="text-green-500">${message.estimated_cost_usd.toFixed(4)}</span>
+                      )}
+                    </div>
+                  )}
                 </div>
                 {isUser && (
                   <div className="mt-5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-gray-800 text-gray-300">

@@ -87,6 +87,7 @@ export interface NewsArticle {
   sentiment_label: string;
   language?: string;
   region?: string;
+  symbolsMentioned?: string[];
 }
 
 export interface TrendingSymbol {

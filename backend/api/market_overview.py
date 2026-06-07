@@ -1,17 +1,22 @@
 """
-Market Overview API - Comprehensive market metrics for Overview tab
-Aggregates data from multiple Gold tables
+Market Overview API - Comprehensive market metrics for Overview tab.
+Reads current gold-style tables from `iceberg.crypto_lakehouse.*` and keeps Redis fallback.
 """
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, List, Dict, Any
+from typing import List, Dict, Any
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import asyncio
 from backend.core.database import get_trino_connection
 
 router = APIRouter(prefix="/api/market", tags=["market-overview"])
 logger = logging.getLogger(__name__)
+
+DB = "iceberg.crypto_lakehouse"
+GOLD_FRESHNESS_MINUTES = 30
+ENABLE_GOLD_PATH = True
+
 
 class AsyncTrinoClient:
     def __init__(self):
@@ -31,9 +36,9 @@ class AsyncTrinoClient:
             return cursor.fetchall()
         return await asyncio.to_thread(_fetch)
 
+
 async def get_trino():
     return AsyncTrinoClient()
-
 
 
 @router.get("/overview")
@@ -41,13 +46,12 @@ async def get_market_overview(
     timeframe: str = Query("24h", description="Timeframe: 1h, 24h, 7d"),
     limit: int = Query(10, ge=5, le=50, description="Number of items per category")
 ):
-    """
-    Get comprehensive market overview with all metrics for Overview tab.
-    Tries Trino gold tables first, falls back to Redis ticker cache.
-    """
+    """Get comprehensive market overview with gold-first queries and Redis fallback."""
+    data_sources: list[str] = []
+    trino_data_available = False
+
     try:
         trino = await get_trino()
-        used_source = "trino_gold"
 
         market_summary = await _get_market_summary(trino)
         top_gainers = await _get_top_movers(trino, "gainer", timeframe, limit)
@@ -59,41 +63,45 @@ async def get_market_overview(
         heatmap_data = await _get_heatmap_data(trino, limit)
         indicators_summary = await _get_indicators_summary(trino)
 
-        has_trino_data = (
-            market_summary.get("total_volume_24h", 0) > 0 or
-            market_summary.get("active_symbols", 0) > 0 or
-            len(top_gainers) > 0
+        trino_data_available = ENABLE_GOLD_PATH and (
+            market_summary.get("active_symbols", 0) > 0
+            or len(top_gainers) > 0
+            or len(most_volatile) > 0
+            or len(highest_volume) > 0
         )
-        if not has_trino_data:
-            logger.info("Trino gold tables empty, deriving from Redis ticker cache")
-            market_summary, top_gainers, top_losers, most_volatile, highest_volume = (
-                await _derive_market_from_redis(timeframe, limit)
-            )
+
+        if trino_data_available:
+            data_sources.append("trino_gold")
+        else:
+            logger.info("Gold tables empty or stale, deriving market overview from Redis fallback")
+            market_summary, top_gainers, top_losers, most_volatile, highest_volume = await _derive_market_from_redis(timeframe, limit)
             trending_news = []
             sector_performance = {}
             heatmap_data = []
-            used_source = "ticker_derived"
-
+            indicators_summary = {
+                "total_symbols": 0,
+                "avg_rsi": 50,
+                "overbought_count": 0,
+                "oversold_count": 0,
+                "bullish_macd_count": 0,
+                "bearish_macd_count": 0,
+            }
+            data_sources.append("redis_fallback")
     except Exception as e:
         logger.warning("Trino gold query failed (%s), falling back to Redis/ticker", e)
-        try:
-            market_summary, top_gainers, top_losers, most_volatile, highest_volume = (
-                await _derive_market_from_redis(timeframe, limit)
-            )
-        except Exception:
-            market_summary = {
-                "total_market_cap": 0, "total_volume_24h": 0,
-                "btc_dominance": 0, "eth_dominance": 0,
-                "active_symbols": 0, "fear_greed_index": 50,
-            }
-            top_gainers = []; top_losers = []; most_volatile = []; highest_volume = []
-        trending_news = []; sector_performance = {}; heatmap_data = []
+        market_summary, top_gainers, top_losers, most_volatile, highest_volume = await _derive_market_from_redis(timeframe, limit)
+        trending_news = []
+        sector_performance = {}
+        heatmap_data = []
         indicators_summary = {
-            "total_symbols": 0, "avg_rsi": 50,
-            "overbought_count": 0, "oversold_count": 0,
-            "bullish_macd_count": 0, "bearish_macd_count": 0,
+            "total_symbols": 0,
+            "avg_rsi": 50,
+            "overbought_count": 0,
+            "oversold_count": 0,
+            "bullish_macd_count": 0,
+            "bearish_macd_count": 0,
         }
-        used_source = "ticker_derived"
+        data_sources.append("redis_fallback")
 
     return {
         "timestamp": datetime.now().isoformat(),
@@ -108,30 +116,27 @@ async def get_market_overview(
         "heatmap_data": heatmap_data,
         "indicators_summary": indicators_summary,
         "metadata": {
-            "source": used_source,
-            "is_placeholder": used_source == "ticker_derived",
-            "warning": None if used_source == "trino_gold" else
-                "Fallback: data derived from live ticker Redis cache. Connect Trino gold tables for full analytics.",
+            "source": data_sources[0] if data_sources else "unknown",
+            "data_sources": data_sources,
+            "is_placeholder": "trino_gold" not in data_sources,
+            "computed_at": datetime.utcnow().isoformat(),
+            "gold_tables_healthy": trino_data_available,
+            "warning": None if "trino_gold" in data_sources else "Fallback: data derived from live ticker Redis cache. Gold analytics unavailable or empty.",
         },
     }
 
 
 async def _get_market_summary(trino) -> Dict[str, Any]:
-    """Get market summary metrics"""
-    query = """
+    query = f"""
     SELECT
-        total_market_cap,
-        total_volume_24h,
-        btc_dominance_pct,
-        eth_dominance_pct,
-        active_symbols
-    FROM iceberg.gold.market_dominance
-    ORDER BY snapshot_time DESC
-    LIMIT 1
+        COALESCE(MAX(total_volume_24h), 0) as total_volume_24h,
+        COALESCE(MAX(active_symbols), 0) as active_symbols,
+        COALESCE(MAX(btc_dominance_pct), 0) as btc_dominance_pct,
+        COALESCE(MAX(eth_dominance_pct), 0) as eth_dominance_pct
+    FROM {DB}.gold_market_dominance
+    WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
     """
-
     result = await trino.fetch_one(query)
-
     if not result:
         return {
             "total_market_cap": 0,
@@ -139,85 +144,256 @@ async def _get_market_summary(trino) -> Dict[str, Any]:
             "btc_dominance": 0,
             "eth_dominance": 0,
             "active_symbols": 0,
-            "fear_greed_index": 50
+            "fear_greed_index": 50,
         }
-
-    # Calculate Fear & Greed Index (simplified)
-    # Based on: volatility (30%), volume (25%), dominance (25%), sentiment (20%)
-    fear_greed = 50  # Neutral baseline
-
+    total_market_cap = 0
     return {
-        "total_market_cap": float(result[0]) if result[0] else 0,
-        "total_volume_24h": float(result[1]) if result[1] else 0,
-        "btc_dominance": float(result[2]) if result[2] else 0,
-        "eth_dominance": float(result[3]) if result[3] else 0,
-        "active_symbols": int(result[4]) if result[4] else 0,
-        "fear_greed_index": fear_greed
+        "total_market_cap": float(total_market_cap),
+        "total_volume_24h": float(result[0] or 0),
+        "btc_dominance": float(result[2] or 0),
+        "eth_dominance": float(result[3] or 0),
+        "active_symbols": int(result[1] or 0),
+        "fear_greed_index": 50,
     }
 
 
 async def _get_top_movers(trino, category: str, timeframe: str, limit: int) -> List[Dict[str, Any]]:
-    """Get top gainers or losers"""
+    order_col = "rank_gainers" if category == "gainer" else "rank_losers"
+    comparator = "> 0" if category == "gainer" else "< 0"
     query = f"""
-    SELECT
-        symbol,
-        rank,
-        change_pct,
-        current_price,
-        volume_24h,
-        volume_change_pct
-    FROM iceberg.gold.movers_ranking
-    WHERE category = '{category}'
-      AND timeframe = '{timeframe}'
-      AND _partition_date = CURRENT_DATE
-    ORDER BY rank
+    SELECT symbol, exchange, price, change_24h, volume_24h, {order_col}
+    FROM {DB}.gold_movers_ranking
+    WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
+      AND change_24h {comparator}
+    ORDER BY {order_col} ASC
     LIMIT {limit}
     """
-
     results = await trino.fetch_all(query)
-
     return [
         {
             "symbol": row[0],
-            "rank": row[1],
-            "change_pct": round(float(row[2]), 2) if row[2] else 0,
-            "price": round(float(row[3]), 2) if row[3] else 0,
+            "exchange": row[1],
+            "price": round(float(row[2]), 2) if row[2] else 0,
+            "change_pct": round(float(row[3]), 2) if row[3] else 0,
             "volume_24h": round(float(row[4]), 2) if row[4] else 0,
-            "volume_change_pct": round(float(row[5]), 2) if row[5] else 0
+            "rank": int(row[5]) if row[5] is not None else None,
         }
         for row in results
     ]
 
 
 async def _get_most_volatile(trino, limit: int) -> List[Dict[str, Any]]:
-    """Get most volatile symbols"""
     query = f"""
-    SELECT
-        symbol,
-        volatility_24h,
-        price_range_pct_24h,
-        rank_by_volatility
-    FROM iceberg.gold.volatility_ranking
-    WHERE _partition_date = CURRENT_DATE
-    ORDER BY rank_by_volatility
+    SELECT symbol, exchange, price_range_pct, atr_estimate, rank
+    FROM {DB}.gold_volatility_ranking
+    WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
+    ORDER BY rank ASC
     LIMIT {limit}
     """
-
     results = await trino.fetch_all(query)
-
     return [
         {
             "symbol": row[0],
-            "volatility_24h": round(float(row[1]), 4) if row[1] else 0,
+            "exchange": row[1],
             "price_range_pct": round(float(row[2]), 2) if row[2] else 0,
-            "rank": row[3]
+            "volatility_24h": round(float(row[2]), 4) if row[2] else 0,
+            "atr_estimate": round(float(row[3]), 4) if row[3] else 0,
+            "rank": int(row[4]) if row[4] is not None else None,
         }
         for row in results
     ]
 
 
 async def _get_highest_volume(trino, limit: int) -> List[Dict[str, Any]]:
-    """Get symbols with highest volume"""
+    query = f"""
+    SELECT symbol, exchange, price, change_24h, volume_24h
+    FROM {DB}.gold_movers_ranking
+    WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
+    ORDER BY volume_24h DESC
+    LIMIT {limit}
+    """
+    results = await trino.fetch_all(query)
+    return [
+        {
+            "symbol": row[0],
+            "exchange": row[1],
+            "price": round(float(row[2]), 2) if row[2] else 0,
+            "change_pct": round(float(row[3]), 2) if row[3] else 0,
+            "volume_24h": round(float(row[4]), 2) if row[4] else 0,
+        }
+        for row in results
+    ]
+
+
+async def _get_trending_news(trino, limit: int) -> List[Dict[str, Any]]:
+    query = f"""
+    SELECT symbol, article_count, avg_sentiment, bullish_count, bearish_count
+    FROM {DB}.gold_news_sentiment_daily
+    WHERE date >= current_timestamp - INTERVAL '7' DAY
+    ORDER BY article_count DESC
+    LIMIT {limit}
+    """
+    results = await trino.fetch_all(query)
+    return [
+        {
+            "symbol": row[0],
+            "article_count": row[1],
+            "avg_sentiment": round(float(row[2]), 3) if row[2] else 0,
+            "sentiment_positive": row[3],
+            "sentiment_negative": row[4],
+        }
+        for row in results
+    ]
+
+
+async def _get_sector_performance(trino) -> Dict[str, Any]:
+    query = f"""
+    SELECT sector, avg_change_pct, total_volume, symbol_count
+    FROM {DB}.gold_sector_performance
+    WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
+    ORDER BY total_volume DESC
+    LIMIT 10
+    """
+    results = await trino.fetch_all(query)
+    sectors = {}
+    for row in results:
+        sectors[str(row[0]).lower().replace(" ", "_")] = {
+            "change_pct": round(float(row[1]), 2) if row[1] else 0,
+            "volume": round(float(row[2]), 2) if row[2] else 0,
+            "symbol_count": row[3],
+        }
+    return sectors
+
+
+async def _get_heatmap_data(trino, limit: int) -> List[Dict[str, Any]]:
+    query = f"""
+    SELECT
+        m.symbol,
+        m.change_24h,
+        m.price,
+        m.volume_24h,
+        (m.price * m.volume_24h * 10) as market_cap,
+        v.price_range_pct
+    FROM {DB}.gold_movers_ranking m
+    LEFT JOIN {DB}.gold_volatility_ranking v
+        ON m.symbol = v.symbol AND m.exchange = v.exchange
+    WHERE m.computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
+    ORDER BY market_cap DESC
+    LIMIT {limit}
+    """
+    results = await trino.fetch_all(query)
+    return [
+        {
+            "symbol": row[0],
+            "change_pct": round(float(row[1]), 2) if row[1] else 0,
+            "price": round(float(row[2]), 2) if row[2] else 0,
+            "volume_24h": round(float(row[3]), 2) if row[3] else 0,
+            "market_cap": round(float(row[4]), 2) if row[4] else 0,
+            "volatility": round(float(row[5]), 4) if row[5] else 0,
+        }
+        for row in results
+    ]
+
+
+async def _get_indicators_summary(trino) -> Dict[str, Any]:
+    query = f"""
+    SELECT
+        COUNT(*) as total_symbols,
+        AVG(CASE WHEN rsi_signal = 'overbought' THEN 75 WHEN rsi_signal = 'oversold' THEN 25 ELSE 50 END) as avg_rsi,
+        SUM(CASE WHEN rsi_signal = 'overbought' THEN 1 ELSE 0 END) as overbought_count,
+        SUM(CASE WHEN rsi_signal = 'oversold' THEN 1 ELSE 0 END) as oversold_count,
+        SUM(CASE WHEN macd_signal = 'bullish_cross' THEN 1 ELSE 0 END) as bullish_macd_count,
+        SUM(CASE WHEN macd_signal = 'bearish_cross' THEN 1 ELSE 0 END) as bearish_macd_count
+    FROM {DB}.gold_momentum_indicators
+    WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
+    """
+    result = await trino.fetch_one(query)
+    if not result:
+        return {
+            "total_symbols": 0,
+            "avg_rsi": 50,
+            "overbought_count": 0,
+            "oversold_count": 0,
+            "bullish_macd_count": 0,
+            "bearish_macd_count": 0,
+        }
+    return {
+        "total_symbols": int(result[0] or 0),
+        "avg_rsi": round(float(result[1]), 2) if result[1] else 50,
+        "overbought_count": int(result[2] or 0),
+        "oversold_count": int(result[3] or 0),
+        "bullish_macd_count": int(result[4] or 0),
+        "bearish_macd_count": int(result[5] or 0),
+    }
+
+
+async def _derive_market_from_redis(timeframe: str, limit: int):
+    """Derive market overview from Redis ticker:latest scan when gold tables are unavailable."""
+    from backend.core.database import get_redis
+    r = await get_redis()
+
+    keys = []
+    cursor = 0
+    while True:
+        cursor, batch = await r.scan(cursor, match="ticker:latest:*:*", count=200)
+        keys.extend(batch)
+        if cursor == 0:
+            break
+
+    tickers = []
+    for key in keys:
+        data = await r.hgetall(key)
+        if not data:
+            continue
+        symbol = key.split(":")[-1]
+        exchange = key.split(":")[-2] if len(key.split(":")) >= 3 else "unknown"
+        try:
+            price = float(data.get("price", 0))
+            volume = float(data.get("volume", 0))
+            change24h = float(data.get("change24h", 0))
+            bid = float(data.get("bid", 0))
+            ask = float(data.get("ask", 0))
+        except (ValueError, TypeError):
+            continue
+        tickers.append({
+            "symbol": symbol,
+            "exchange": exchange,
+            "price": price,
+            "volume_24h": volume,
+            "change_pct": change24h,
+            "spread": round(ask - bid, 8) if bid > 0 and ask > 0 else 0,
+        })
+
+    if not tickers:
+        return (
+            {"total_market_cap": 0, "total_volume_24h": 0, "btc_dominance": 0, "eth_dominance": 0, "active_symbols": 0, "fear_greed_index": 50},
+            [], [], [], [],
+        )
+
+    total_volume = sum(t["volume_24h"] for t in tickers)
+    active = len(tickers)
+    sorted_change = sorted(tickers, key=lambda t: t["change_pct"], reverse=True)
+    top_gainers = sorted_change[:limit]
+    top_losers = sorted_change[-limit:][::-1]
+    for t in tickers:
+        t["volatility"] = round(abs(t["change_pct"]) + t["spread"] / (t["price"] or 1) * 100, 4)
+    most_volatile = sorted(tickers, key=lambda t: t["volatility"], reverse=True)[:limit]
+    for t in top_gainers + top_losers + most_volatile:
+        t.pop("spread", None)
+    highest_volume = sorted(tickers, key=lambda t: t["volume_24h"], reverse=True)[:limit]
+    btc = next((t for t in tickers if t["symbol"] == "BTCUSDT"), None)
+    eth = next((t for t in tickers if t["symbol"] == "ETHUSDT"), None)
+    btc_dom = (btc["volume_24h"] / total_volume * 100) if btc and total_volume > 0 else 0
+    eth_dom = (eth["volume_24h"] / total_volume * 100) if eth and total_volume > 0 else 0
+    market_summary = {
+        "total_market_cap": 0,
+        "total_volume_24h": round(total_volume, 2),
+        "btc_dominance": round(btc_dom, 2),
+        "eth_dominance": round(eth_dom, 2),
+        "active_symbols": active,
+        "fear_greed_index": 50,
+    }
+    return market_summary, top_gainers, top_losers, most_volatile, highest_volume
     query = f"""
     SELECT
         symbol,
@@ -245,83 +421,62 @@ async def _get_highest_volume(trino, limit: int) -> List[Dict[str, Any]]:
 
 
 async def _get_trending_news(trino, limit: int) -> List[Dict[str, Any]]:
-    """Get trending news by symbol"""
     query = f"""
-    SELECT
-        symbol,
-        article_count,
-        avg_sentiment,
-        sentiment_positive,
-        sentiment_negative
-    FROM iceberg.gold.news_sentiment_daily
-    WHERE date = CURRENT_DATE
+    SELECT symbol, article_count, avg_sentiment, bullish_count, bearish_count
+    FROM {DB}.gold_news_sentiment_daily
+    WHERE date >= current_timestamp - INTERVAL '7' DAY
     ORDER BY article_count DESC
     LIMIT {limit}
     """
-
     results = await trino.fetch_all(query)
-
     return [
         {
             "symbol": row[0],
             "article_count": row[1],
             "avg_sentiment": round(float(row[2]), 3) if row[2] else 0,
             "sentiment_positive": row[3],
-            "sentiment_negative": row[4]
+            "sentiment_negative": row[4],
         }
         for row in results
     ]
 
 
 async def _get_sector_performance(trino) -> Dict[str, Any]:
-    """Get sector performance metrics"""
-    query = """
-    SELECT
-        sector,
-        avg_change_pct,
-        total_volume,
-        symbol_count
-    FROM iceberg.gold.sector_performance
-    WHERE _partition_date = CURRENT_DATE
-    ORDER BY snapshot_time DESC
-    LIMIT 3
+    query = f"""
+    SELECT sector, avg_change_pct, total_volume, symbol_count
+    FROM {DB}.gold_sector_performance
+    WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
+    ORDER BY total_volume DESC
+    LIMIT 10
     """
-
     results = await trino.fetch_all(query)
-
     sectors = {}
     for row in results:
-        sectors[row[0].lower().replace(" ", "_")] = {
+        sectors[str(row[0]).lower().replace(" ", "_")] = {
             "change_pct": round(float(row[1]), 2) if row[1] else 0,
             "volume": round(float(row[2]), 2) if row[2] else 0,
-            "symbol_count": row[3]
+            "symbol_count": row[3],
         }
-
     return sectors
 
 
 async def _get_heatmap_data(trino, limit: int) -> List[Dict[str, Any]]:
-    """Get heatmap data (symbol, change, volume, market cap)"""
     query = f"""
     SELECT
         m.symbol,
-        m.change_pct,
-        m.current_price,
+        m.change_24h,
+        m.price,
         m.volume_24h,
-        (m.current_price * m.volume_24h * 10) as market_cap,
-        v.volatility_24h
-    FROM iceberg.gold.movers_ranking m
-    LEFT JOIN iceberg_catalog.gold.volatility_ranking v
-        ON m.symbol = v.symbol
-        AND m._partition_date = v._partition_date
-    WHERE m.timeframe = '24h'
-      AND m._partition_date = CURRENT_DATE
+        (m.price * m.volume_24h * 10) as market_cap,
+        v.price_range_pct
+    FROM {DB}.gold_movers_ranking m
+    LEFT JOIN {DB}.gold_volatility_ranking v
+        ON m.symbol = v.symbol AND m.exchange = v.exchange
+    WHERE m.computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
     ORDER BY market_cap DESC
     LIMIT {limit}
     """
-
     results = await trino.fetch_all(query)
-
     return [
         {
             "symbol": row[0],
@@ -329,28 +484,25 @@ async def _get_heatmap_data(trino, limit: int) -> List[Dict[str, Any]]:
             "price": round(float(row[2]), 2) if row[2] else 0,
             "volume_24h": round(float(row[3]), 2) if row[3] else 0,
             "market_cap": round(float(row[4]), 2) if row[4] else 0,
-            "volatility": round(float(row[5]), 4) if row[5] else 0
+            "volatility": round(float(row[5]), 4) if row[5] else 0,
         }
         for row in results
     ]
 
 
 async def _get_indicators_summary(trino) -> Dict[str, Any]:
-    """Get technical indicators summary"""
-    query = """
+    query = f"""
     SELECT
         COUNT(*) as total_symbols,
-        AVG(rsi_14) as avg_rsi,
-        SUM(CASE WHEN rsi_14 > 70 THEN 1 ELSE 0 END) as overbought_count,
-        SUM(CASE WHEN rsi_14 < 30 THEN 1 ELSE 0 END) as oversold_count,
-        SUM(CASE WHEN macd > macd_signal THEN 1 ELSE 0 END) as bullish_macd_count,
-        SUM(CASE WHEN macd < macd_signal THEN 1 ELSE 0 END) as bearish_macd_count
-    FROM iceberg.gold.momentum_indicators
-    WHERE _partition_date = CURRENT_DATE
+        AVG(CASE WHEN rsi_signal = 'overbought' THEN 75 WHEN rsi_signal = 'oversold' THEN 25 ELSE 50 END) as avg_rsi,
+        SUM(CASE WHEN rsi_signal = 'overbought' THEN 1 ELSE 0 END) as overbought_count,
+        SUM(CASE WHEN rsi_signal = 'oversold' THEN 1 ELSE 0 END) as oversold_count,
+        SUM(CASE WHEN macd_signal = 'bullish_cross' THEN 1 ELSE 0 END) as bullish_macd_count,
+        SUM(CASE WHEN macd_signal = 'bearish_cross' THEN 1 ELSE 0 END) as bearish_macd_count
+    FROM {DB}.gold_momentum_indicators
+    WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
     """
-
     result = await trino.fetch_one(query)
-
     if not result:
         return {
             "total_symbols": 0,
@@ -358,18 +510,16 @@ async def _get_indicators_summary(trino) -> Dict[str, Any]:
             "overbought_count": 0,
             "oversold_count": 0,
             "bullish_macd_count": 0,
-            "bearish_macd_count": 0
+            "bearish_macd_count": 0,
         }
-
     return {
-        "total_symbols": result[0],
+        "total_symbols": int(result[0] or 0),
         "avg_rsi": round(float(result[1]), 2) if result[1] else 50,
-        "overbought_count": result[2],
-        "oversold_count": result[3],
-        "bullish_macd_count": result[4],
-        "bearish_macd_count": result[5]
+        "overbought_count": int(result[2] or 0),
+        "oversold_count": int(result[3] or 0),
+        "bullish_macd_count": int(result[4] or 0),
+        "bearish_macd_count": int(result[5] or 0),
     }
-
 
 
 async def _derive_market_from_redis(timeframe: str, limit: int):

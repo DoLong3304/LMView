@@ -4,6 +4,7 @@ FastAPI application entry point.
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+import asyncio
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,11 +33,22 @@ from backend.api import (
 from backend.services.admin_bootstrap_service import ensure_default_admin
 from backend.tasks.news_fetcher import news_fetcher
 from backend.tasks.market_fetcher import market_fetcher
+from backend.services.sentiment_service import batch_score_unscored_articles
 
 import logging
 import os
 
 logger = logging.getLogger("backend.app")
+
+
+async def sentiment_score_loop():
+    while True:
+        try:
+            await asyncio.sleep(600)
+            scored = await batch_score_unscored_articles(batch_size=20)
+            logger.info("Sentiment loop scored %d articles", scored)
+        except Exception:
+            logger.exception("Sentiment loop failed")
 
 
 @asynccontextmanager
@@ -59,10 +71,16 @@ async def lifespan(app: FastAPI):
     # Start background tasks
     await news_fetcher.start()
     await market_fetcher.start()
+    sentiment_task = asyncio.create_task(sentiment_score_loop())
 
     yield
 
     # Stop background tasks
+    sentiment_task.cancel()
+    try:
+        await sentiment_task
+    except asyncio.CancelledError:
+        pass
     await news_fetcher.stop()
     await market_fetcher.stop()
     await close_all()

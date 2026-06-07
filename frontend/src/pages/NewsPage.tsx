@@ -11,6 +11,7 @@ import {
   TrendingDown,
   TrendingUp,
 } from "lucide-react";
+import { NewsCard } from "@/components/NewsCard";
 import { NEWS_REFRESH_MS, NEWS_SOURCES, NEWS_SYMBOLS } from "@/constants/market";
 import {
   fetchLatestNews,
@@ -277,69 +278,73 @@ const NewsPage: React.FC = () => {
               <>
                 <div className={articleLayoutClass}>
                   {articles.map((article) => (
-                    <a
-                      key={article.id}
-                      href={article.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block bg-gray-850 border border-gray-800 rounded overflow-hidden hover:border-gray-700 transition-all group"
-                    >
-                      <div className={isGridView ? "flex h-full flex-col" : "flex flex-col md:flex-row"}>
-                        {article.image_url && (
-                          <div className={isGridView ? "relative h-40 overflow-hidden bg-gray-900" : "md:w-64 relative overflow-hidden bg-gray-900"}>
-                            <img
-                              src={article.image_url}
-                              alt={article.title}
-                              className={isGridView ? "h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" : "w-full h-48 md:h-full object-cover transition-transform duration-500 group-hover:scale-105"}
-                              onError={(e) => {
-                                e.currentTarget.style.display = "none";
-                              }}
-                            />
-                          </div>
-                        )}
+                    isGridView ? (
+                      <NewsCard key={article.id} article={article} />
+                    ) : (
+                      <a
+                        key={article.id}
+                        href={article.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="block bg-gray-850 border border-gray-800 rounded overflow-hidden hover:border-gray-700 transition-all group"
+                      >
+                        <div className={isGridView ? "flex h-full flex-col" : "flex flex-col md:flex-row"}>
+                          {article.image_url && (
+                            <div className={isGridView ? "relative h-40 overflow-hidden bg-gray-900" : "md:w-64 relative overflow-hidden bg-gray-900"}>
+                              <img
+                                src={article.image_url}
+                                alt={article.title}
+                                className={isGridView ? "h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" : "w-full h-48 md:h-full object-cover transition-transform duration-500 group-hover:scale-105"}
+                                onError={(e) => {
+                                  e.currentTarget.style.display = "none";
+                                }}
+                              />
+                            </div>
+                          )}
 
-                        <div className="p-5 flex-1">
-                          <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
-                            <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-1 rounded font-medium">
-                              {article.source}
-                            </span>
-                            <span className="flex items-center text-gray-500">
-                              <Clock size={12} className="mr-1" />
-                              {formatTimeAgo(article.published_at)}
-                            </span>
-                            <span
-                              className={`flex items-center gap-1 px-2 py-1 rounded border text-xs font-medium ${getSentimentColor(
-                                article.sentiment_score,
-                              )}`}
-                            >
-                              {getSentimentIcon(article.sentiment_score)}
-                              {article.sentiment_score > 0 ? "+" : ""}
-                              {article.sentiment_score.toFixed(2)}
-                            </span>
-                          </div>
-
-                          <h3 className="text-base md:text-lg font-bold mb-2 text-white group-hover:text-blue-400 transition-colors flex items-start">
-                            {article.title}
-                            <ExternalLink size={14} className="ml-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
-                          </h3>
-
-                          <p className="text-sm text-gray-400 mb-3 line-clamp-2">
-                            {stripHtmlTags(article.summary)}
-                          </p>
-
-                          <div className="flex flex-wrap gap-2">
-                            {article.symbols.slice(0, 5).map((symbol) => (
-                              <span
-                                key={symbol}
-                                className="text-xs font-mono font-bold px-2 py-1 rounded bg-gray-800 border border-gray-700 text-gray-300"
-                              >
-                                {symbol}
+                          <div className="p-5 flex-1">
+                            <div className="flex flex-wrap items-center gap-2 mb-3 text-xs">
+                              <span className="bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-1 rounded font-medium">
+                                {article.source}
                               </span>
-                            ))}
+                              <span className="flex items-center text-gray-500">
+                                <Clock size={12} className="mr-1" />
+                                {formatTimeAgo(article.published_at)}
+                              </span>
+                              <span
+                                className={`flex items-center gap-1 px-2 py-1 rounded border text-xs font-medium ${getSentimentColor(
+                                  article.sentiment_score,
+                                )}`}
+                              >
+                                {getSentimentIcon(article.sentiment_score)}
+                                {article.sentiment_score > 0 ? "+" : ""}
+                                {article.sentiment_score.toFixed(2)}
+                              </span>
+                            </div>
+
+                            <h3 className="text-base md:text-lg font-bold mb-2 text-white group-hover:text-blue-400 transition-colors flex items-start">
+                              {article.title}
+                              <ExternalLink size={14} className="ml-2 mt-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+                            </h3>
+
+                            <p className="text-sm text-gray-400 mb-3 line-clamp-2">
+                              {stripHtmlTags(article.summary)}
+                            </p>
+
+                            <div className="flex flex-wrap gap-2">
+                              {(article.symbolsMentioned || article.symbols).slice(0, 5).map((symbol) => (
+                                <span
+                                  key={symbol}
+                                  className="text-xs font-mono font-bold px-2 py-1 rounded bg-gray-800 border border-gray-700 text-gray-300"
+                                >
+                                  {symbol}
+                                </span>
+                              ))}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    </a>
+                      </a>
+                    )
                   ))}
 
                   {articles.length === 0 && !loading && (

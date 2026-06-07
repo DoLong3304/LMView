@@ -4,6 +4,7 @@ Orchestrates Bronze → Silver → Gold transformations
 """
 from dagster import asset, AssetExecutionContext, schedule, define_asset_job, Definitions
 from pyspark.sql import SparkSession
+import subprocess
 import sys
 import os
 from pathlib import Path
@@ -16,7 +17,17 @@ from lakehouse.silver.transformations import SilverTickerTransformation, SilverK
 from lakehouse.gold.aggregations import GoldMarketOverview, GoldSymbolStatistics, GoldSectorPerformance
 import logging
 
-logger = logging.getLogger(__name__)
+SPARK_MASTER_URL = os.getenv("SPARK_MASTER_URL", os.getenv("SPARK_MASTER", "spark://spark-master:7077"))
+SPARK_SUBMIT = os.getenv("SPARK_SUBMIT", "/opt/spark/bin/spark-submit")
+GOLD_TRINO_JOB_PATH = "/app/src/lakehouse/gold_aggregator_trino.py"
+SPARK_PACKAGES = (
+    "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2,"
+    "org.apache.iceberg:iceberg-aws-bundle:1.5.2,"
+    "org.apache.hadoop:hadoop-aws:3.3.4,"
+    "org.postgresql:postgresql:42.7.2,"
+    "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.5,"
+    "org.apache.spark:spark-avro_2.12:3.5.5"
+)
 
 
 def get_spark_session() -> SparkSession:
@@ -352,6 +363,23 @@ def gold_movers_ranking(context: AssetExecutionContext):
     context.log.info("Gold movers_ranking calculated")
 
 
+@asset(
+    group_name="gold_layer",
+    compute_kind="python",
+    description="Compute gold overview tables from current crypto_lakehouse tables every 5 minutes",
+)
+def compute_gold_layer(context: AssetExecutionContext):
+    cmd = ["python3", GOLD_TRINO_JOB_PATH]
+    context.log.info("Running gold aggregation job: %s", " ".join(cmd))
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+    if result.returncode != 0:
+        context.log.error(result.stderr[-2000:])
+        context.log.error(result.stdout[-2000:])
+        raise RuntimeError(f"Gold aggregation failed: {result.stderr[-500:] or result.stdout[-500:]}")
+    context.log.info(result.stdout[-2000:])
+    return {"status": "success"}
+
+
 @asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_kline_1h])
 def gold_momentum_indicators(context: AssetExecutionContext):
     """Calculate RSI, MACD, Bollinger Bands"""
@@ -370,6 +398,16 @@ def gold_momentum_indicators(context: AssetExecutionContext):
     context.log.info("Gold momentum_indicators calculated")
 
 
+@asset(
+    group_name="gold_layer",
+    compute_kind="python",
+    description="Aggregate daily news sentiment per symbol into Iceberg gold",
+)
+def compute_news_sentiment_daily(context: AssetExecutionContext):
+    context.log.info("News sentiment daily aggregation placeholder: Phase C partial implementation in current session")
+    return {"status": "pending-runtime-dependency"}
+
+
 # Advanced gold metrics job (every 5 minutes)
 gold_advanced_job = define_asset_job(
     name="gold_advanced_metrics",
@@ -377,7 +415,8 @@ gold_advanced_job = define_asset_job(
         gold_market_dominance,
         gold_volatility_ranking,
         gold_movers_ranking,
-        gold_momentum_indicators
+        gold_momentum_indicators,
+        compute_gold_layer,
     ]
 )
 
@@ -386,6 +425,19 @@ gold_advanced_job = define_asset_job(
     cron_schedule="*/5 * * * *"  # Every 5 minutes
 )
 def gold_advanced_schedule():
+    return {}
+
+
+gold_layer_job = define_asset_job(
+    name="gold_layer_job",
+    selection=[compute_gold_layer, compute_news_sentiment_daily],
+)
+
+@schedule(
+    job=gold_layer_job,
+    cron_schedule="*/5 * * * *"
+)
+def gold_layer_schedule():
     return {}
 
 
@@ -406,6 +458,8 @@ defs = Definitions(
         gold_volatility_ranking,
         gold_movers_ranking,
         gold_momentum_indicators,
+        compute_gold_layer,
+        compute_news_sentiment_daily,
     ],
     schedules=[
         silver_transformation_schedule,
@@ -413,6 +467,7 @@ defs = Definitions(
         daily_aggregation_schedule,
         news_sentiment_schedule,
         gold_advanced_schedule,
+        gold_layer_schedule,
     ],
 )
 

@@ -132,6 +132,9 @@ export function useAiChat(): UseAiChatReturn {
               sources: response.sources,
               data_caveats: response.data_caveats,
               provider_metadata: response.provider_metadata,
+              token_input: response.token_input ?? undefined,
+              token_output: response.token_output ?? undefined,
+              estimated_cost_usd: response.estimated_cost_usd ?? undefined,
             };
             // Update session ID from backend response
             if (response.session_id && response.session_id !== sessionId) {

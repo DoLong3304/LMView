@@ -26,7 +26,7 @@ class TestMarketOverviewEndpoint:
     async def test_get_overview(self):
         """Test the market overview endpoint with mocked Trino data."""
         mock_trino = MockTrinoClient(
-            one_return=(1000000.0, 500000.0, 50.0, 20.0, 100, 50),
+            one_return=(500000.0, 100, 50.0, 20.0),
             all_return=[]
         )
         with patch("backend.api.market_overview.get_trino", return_value=mock_trino):
@@ -37,6 +37,8 @@ class TestMarketOverviewEndpoint:
             assert resp.status_code == 200
             data = resp.json()
             assert "market_summary" in data
+            assert "metadata" in data
+            assert "data_sources" in data["metadata"]
 
     @pytest.mark.asyncio
     async def test_get_heatmap(self):
@@ -48,7 +50,7 @@ class TestMarketOverviewEndpoint:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/market/heatmap")
-                
+
             assert resp.status_code == 200
             data = resp.json()
             assert "data" in data
@@ -59,13 +61,13 @@ class TestMarketOverviewEndpoint:
     async def test_get_rankings_gainers(self):
         """Test the rankings endpoint for gainers."""
         mock_trino = MockTrinoClient(
-            all_return=[("ETHUSDT", 1, 10.5, 3000.0, 500.0, 5.0)]
+            all_return=[("ETHUSDT", "binance", 3000.0, 10.5, 500.0, 1)]
         )
         with patch("backend.api.market_overview.get_trino", return_value=mock_trino):
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/market/rankings/gainers")
-                
+
             assert resp.status_code == 200
             data = resp.json()
             assert data["category"] == "gainers"
@@ -80,5 +82,5 @@ class TestMarketOverviewEndpoint:
             transport = ASGITransport(app=app)
             async with AsyncClient(transport=transport, base_url="http://test") as ac:
                 resp = await ac.get("/api/market/rankings/invalid_cat")
-                
+
             assert resp.status_code == 400

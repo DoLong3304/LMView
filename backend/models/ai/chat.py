@@ -67,6 +67,10 @@ class AIChatResponse(BaseModel):
     sources: Optional[List[Dict[str, Any]]] = None
     data_caveats: Optional[List[str]] = None
     provider_metadata: Optional[Dict[str, Any]] = None
+    # Token usage for cost tracking
+    token_input: Optional[int] = None
+    token_output: Optional[int] = None
+    estimated_cost_usd: Optional[float] = None
 
 
 class AISessionResponse(BaseModel):

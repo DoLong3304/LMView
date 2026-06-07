@@ -6,6 +6,8 @@ COPY docker/fastapi/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ backend/
+COPY src/ src/
+COPY schemas/ schemas/
 
 EXPOSE 8000
 

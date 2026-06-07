@@ -258,8 +258,31 @@ async def _real_llm_response(
             "is_local": routing.is_local,
             "fallback_used": routing.fallback_used,
             "latency_ms": elapsed_ms,
+            "token_input": llm_response.token_input,
+            "token_output": llm_response.token_output,
         },
+        token_input=llm_response.token_input,
+        token_output=llm_response.token_output,
+        estimated_cost_usd=_estimate_cost(llm_response.token_input, llm_response.token_output, routing.selected_provider),
     )
+
+
+def _estimate_cost(token_input: int | None, token_output: int | None, provider: str | None) -> float | None:
+    """Estimate cost in USD based on token usage and provider pricing."""
+    if token_input is None and token_output is None:
+        return None
+    # Qwen API pricing (approximate, per 1M tokens)
+    pricing = {
+        "qwen_api": {"input_per_1m": 0.5, "output_per_1m": 1.5},  # Qwen-plus pricing
+        "openai": {"input_per_1m": 0.15, "output_per_1m": 0.60},
+        "gemini": {"input_per_1m": 0.075, "output_per_1m": 0.30},
+        "deepseek": {"input_per_1m": 0.27, "output_per_1m": 1.10},
+        "mock": {"input_per_1m": 0.0, "output_per_1m": 0.0},
+    }
+    provider_pricing = pricing.get(provider or "qwen_api", pricing["qwen_api"])
+    input_cost = (token_input or 0) / 1_000_000 * provider_pricing["input_per_1m"]
+    output_cost = (token_output or 0) / 1_000_000 * provider_pricing["output_per_1m"]
+    return round(input_cost + output_cost, 6)
 
 
 async def _mock_response(

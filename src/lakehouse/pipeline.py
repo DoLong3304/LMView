@@ -13,11 +13,15 @@ Usage (Docker)::
 import json
 import os
 import sys
+import time
+import logging
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from pyspark.sql import SparkSession
 from pyspark.sql.functions import col, current_timestamp
+
+logger = logging.getLogger(__name__)
 from pyspark.sql.avro.functions import from_avro
 
 from common.config import (
@@ -115,6 +119,38 @@ def read_kafka(spark: SparkSession, topic: str, avro_schema: str):
     )
 
 
+def _ensure_column(spark: SparkSession, table_name: str, column_name: str, column_type: str) -> None:
+    """Best-effort schema evolution for existing Iceberg tables."""
+    try:
+        spark.sql(f"ALTER TABLE {table_name} ADD COLUMNS ({column_name} {column_type})")
+        logger.info("Added column %s %s to %s", column_name, column_type, table_name)
+    except Exception as exc:
+        message = str(exc)
+        if "already exists" in message or "Cannot add duplicate" in message or "Found duplicate column" in message:
+            logger.info("Column %s already exists on %s", column_name, table_name)
+        else:
+            logger.warning("Could not add column %s to %s: %s", column_name, table_name, exc)
+
+def _start_query_with_retry(start_query_fn, query_name: str, max_retries: int = 5, backoff_sec: int = 15):
+    """Start streaming query with bounded retries.
+
+    Retries cover startup-time failures only. Once all queries are started,
+    Spark owns runtime supervision until `awaitAnyTermination()` returns.
+    """
+    attempt = 0
+    while True:
+        try:
+            query = start_query_fn()
+            logger.info("Started streaming query %s", query_name)
+            return query
+        except Exception as exc:
+            attempt += 1
+            logger.exception("Failed starting query %s (attempt %d/%d): %s", query_name, attempt, max_retries, exc)
+            if attempt >= max_retries:
+                raise
+            time.sleep(backoff_sec * attempt)
+
+
 def run():
     spark = build_spark()
     spark.sparkContext.setLogLevel("WARN")
@@ -144,6 +180,7 @@ def run():
         USING iceberg
         PARTITIONED BY (days(event_timestamp))
     """)
+    _ensure_column(spark, ICEBERG_TABLE_TICKER, "exchange", "STRING")
 
     spark.sql(f"""
         CREATE TABLE IF NOT EXISTS {ICEBERG_TABLE_TRADES} (
@@ -162,6 +199,7 @@ def run():
         USING iceberg
         PARTITIONED BY (days(trade_timestamp))
     """)
+    _ensure_column(spark, ICEBERG_TABLE_TRADES, "exchange", "STRING")
 
     spark.sql(f"""
         CREATE TABLE IF NOT EXISTS {ICEBERG_TABLE_KLINES} (
@@ -185,6 +223,7 @@ def run():
         USING iceberg
         PARTITIONED BY (days(kline_timestamp))
     """)
+    _ensure_column(spark, ICEBERG_TABLE_KLINES, "exchange", "STRING")
 
     # â”€â”€ Ticker stream â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     ticker_df = (
@@ -192,17 +231,36 @@ def run():
         .filter(col("event_time").isNotNull())
         .withColumn("event_timestamp", (col("event_time") / 1000).cast("timestamp"))
         .withColumn("ingested_at", current_timestamp())
+        .select(
+            "event_time",
+            "symbol",
+            "close",
+            "bid",
+            "ask",
+            "h24_open",
+            "h24_high",
+            "h24_low",
+            "h24_volume",
+            "h24_quote_volume",
+            "h24_price_change",
+            "h24_price_change_pct",
+            "h24_trade_count",
+            "event_timestamp",
+            "ingested_at",
+            "exchange",
+        )
         .withWatermark("event_timestamp", "1 minute")
         .dropDuplicates(["symbol", "event_timestamp"])
     )
 
-    ticker_query = (
-        ticker_df.writeStream
+    ticker_query = _start_query_with_retry(
+        lambda: ticker_df.writeStream
         .format("iceberg")
         .outputMode("append")
         .trigger(processingTime="1 minute")
         .option("checkpointLocation", CHECKPOINT_TICKER)
-        .toTable(ICEBERG_TABLE_TICKER)
+        .toTable(ICEBERG_TABLE_TICKER),
+        "ticker",
     )
 
     # â”€â”€ Trades stream â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -212,37 +270,71 @@ def run():
         .withColumn("event_timestamp", (col("event_time") / 1000).cast("timestamp"))
         .withColumn("trade_timestamp",  (col("trade_time") / 1000).cast("timestamp"))
         .withColumn("ingested_at", current_timestamp())
+        .select(
+            "event_time",
+            "symbol",
+            "agg_trade_id",
+            "price",
+            "quantity",
+            "trade_time",
+            "is_buyer_maker",
+            "event_timestamp",
+            "trade_timestamp",
+            "ingested_at",
+            "exchange",
+        )
     )
 
-    trades_query = (
-        trades_df.writeStream
+    trades_query = _start_query_with_retry(
+        lambda: trades_df.writeStream
         .format("iceberg")
         .outputMode("append")
         .trigger(processingTime="1 minute")
         .option("checkpointLocation", CHECKPOINT_TRADES)
-        .toTable(ICEBERG_TABLE_TRADES)
+        .toTable(ICEBERG_TABLE_TRADES),
+        "trades",
     )
 
     # â”€â”€ Klines stream â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     klines_df = (
         read_kafka(spark, "crypto_klines", KLINES_AVRO_SCHEMA)
         .filter(col("kline_start").isNotNull())
-        .filter(col("interval") == "1m")
         .filter(col("is_closed") == True)
         .withColumn("kline_timestamp", (col("kline_start") / 1000).cast("timestamp"))
         .withColumn("ingested_at", current_timestamp())
+        .select(
+            "event_time",
+            "symbol",
+            "kline_start",
+            "kline_close",
+            "interval",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "quote_volume",
+            "trade_count",
+            "is_closed",
+            "kline_timestamp",
+            "ingested_at",
+            "exchange",
+        )
         .withWatermark("kline_timestamp", "2 minutes")
         .dropDuplicates(["exchange", "symbol", "kline_start"])
     )
 
-    klines_query = (
-        klines_df.writeStream
+    klines_query = _start_query_with_retry(
+        lambda: klines_df.writeStream
         .format("iceberg")
         .outputMode("append")
         .trigger(processingTime="1 minute")
         .option("checkpointLocation", CHECKPOINT_KLINES)
-        .toTable(ICEBERG_TABLE_KLINES)
+        .toTable(ICEBERG_TABLE_KLINES),
+        "klines",
     )
+
+    logger.info("All streaming queries started: %s", [q.name for q in spark.streams.active])
 
     # Block indefinitely so the JVM stays alive and processes records
     spark.streams.awaitAnyTermination()

@@ -10,6 +10,7 @@ const TRENDING_SYMBOLS_CACHE_MS = 60_000;
 const mockDataAdapter = getMockDataAdapter();
 
 function normalizeNewsItem(item: Partial<NewsArticle>): NewsArticle {
+  const rawSymbols = (item as NewsArticle & { symbolsMentioned?: string[] }).symbolsMentioned || item.symbols || [];
   return {
     id: item.id || `${item.source || "news"}-${item.published_at || Date.now()}`,
     source: item.source || "",
@@ -20,9 +21,9 @@ function normalizeNewsItem(item: Partial<NewsArticle>): NewsArticle {
     published_at: item.published_at || Date.now(),
     image_url: item.image_url,
     tags: item.tags || [],
-    symbols: item.symbols || [],
+    symbols: rawSymbols,
     sentiment_score: Number(item.sentiment_score || 0),
-    sentiment_label: item.sentiment_label || "Neutral",
+    sentiment_label: item.sentiment_label || "neutral",
     language: item.language,
     region: item.region,
   };

@@ -157,9 +157,9 @@ const MarketNews: React.FC = () => {
                     <p className="text-xs text-gray-400 line-clamp-2 mb-2">
                       {article.summary}
                     </p>
-                    {article.symbols.length > 0 && (
+                    {(article.symbolsMentioned || article.symbols).length > 0 && (
                       <div className="flex flex-wrap gap-1">
-                        {article.symbols.slice(0, 5).map((symbol) => (
+                        {(article.symbolsMentioned || article.symbols).slice(0, 5).map((symbol) => (
                           <span
                             key={symbol}
                             className="text-xs px-2 py-0.5 bg-blue-900/30 text-blue-400 rounded"

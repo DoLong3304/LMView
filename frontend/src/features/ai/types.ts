@@ -26,6 +26,10 @@ export interface AiMessage {
   data_caveats?: string[] | null;
   /** Phase 1: provider routing metadata */
   provider_metadata?: Record<string, unknown> | null;
+  /** Token usage for cost tracking */
+  token_input?: number | null;
+  token_output?: number | null;
+  estimated_cost_usd?: number | null;
 }
 
 export interface AiChatState {

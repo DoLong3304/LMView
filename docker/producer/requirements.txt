@@ -1,4 +1,5 @@
 kafka-python==2.0.2
+redis==5.0.*
 requests==2.32.*
 websocket-client==1.8.*
 fastavro==1.9.*

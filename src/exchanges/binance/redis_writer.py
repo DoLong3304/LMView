@@ -38,14 +38,27 @@ class DirectRedisWriter:
             return False
         try:
             key = f"ticker:latest:{exchange}:{symbol}"
+
+            # Calculate real-time % change from current price vs 24h open
+            current_price = float(data.get("close", 0))
+            h24_open = float(data.get("h24_open", 0))
+            if h24_open > 0:
+                calculated_change = ((current_price - h24_open) / h24_open) * 100
+            else:
+                # Fallback to Binance-provided % change
+                calculated_change = float(data.get("h24_price_change_pct", 0))
+
             mapping = {
-                "price":      str(data.get("close", 0)),
+                "price":      str(current_price),
                 "bid":        str(data.get("bid", 0)),
                 "ask":        str(data.get("ask", 0)),
                 "volume":     str(data.get("h24_volume", 0)),
-                "change24h":  str(data.get("h24_price_change_pct", 0)),
+                "change24h":  str(round(calculated_change, 4)),
                 "event_time": str(data.get("event_time", 0)),
                 "exchange":   exchange,
+                "h24_open":   str(h24_open),
+                "h24_high":   str(data.get("h24_high", 0)),
+                "h24_low":    str(data.get("h24_low", 0)),
             }
             self._r.hset(key, mapping=mapping)
             self._r.expire(key, self.TICKER_TTL)

@@ -20,7 +20,7 @@ async def get_latest_news(
 ):
     """Get latest news articles."""
     try:
-        return news_service.get_latest(limit=limit, source=source, symbol=symbol, hours=hours)
+        return await news_service.get_latest(limit=limit, source=source, symbol=symbol, hours=hours)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -28,7 +28,7 @@ async def get_latest_news(
 @router.get("/sources")
 async def get_news_sources():
     """Get list of all news sources."""
-    return news_service.get_sources()
+    return await news_service.get_sources()
 
 
 @router.get("/trending")
@@ -37,7 +37,7 @@ async def get_trending_news(
 ):
     """Get trending news (most mentioned symbols, highest sentiment)."""
     try:
-        return news_service.get_trending(limit=limit)
+        return await news_service.get_trending(limit=limit)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -49,7 +49,7 @@ async def get_symbol_sentiment(
 ):
     """Get sentiment analysis for a specific symbol."""
     try:
-        return news_service.get_symbol_sentiment(symbol=symbol, hours=hours)
+        return await news_service.get_symbol_sentiment(symbol=symbol, hours=hours)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -61,6 +61,6 @@ async def search_news(
 ):
     """Search news articles by keyword."""
     try:
-        return news_service.search_news(query=q, limit=limit)
+        return await news_service.search_news(query=q, limit=limit)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

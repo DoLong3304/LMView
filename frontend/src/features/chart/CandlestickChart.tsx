@@ -9,6 +9,7 @@ import {
   HistogramSeries,
   LineSeries,
 } from "lightweight-charts";
+import { NewsCard } from "@/components/NewsCard";
 import {
   Activity,
   AreaChart,
@@ -64,6 +65,7 @@ import type {
   IndicatorSettings,
   IndicatorStreamSnapshot,
   TimeframeKey,
+  NewsArticle,
 } from "@/types";
 import type { TranslationKey } from "@/i18n/translations";
 
@@ -97,6 +99,8 @@ interface CandlestickChartProps {
   themeMode?: "dark" | "light";
   chartType?: ChartType;
   onChartTypeChange?: (type: ChartType) => void;
+  newsItems?: NewsArticle[];
+  showNewsMarkers?: boolean;
   // Replay mode props
   isReplayActive?: boolean;
 }
@@ -124,6 +128,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   themeMode = "dark",
   chartType = "candles",
   onChartTypeChange,
+  newsItems = [],
+  showNewsMarkers = true,
   isReplayActive = false,
 }) => {
   const { t } = useI18n();
@@ -1529,6 +1535,38 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       }
     }
   }, [isReplayActive]);
+
+  useEffect(() => {
+    if (!showNewsMarkers) {
+      candleRef.current?.setMarkers?.([]);
+      return;
+    }
+    if (!candleRef.current || !newsItems?.length) return;
+
+    const markers = newsItems
+      .filter((article) => {
+        const symbols = article.symbolsMentioned || article.symbols || [];
+        return symbols.some((s) => symbol.includes(s));
+      })
+      .map((article) => {
+        const sentiment = (article.sentiment_label || "neutral").toLowerCase();
+        const color = sentiment === "bullish" ? "#22c55e" : sentiment === "bearish" ? "#ef4444" : "#94a3b8";
+        const ts = typeof article.published_at === "string" ? Date.parse(article.published_at) : article.published_at;
+        return {
+          time: Math.floor(ts / 1000),
+          position: "aboveBar",
+          color,
+          shape: "circle",
+          text: "N",
+        } as any;
+      })
+      .sort((a, b) => Number(a.time) - Number(b.time));
+
+    candleRef.current?.setMarkers?.(markers);
+    return () => {
+      candleRef.current?.setMarkers?.([]);
+    };
+  }, [newsItems, showNewsMarkers, symbol]);
 
   // Load historical data when date range is set
   // (Removed - now handled by handleHistoricalRange callback)

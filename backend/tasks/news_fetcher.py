@@ -1,49 +1,189 @@
 """
-Background task to fetch news from multiple sources.
-Runs every 5 minutes to keep news cache fresh.
+News fetcher with PostgreSQL persistence.
+Fetches from multi-source scraper every 5 minutes and stores deduplicated articles.
 """
+from __future__ import annotations
+
 import asyncio
 import logging
-import os
-from datetime import datetime
+import re
+from datetime import datetime, timezone
+from typing import Any
 
+from backend.core.postgres import get_pg_pool
 from src.news.enhanced_scraper import EnhancedMultiSourceScraper
-from src.news.sentiment_analyzer import SentimentAnalyzer
-from backend.services import news_service
 
 logger = logging.getLogger(__name__)
 
+TRACKED_SYMBOLS = [
+    "BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "AVAX", "DOT", "MATIC",
+    "LINK", "UNI", "ATOM", "LTC", "TRX", "NEAR", "APT", "SUI", "FIL", "ICP",
+]
+
+SYMBOL_PATTERNS = {
+    symbol: re.compile(rf"\b{re.escape(symbol)}\b", re.IGNORECASE)
+    for symbol in TRACKED_SYMBOLS
+}
+
+
+def _extract_symbols(title: str, summary: str, scraper_symbols: list[str] | None = None) -> list[str]:
+    found = set(scraper_symbols or [])
+    text = f"{title} {summary}".upper()
+    for symbol, pattern in SYMBOL_PATTERNS.items():
+        if pattern.search(text):
+            found.add(symbol)
+    return sorted(found)
+
+
+def _normalize_article(article: dict[str, Any]) -> dict[str, Any]:
+    title = article.get("title", "") or ""
+    summary = article.get("summary", "") or ""
+    source = (article.get("source") or "unknown").strip().lower()
+    url = article.get("url", "") or ""
+    published_raw = article.get("published_at")
+    if isinstance(published_raw, (int, float)):
+        published_at = datetime.fromtimestamp(published_raw / 1000, tz=timezone.utc)
+    elif isinstance(published_raw, str):
+        try:
+            published_at = datetime.fromisoformat(published_raw.replace("Z", "+00:00"))
+        except Exception:
+            published_at = datetime.now(timezone.utc)
+    else:
+        published_at = datetime.now(timezone.utc)
+
+    symbols = _extract_symbols(title, summary, article.get("symbols") or [])
+
+    return {
+        "external_id": str(article.get("id") or url or title),
+        "source": source,
+        "title": title,
+        "summary": summary[:1000] if summary else None,
+        "url": url or None,
+        "published_at": published_at,
+        "fetched_at": datetime.now(timezone.utc),
+        "symbols": symbols,
+        "symbols_mentioned": symbols,
+        "tags": article.get("tags") or [],
+        "language": article.get("language") or "en",
+        "content_snippet": (article.get("content") or summary or title)[:1500],
+        "raw_payload": article,
+        "raw_metadata": {
+            "author": article.get("author"),
+            "image_url": article.get("image_url"),
+            "region": article.get("region"),
+            "votes": article.get("votes") or {},
+        },
+    }
+
+
+async def save_articles_to_postgres(articles: list[dict[str, Any]]) -> int:
+    pool = await get_pg_pool()
+    if pool is None:
+        logger.warning("PostgreSQL pool unavailable; skipping news persistence")
+        return 0
+
+    inserted = 0
+    async with pool.acquire() as conn:
+        for article in articles:
+            try:
+                result = await conn.execute(
+                    """
+                    INSERT INTO news_articles (
+                        external_id, source, title, summary, url, published_at, fetched_at,
+                        symbols, symbols_mentioned, tags, language, content_snippet,
+                        raw_payload, raw_metadata
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::text[], $10::jsonb, $11, $12, $13::jsonb, $14::jsonb)
+                    """,
+                    article["external_id"],
+                    article["source"],
+                    article["title"],
+                    article["summary"],
+                    article["url"],
+                    article["published_at"],
+                    article["fetched_at"],
+                    __import__("json").dumps(article["symbols"]),
+                    article["symbols_mentioned"],
+                    __import__("json").dumps(article["tags"]),
+                    article["language"],
+                    article["content_snippet"],
+                    __import__("json").dumps(article["raw_payload"]),
+                    __import__("json").dumps(article["raw_metadata"]),
+                )
+                if result != "INSERT 0 0":
+                    inserted += 1
+            except Exception as exc:
+                if article.get("url"):
+                    dedupe_result = await conn.execute(
+                        """
+                        UPDATE news_articles
+                        SET title = $1,
+                            summary = $2,
+                            published_at = $3,
+                            fetched_at = $4,
+                            symbols = $5::jsonb,
+                            symbols_mentioned = $6::text[],
+                            tags = $7::jsonb,
+                            language = $8,
+                            content_snippet = $9,
+                            raw_payload = $10::jsonb,
+                            raw_metadata = $11::jsonb
+                        WHERE source = $12 AND url = $13
+                        """,
+                        article["title"],
+                        article["summary"],
+                        article["published_at"],
+                        article["fetched_at"],
+                        __import__("json").dumps(article["symbols"]),
+                        article["symbols_mentioned"],
+                        __import__("json").dumps(article["tags"]),
+                        article["language"],
+                        article["content_snippet"],
+                        __import__("json").dumps(article["raw_payload"]),
+                        __import__("json").dumps(article["raw_metadata"]),
+                        article["source"],
+                        article["url"],
+                    )
+                    if dedupe_result != "UPDATE 0":
+                        continue
+                logger.warning("Failed to persist article %s: %s", article.get("url") or article.get("title"), exc)
+    return inserted
+
+
+async def fetch_and_store_all_news() -> dict[str, Any]:
+    scraper = EnhancedMultiSourceScraper(cryptopanic_api_key=None)
+    fetched = await asyncio.to_thread(scraper.fetch_recent, 24, 10)
+    normalized = [_normalize_article(article) for article in fetched]
+    inserted = await save_articles_to_postgres(normalized)
+
+    try:
+        from backend.services.sentiment_service import batch_score_unscored_articles
+        scored = await batch_score_unscored_articles(batch_size=20)
+    except Exception as exc:
+        logger.warning("Sentiment scoring after fetch failed: %s", exc)
+        scored = 0
+
+    logger.info("News fetch complete: fetched=%d inserted=%d scored=%d", len(normalized), inserted, scored)
+    return {"fetched": len(normalized), "inserted": inserted, "scored": scored}
+
 
 class NewsFetcherTask:
-    """Background task to fetch and cache news articles."""
-
     def __init__(self, interval_seconds: int = 300):
         self.interval_seconds = interval_seconds
-        self.scraper = None
-        self.sentiment_analyzer = None
-        self.task = None
+        self.task: asyncio.Task | None = None
         self.running = False
 
     async def start(self):
-        """Start the background task."""
         if self.running:
             logger.warning("News fetcher already running")
             return
-
-        # Initialize scraper and sentiment analyzer
-        api_key = os.getenv("CRYPTOPANIC_API_KEY")
-        self.scraper = EnhancedMultiSourceScraper(cryptopanic_api_key=api_key)
-        self.sentiment_analyzer = SentimentAnalyzer()
-
         self.running = True
         self.task = asyncio.create_task(self._run())
         logger.info("News fetcher task started (interval: %ds)", self.interval_seconds)
 
     async def stop(self):
-        """Stop the background task."""
         if not self.running:
             return
-
         self.running = False
         if self.task:
             self.task.cancel()
@@ -54,55 +194,13 @@ class NewsFetcherTask:
         logger.info("News fetcher task stopped")
 
     async def _run(self):
-        """Main loop to fetch news periodically."""
-        # Delay first fetch to avoid blocking startup
         await asyncio.sleep(5)
-        await self._fetch_and_cache()
-
         while self.running:
             try:
-                await asyncio.sleep(self.interval_seconds)
-                if self.running:
-                    await self._fetch_and_cache()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("Error in news fetcher loop: %s", e, exc_info=True)
-                await asyncio.sleep(60)  # Wait 1 min before retry
-
-    async def _fetch_and_cache(self):
-        """Fetch news from all sources and update cache."""
-        try:
-            logger.info("Fetching news from all sources...")
-            start_time = datetime.now()
-
-            # Fetch in thread pool (blocking I/O)
-            articles = await asyncio.to_thread(
-                self.scraper.fetch_recent,
-                hours=24,
-                articles_per_source=10
-            )
-
-            # Add sentiment scores
-            for article in articles:
-                text = f"{article.get('title', '')} {article.get('summary', '')}"
-                sentiment_score = self.sentiment_analyzer.analyze(text)
-                article["sentiment_score"] = sentiment_score
-                article["sentiment_label"] = self.sentiment_analyzer.classify(sentiment_score)
-
-            # Update cache
-            news_service.update_news_cache(articles)
-
-            elapsed = (datetime.now() - start_time).total_seconds()
-            logger.info(
-                "✅ Fetched %d articles in %.2fs (sentiment analyzed)",
-                len(articles),
-                elapsed
-            )
-
-        except Exception as e:
-            logger.error("Failed to fetch news: %s", e, exc_info=True)
+                await fetch_and_store_all_news()
+            except Exception as exc:
+                logger.error("Failed to fetch/store news: %s", exc, exc_info=True)
+            await asyncio.sleep(self.interval_seconds)
 
 
-# Global instance
-news_fetcher = NewsFetcherTask(interval_seconds=300)  # 5 minutes
+news_fetcher = NewsFetcherTask(interval_seconds=300)

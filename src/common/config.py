@@ -52,7 +52,7 @@ DEPTH_UPDATE_MS        = os.environ.get("DEPTH_UPDATE_MS", "100")
 SYMBOLS_PER_CONNECTION = int(os.environ.get("SYMBOLS_PER_CONNECTION", "25"))
 SYMBOLS_PER_DEPTH_CONN = int(os.environ.get("SYMBOLS_PER_DEPTH_CONN", "15"))
 MAX_SYMBOLS            = int(os.environ.get("MAX_SYMBOLS", "200"))
-TICKER_HEARTBEAT_SEC   = 5.0
+TICKER_HEARTBEAT_SEC   = 0.3
 ENABLE_OKX             = os.environ.get("ENABLE_OKX", "false").lower() == "true"
 
 # ── Direct Redis Bypass ──
