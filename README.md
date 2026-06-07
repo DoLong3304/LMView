@@ -1,6 +1,6 @@
 # LMView
 
-[![Docker](https://img.shields.io/badge/Docker-27_dev_services-blue?logo=docker)](docker-compose.yml)
+[![Docker](https://img.shields.io/badge/Docker-29_dev_services-blue?logo=docker)](docker-compose.yml)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115.6-009688?logo=fastapi)](backend/)
 [![React](https://img.shields.io/badge/React-19.1-61DAFB?logo=react)](frontend/)
 [![Apache Flink](https://img.shields.io/badge/Apache_Flink-1.18.1-E6522C?logo=apacheflink)](src/processing/)
@@ -16,13 +16,18 @@ Real-time cryptocurrency technical-analysis platform built on Lambda Architectur
 
 - **Live market data path** through exchange WebSockets, Kafka, Flink, Redis Sentinel, InfluxDB, FastAPI, and WebSocket streaming.
 - **Multi-timeframe charts**: `1s`, `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`.
-- **Exchange abstraction** with Binance as primary path and OKX present but still experimental.
+- **Exchange abstraction** with Binance as primary path and OKX present, tested at mapper/subscription-frame level, and disabled by default until remaining interval/exchange caveats are closed.
 - **Lakehouse analytics** with Spark, Iceberg on MinIO, PostgreSQL catalog, and Trino.
 - **High availability infrastructure**: 3 Kafka brokers and Redis Sentinel with 1 master, 2 replicas, 3 Sentinels.
 - **Resilience bypass path**: Direct WebSocket → Redis writes when Kafka/Flink is down (ENABLE_DIRECT_REDIS=true).
 - **Market overview and news**: gold-table metrics, heatmaps, rankings, multi-source news and sentiment cache.
 - **Trading UI**: lightweight-charts v5.2.0, drawing tools, replay mode, i18n, mock/API data mode.
 - **Observability**: Prometheus, Grafana, Loki, exporters, 11 dashboards, alert rules.
+- **Resilience bypass path**: optional direct WebSocket -> Redis writes, plus partial health-monitor auto-failover for Binance ticker writes.
+- **Market overview and news**: gold-table metrics with Redis ticker fallback, heatmaps/rankings, multi-source news and sentiment cache.
+- **Trading UI**: lightweight-charts v5.2.0, drawing tools, replay mode, i18n, auth, settings, notifications, market/news views, and mock/API data mode.
+- **Phase 1 AI Ask Mode**: provider routing, pgvector-powered RAG knowledge base, prompt builder, output guard, context service, mock fallback, and 50 golden evaluation questions.
+- **Observability**: Prometheus, Grafana, Loki, exporters, 22 dashboards, and 18 alert rules.
 
 ---
 
@@ -36,7 +41,7 @@ Exchange WS/REST -> Producer -> Kafka -> Flink/Spark
 
 ![Data Flow Diagram](docs/crypto.png)
 
-LMView focuses on data engineering first: durable lakehouse data, low-latency Redis features, Trino analytics, and clear FastAPI serving boundaries. AI/ML work is currently at foundation stage; real LLM/model inference is not production-wired.
+LMView focuses on data engineering first: durable lakehouse data, low-latency Redis features, Trino analytics, and clear FastAPI serving boundaries. Phase 1 AI Ask Mode is wired into core FastAPI with mock fallback by default; real provider/RAG paths require the right env vars, provider keys, pgvector, and optional Python dependencies in the runtime image.
 
 ---
 
@@ -56,6 +61,8 @@ curl "http://localhost:8080/api/ticker/BTCUSDT"
 curl "http://localhost:8080/api/orderbook/BTCUSDT/summary"
 curl "http://localhost:8080/api/indicators/supported"
 curl "http://localhost:8080/api/ai/health"
+# Auth required:
+# curl -H "Authorization: Bearer <token>" http://localhost:8080/api/ai/knowledge/health
 ```
 
 Web UIs:
@@ -98,7 +105,7 @@ Profiles:
 
 | Command | Starts |
 |---|---|
-| `make dev` | Core dev stack, 27 services |
+| `make dev` | Core dev stack, 29 services |
 | `make monitoring` | Dev + Prometheus/Grafana/exporters |
 | `make logging` | Dev + monitoring + Loki/Promtail |
 | `make prod` | Production profile + monitoring + logging |
@@ -113,16 +120,16 @@ docker compose run --rm influx-backfill python /app/src/batch/backfill.py --mode
 
 ## Direct Redis Bypass (Resilience)
 
-When Kafka or Flink is down, the API fallback falls back to Redis cache — but Redis may also be empty. Enable the **Direct Redis Bypass** to have WebSocket streams write directly to Redis as a backup path.
+When Kafka or Flink is down, the API fallback falls back to Redis cache, but Redis may also be empty. Enable the **Direct Redis Bypass** to have WebSocket streams write directly to Redis as a backup path.
 
 ```bash
 # In docker-compose.yml, producer service:
 ENABLE_DIRECT_REDIS: "true"
 ```
 
-This writes to the same Redis keys as Flink (ticker, candle, trade, orderbook) with matching TTLs. API fallback will still work even when the speed layer is degraded.
+This writes to the same Redis keys as Flink (ticker, candle, trade, orderbook) with matching TTLs. Current auto-failover only activates the Binance ticker path when static `ENABLE_DIRECT_REDIS=false`; kline/trade/depth direct paths still require the env flag.
 
-For details, see [Section 17.7 in SYSTEM.md](docs/SYSTEM.md#177-direct-redis-bypass-resilience-path).
+For current limitations, see [SYSTEM.md caveats](docs/SYSTEM.md#16-current-caveats-and-gotchas).
 
 ---
 
@@ -153,7 +160,7 @@ npm run typecheck
 npm run build
 ```
 
-Current source contains 254 pytest test functions and 35 frontend hook specs. `frontend/package.json` currently has no frontend test script. During the 2026-06-05 docs audit, focused auth/AI unit tests passed; e2e collection needed missing host project dependencies.
+Current source contains 341 pytest test functions across 27 Python test files and 35 frontend hook specs. `frontend/package.json` currently has no frontend test script. Full pytest requires project dependencies on the host or in the target container image.
 
 ---
 
@@ -164,6 +171,7 @@ Current source contains 254 pytest test functions and 35 frontend hook specs. `f
 | [SYSTEM.md](docs/SYSTEM.md) | Current system architecture, data flow, APIs, caveats |
 | [CHANGELOG.md](docs/CHANGELOG.md) | Project history |
 | [AGENTS.md](AGENTS.md) | AI agent workflow and coding rules |
+| [docs/ai](docs/ai/AI_ARCHITECTURE.md) | Phase 1 AI architecture, API contracts, provider routing, RAG, evaluation, security, roadmap |
 
 `docs/DOCUMENTATION.md.old` is archived historical material and is not maintained as current truth.
 
