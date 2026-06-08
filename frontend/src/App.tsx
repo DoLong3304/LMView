@@ -13,6 +13,7 @@ import RightPanel from "@/features/watchlist/components/RightPanel";
 import NewsPage from "@/pages/NewsPage";
 import { FALLBACK_SYMBOLS } from "@/constants/market";
 import { fetchTickers, fetchSymbols } from "@/services/marketDataService";
+import { fetchLatestNews } from "@/services/newsService";
 import { fetchUserSettings } from "@/services/settingsService";
 import { loadFromStorage, saveToStorage } from "@/utils/storageHelpers";
 import { loadDrawings, saveDrawings, deleteDrawings } from "@/services/chartStorageService";
@@ -20,10 +21,12 @@ import { useChartKeyboardShortcuts } from "@/hooks/useChartKeyboardShortcuts";
 import { useDrawingToolbarPosition } from "@/hooks/useDrawingToolbarPosition";
 import { useReplayMode } from "@/hooks/useReplayMode";
 import { useI18n } from "@/i18n";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import type {
   Candle,
   ChartType,
   Drawing,
+  NewsArticle,
   SettingsTab,
   SymbolInfo,
   Ticker,
@@ -154,6 +157,25 @@ const TradingDashboard: React.FC = () => {
       .catch(() => {
         setConnError(true);
       });
+  }, []);
+
+  // Fetch news articles for chart overlay markers
+  useEffect(() => {
+    let cancelled = false;
+    const refreshNews = async () => {
+      try {
+        const articles = await fetchLatestNews({ limit: 200, hours: 72 });
+        if (!cancelled) setNewsArticles(articles);
+      } catch {
+        // silently ignore news fetch errors in chart context
+      }
+    };
+    refreshNews();
+    const id = setInterval(refreshNews, 5 * 60_000); // refresh every 5 min
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, []);
 
   // Fetch live ticker prices for the watchlist
@@ -475,6 +497,9 @@ const TradingDashboard: React.FC = () => {
   const [chartApi, setChartApi] = useState<any>(null);
   const [candleSeries, setCandleSeries] = useState<any>(null);
 
+  // News items for chart overlay markers
+  const [newsArticles, setNewsArticles] = useState<NewsArticle[]>([]);
+
   // Replay mode state and hook
   const {
     isReplayActive,
@@ -648,6 +673,7 @@ const TradingDashboard: React.FC = () => {
   ) : null;
 
   return (
+    <ErrorBoundary>
     <div className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
       <Header
         themeMode={themeMode}
@@ -709,6 +735,8 @@ const TradingDashboard: React.FC = () => {
               chartType={chartType}
               onChartTypeChange={setChartType}
               isReplayActive={isReplayActive}
+              newsItems={newsArticles}
+              showNewsMarkers={true}
             >
               {(chartApiRef, candleSeriesRef) => {
                 if (chartApiRef !== chartApi) setChartApi(chartApiRef);
@@ -880,9 +908,9 @@ const TradingDashboard: React.FC = () => {
         onTimeframeChange={handleTimeframeChange}
         onChartTypeChange={setChartType}
       />
-    </div>
+    </ErrorBoundary>
   );
-};
+}
 
 function ForcedPasswordChangeModal({
   onSubmit,

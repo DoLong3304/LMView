@@ -54,15 +54,32 @@ async def score_article_sentiment(title: str, content: str) -> dict:
     except Exception as exc:
         logger.warning("Qwen sentiment scoring failed, falling back to heuristic: %s", exc)
         lower = f"{title} {content}".lower()
-        bullish_terms = ["surge", "rally", "bull", "gain", "breakout", "approval", "high"]
-        bearish_terms = ["crash", "dump", "bear", "loss", "hack", "drop", "lawsuit", "liquidation"]
-        bull_hits = sum(term in lower for term in bullish_terms)
-        bear_hits = sum(term in lower for term in bearish_terms)
+        # Expanded keyword lists for better coverage
+        bullish_terms = [
+            "surge", "rally", "bull", "gain", "breakout", "approval", "high",
+            "soar", "pump", "moon", "ATH", "break", "surpass", "upgrade",
+            "adoption", "institutional", "ETF", "record", "all-time", "launch",
+            "partnership", "bullish", "optimistic", "growth", "sector",
+        ]
+        bearish_terms = [
+            "crash", "dump", "bear", "loss", "hack", "drop", "lawsuit",
+            "liquidation", "plunge", "reject", "fail", "sell", "ban",
+            "SEC", "investigation", "fraud", "scam", "rug", "crackdown",
+            "bearish", "pessimistic", "decline", "warning", "risk", "concern",
+        ]
+        bull_hits = sum(1 for term in bullish_terms if term in lower)
+        bear_hits = sum(1 for term in bearish_terms if term in lower)
+
+        # Scale score based on number of matches (more matches = higher confidence)
         if bull_hits > bear_hits:
-            return {"score": 0.35, "label": "bullish", "confidence": 0.35}
+            score = min(0.5, 0.1 + bull_hits * 0.08)
+            confidence = min(0.6, 0.2 + bull_hits * 0.08)
+            return {"score": score, "label": "bullish", "confidence": confidence}
         if bear_hits > bull_hits:
-            return {"score": -0.35, "label": "bearish", "confidence": 0.35}
-        return {"score": 0.0, "label": "neutral", "confidence": 0.1}
+            score = max(-0.5, -(0.1 + bear_hits * 0.08))
+            confidence = min(0.6, 0.2 + bear_hits * 0.08)
+            return {"score": score, "label": "bearish", "confidence": confidence}
+        return {"score": 0.0, "label": "neutral", "confidence": 0.15}
 
 
 async def batch_score_unscored_articles(batch_size: int = 20) -> int:

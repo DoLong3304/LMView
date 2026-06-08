@@ -9,7 +9,6 @@ import {
   HistogramSeries,
   LineSeries,
 } from "lightweight-charts";
-import { NewsCard } from "@/components/NewsCard";
 import {
   Activity,
   AreaChart,

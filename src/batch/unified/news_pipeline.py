@@ -54,7 +54,7 @@ def create_tables(spark: SparkSession):
 
     # Silver news_enriched
     spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.silver.news_enriched (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.news_enriched (
             id STRING NOT NULL,
             published_at BIGINT NOT NULL,
             source STRING NOT NULL,
@@ -74,7 +74,7 @@ def create_tables(spark: SparkSession):
 
     # Gold news_sentiment_daily
     spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.news_sentiment_daily (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.news_sentiment_daily (
             symbol STRING NOT NULL,
             date DATE NOT NULL,
             article_count INT NOT NULL,
@@ -98,7 +98,7 @@ def transform_bronze_to_silver(spark: SparkSession, partition_date: str = None):
     logger.info("Transforming Bronze → Silver news...")
 
     # Read Bronze
-    bronze_df = spark.table("iceberg_catalog.bronze.news")
+    bronze_df = spark.table("iceberg.crypto_lakehouse.news")
 
     if partition_date:
         bronze_df = bronze_df.filter(col("_partition_date") == partition_date)
@@ -179,9 +179,9 @@ def transform_bronze_to_silver(spark: SparkSession, partition_date: str = None):
             .format("iceberg") \
             .mode("overwrite") \
             .option("overwrite-mode", "dynamic") \
-            .saveAsTable("iceberg_catalog.silver.news_enriched")
+            .saveAsTable("iceberg.crypto_lakehouse.news_enriched")
     else:
-        filtered_df.writeTo("iceberg_catalog.silver.news_enriched").append()
+        filtered_df.writeTo("iceberg.crypto_lakehouse.news_enriched").append()
 
     count = filtered_df.count()
     logger.info(f"Transformed {count} articles to Silver")
@@ -196,7 +196,7 @@ def calculate_gold_sentiment(spark: SparkSession, date: str = None):
         date = datetime.now().strftime("%Y-%m-%d")
 
     # Read Silver news
-    silver_df = spark.table("iceberg_catalog.silver.news_enriched") \
+    silver_df = spark.table("iceberg.crypto_lakehouse.news_enriched") \
         .filter(col("_partition_date") == date)
 
     # Explode symbols array
@@ -269,7 +269,7 @@ def calculate_gold_sentiment(spark: SparkSession, date: str = None):
         .format("iceberg") \
         .mode("overwrite") \
         .option("overwrite-mode", "dynamic") \
-        .saveAsTable("iceberg_catalog.gold.news_sentiment_daily")
+        .saveAsTable("iceberg.crypto_lakehouse.news_sentiment_daily")
 
     count = result.count()
     logger.info(f"Calculated sentiment for {count} symbols")

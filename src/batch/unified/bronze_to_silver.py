@@ -52,7 +52,7 @@ def create_silver_tables(spark: SparkSession):
     """Create Silver tables if not exist"""
     # Ticker unified
     spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.silver.ticker_unified (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.ticker_unified (
             event_time BIGINT,
             symbol STRING,
             price_binance DOUBLE,
@@ -71,7 +71,7 @@ def create_silver_tables(spark: SparkSession):
 
     # Kline multi-timeframe
     spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.silver.kline_multi_timeframe (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.kline_multi_timeframe (
             event_time BIGINT,
             symbol STRING,
             `interval` STRING,
@@ -97,7 +97,7 @@ def transform_ticker(spark: SparkSession):
     logger.info("Transforming ticker data...")
 
     # Read Bronze ticker
-    bronze_df = spark.table("iceberg_catalog.bronze.ticker")
+    bronze_df = spark.table("iceberg.crypto_lakehouse.ticker")
 
     # Deduplicate by (symbol, event_time, exchange)
     window_spec = Window.partitionBy("symbol", "event_time", "exchange").orderBy(col("ingestion_time").desc())
@@ -161,7 +161,7 @@ def transform_ticker(spark: SparkSession):
                     .withColumn("_partition_date", to_date(from_unixtime(col("event_time") / 1000)))
 
     # Write to Silver
-    unified.writeTo("iceberg_catalog.silver.ticker_unified").append()
+    unified.writeTo("iceberg.crypto_lakehouse.ticker_unified").append()
 
     count = unified.count()
     logger.info(f"Transformed {count} ticker records to Silver")
@@ -176,7 +176,7 @@ def aggregate_klines_unified(spark: SparkSession):
     logger.info("Aggregating klines (1m → 5m → 15m → 1h)...")
 
     # Read Bronze 1m klines
-    bronze_1m = spark.table("iceberg_catalog.bronze.kline") \
+    bronze_1m = spark.table("iceberg.crypto_lakehouse.kline") \
                     .filter(col("interval") == "1m")
 
     # Aggregate 1m → 5m
@@ -271,15 +271,15 @@ def aggregate_klines_unified(spark: SparkSession):
 
     # Write all timeframes to Silver
     logger.info("  Writing 5m candles...")
-    kline_5m.writeTo("iceberg_catalog.silver.kline_multi_timeframe").append()
+    kline_5m.writeTo("iceberg.crypto_lakehouse.kline_multi_timeframe").append()
     count_5m = kline_5m.count()
 
     logger.info("  Writing 15m candles...")
-    kline_15m.writeTo("iceberg_catalog.silver.kline_multi_timeframe").append()
+    kline_15m.writeTo("iceberg.crypto_lakehouse.kline_multi_timeframe").append()
     count_15m = kline_15m.count()
 
     logger.info("  Writing 1h candles...")
-    kline_1h.writeTo("iceberg_catalog.silver.kline_multi_timeframe").append()
+    kline_1h.writeTo("iceberg.crypto_lakehouse.kline_multi_timeframe").append()
     count_1h = kline_1h.count()
 
     # Unpersist cache

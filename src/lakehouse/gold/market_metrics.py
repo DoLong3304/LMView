@@ -19,13 +19,13 @@ class GoldMarketDominance:
 
     def __init__(self, spark: SparkSession):
         self.spark = spark
-        self.ticker_table = "iceberg_catalog.silver.ticker_unified"
-        self.gold_table = "iceberg_catalog.gold.market_dominance"
+        self.ticker_table = "iceberg.crypto_lakehouse.silver_ticker_unified"
+        self.gold_table = "iceberg.crypto_lakehouse.market_dominance"
 
     def create_table(self):
         """Create Gold market_dominance table"""
         create_sql = """
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.market_dominance (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.market_dominance (
             snapshot_time TIMESTAMP NOT NULL,
             btc_dominance_pct DOUBLE,
             eth_dominance_pct DOUBLE,
@@ -113,13 +113,13 @@ class GoldVolatilityRanking:
 
     def __init__(self, spark: SparkSession):
         self.spark = spark
-        self.ticker_table = "iceberg_catalog.silver.ticker_unified"
-        self.gold_table = "iceberg_catalog.gold.volatility_ranking"
+        self.ticker_table = "iceberg.crypto_lakehouse.silver_ticker_unified"
+        self.gold_table = "iceberg.crypto_lakehouse.volatility_ranking"
 
     def create_table(self):
         """Create Gold volatility_ranking table"""
         create_sql = """
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.volatility_ranking (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.volatility_ranking (
             symbol STRING NOT NULL,
             snapshot_time TIMESTAMP NOT NULL,
             volatility_1h DOUBLE,
@@ -211,13 +211,13 @@ class GoldMoversRanking:
 
     def __init__(self, spark: SparkSession):
         self.spark = spark
-        self.ticker_table = "iceberg_catalog.silver.ticker_unified"
-        self.gold_table = "iceberg_catalog.gold.movers_ranking"
+        self.ticker_table = "iceberg.crypto_lakehouse.silver_ticker_unified"
+        self.gold_table = "iceberg.crypto_lakehouse.movers_ranking"
 
     def create_table(self):
         """Create Gold movers_ranking table"""
         create_sql = """
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.movers_ranking (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.movers_ranking (
             symbol STRING NOT NULL,
             rank INT NOT NULL,
             category STRING NOT NULL,

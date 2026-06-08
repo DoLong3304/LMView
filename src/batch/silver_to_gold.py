@@ -50,7 +50,7 @@ def create_spark_session():
 def create_coin_ticker_table(spark: SparkSession):
     """Create coin_ticker table for market overview API"""
     create_sql = """
-    CREATE TABLE IF NOT EXISTS iceberg_catalog.crypto_lakehouse.coin_ticker (
+    CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.coin_ticker (
         symbol STRING,
         close DOUBLE,
         h24_price_change_pct DOUBLE,
@@ -73,7 +73,7 @@ def populate_coin_ticker(spark: SparkSession):
     logger.info("Populating coin_ticker from Silver layer...")
 
     # Read Silver ticker data
-    silver_df = spark.table("iceberg_catalog.silver.ticker_unified")
+    silver_df = spark.table("iceberg.crypto_lakehouse.ticker_unified")
 
     # Get latest price per symbol
     latest_window = Window.partitionBy("symbol").orderBy(desc("event_time"))
@@ -154,7 +154,7 @@ def populate_coin_ticker(spark: SparkSession):
     final_df.write \
         .format("iceberg") \
         .mode("overwrite") \
-        .saveAsTable("iceberg_catalog.crypto_lakehouse.coin_ticker")
+        .saveAsTable("iceberg.crypto_lakehouse.coin_ticker")
 
     count = final_df.count()
     logger.info(f"Populated coin_ticker with {count} symbols")

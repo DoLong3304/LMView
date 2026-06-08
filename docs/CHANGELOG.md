@@ -8,6 +8,46 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.20.0] - 2026-06-08 - Phase D: System Audit & Critical Fixes
+
+### Added
+
+- **React error boundary** — `frontend/src/components/ErrorBoundary.tsx` wraps App.tsx to prevent full-app crashes on component errors; shows retry + reload buttons, displays stack trace in dev mode.
+
+### Fixed
+
+- **Catalog mismatch audit** — `src/lakehouse/gold/market_metrics.py` 3 classes (`GoldMarketDominance`, `GoldVolatilityRanking`, `GoldMoversRanking`) had `iceberg_catalog.gold.*` references (non-existent schema). Fixed to `iceberg.crypto_lakehouse.*` — matching active catalog config in `lakehouse/pipeline.py` and Dagster assets.
+- **Market overview dead code removal** — Removed 130+ lines of duplicate dead code from `backend/api/market_overview.py` (duplicate `_get_trending_news`, `_get_sector_performance`, `_get_heatmap_data`, `_get_indicators_summary`, `_derive_market_from_redis` functions after the first return statement).
+
+### Changed
+
+- **Sentiment heuristic improvement** — Expanded `bullish_terms` from 7 to 24 keywords, `bearish_terms` from 8 to 26 keywords in `backend/services/sentiment_service.py`; score and confidence now scale with match count for more meaningful sentiment differentiation.
+
+### Notes
+
+- **Legacy batch files still reference `iceberg_catalog`** — `src/batch/` and `src/lakehouse/silver/` use `iceberg_catalog` as Spark catalog name (JDBC/Hadoop catalog alias), not schema. Active runtime uses `iceberg.crypto_lakehouse` via Trino. Legacy files not used by Dagster orchestration.
+- **Trino QUEUED investigation** — Code review confirms stable implementation with `nextUri` polling in `gold_aggregator_trino.py` and `compute_news_sentiment_daily`. Runtime verification requires Docker environment.
+
+---
+
+## [0.19.3] - 2026-06-08 - Phase C Full Completion
+
+### Added
+
+- **Dagster news sentiment gold asset** — `orchestration/assets.py` `compute_news_sentiment_daily` upgraded from placeholder to full implementation: reads PostgreSQL `news_articles`, aggregates by symbol/day via `UNNEST(symbols_mentioned)`, writes to `iceberg.crypto_lakehouse.gold_news_sentiment_daily` via Trino HTTP API. Now has `deps=[compute_gold_layer]` to run after gold layer.
+- **Chart news markers wired** — `frontend/src/App.tsx` now fetches news via `fetchLatestNews({ limit: 200, hours: 72 })` every 5 minutes, stores in `newsArticles` state, and passes `newsItems={newsArticles} showNewsMarkers={true}` to `CandlestickChart`. Chart renders colored circle markers at news event timestamps.
+
+### Changed
+
+- **Frontend typecheck clean** — Removed unused `React` import from `NewsCard.tsx` and unused `NewsCard` import from `CandlestickChart.tsx`. `npm run typecheck` passes with zero errors.
+
+### Notes
+
+- **Dagster daemon restart required** — After this change, restart `dagster-daemon` and `dagster-webserver` containers so the new asset code loads: `docker compose restart dagster-daemon dagster-webserver`
+- **Runtime verification pending** — Full end-to-end test (news fetch → sentiment score → Dagster aggregation → chart markers) requires live Docker environment with running services.
+
+---
+
 ## [0.18.1] - 2026-06-07 - Update documentations
 
 ### Changed

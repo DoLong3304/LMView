@@ -18,13 +18,13 @@ class GoldNewsSentiment:
 
     def __init__(self, spark: SparkSession):
         self.spark = spark
-        self.silver_table = "iceberg_catalog.silver.news_enriched"
-        self.gold_table = "iceberg_catalog.gold.news_sentiment_daily"
+        self.silver_table = "iceberg.crypto_lakehouse.silver_news_enriched"
+        self.gold_table = "iceberg.crypto_lakehouse.gold_news_sentiment_daily"
 
     def create_table(self):
         """Create Gold news_sentiment_daily table"""
         create_sql = """
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.news_sentiment_daily (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.gold_news_sentiment_daily (
             symbol STRING NOT NULL,
             date DATE NOT NULL,
             article_count INT NOT NULL,
@@ -147,14 +147,14 @@ class GoldNewsImpact:
 
     def __init__(self, spark: SparkSession):
         self.spark = spark
-        self.news_table = "iceberg_catalog.silver.news_enriched"
-        self.ticker_table = "iceberg_catalog.silver.ticker_unified"
-        self.gold_table = "iceberg_catalog.gold.news_market_impact"
+        self.news_table = "iceberg.crypto_lakehouse.silver_news_enriched"
+        self.ticker_table = "iceberg.crypto_lakehouse.silver_ticker_unified"
+        self.gold_table = "iceberg.crypto_lakehouse.gold_news_market_impact"
 
     def create_table(self):
         """Create Gold news_market_impact table"""
         create_sql = """
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.news_market_impact (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.gold_news_market_impact (
             symbol STRING NOT NULL,
             news_published_at BIGINT NOT NULL,
             news_title STRING,

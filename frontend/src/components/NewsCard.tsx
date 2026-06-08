@@ -1,4 +1,3 @@
-import React from "react";
 import type { NewsArticle } from "@/types";
 
 const SENTIMENT_CONFIG = {

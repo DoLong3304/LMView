@@ -5,7 +5,7 @@ snapshot expiration, and orphan file cleanup.
 
 Usage:
     python maintenance.py
-    python maintenance.py iceberg_catalog.crypto_lakehouse.coin_klines
+    python maintenance.py iceberg.crypto_lakehouse.coin_klines
 """
 
 import logging

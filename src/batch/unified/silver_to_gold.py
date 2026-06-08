@@ -54,7 +54,7 @@ def create_gold_tables(spark: SparkSession):
 
     # Market overview
     spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.market_overview (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.market_overview (
             snapshot_time TIMESTAMP,
             total_symbols INT,
             total_volume_24h DOUBLE,
@@ -69,7 +69,7 @@ def create_gold_tables(spark: SparkSession):
 
     # Market dominance
     spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.market_dominance (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.market_dominance (
             snapshot_time TIMESTAMP NOT NULL,
             btc_dominance_pct DOUBLE,
             eth_dominance_pct DOUBLE,
@@ -85,7 +85,7 @@ def create_gold_tables(spark: SparkSession):
 
     # Volatility ranking
     spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.volatility_ranking (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.volatility_ranking (
             symbol STRING NOT NULL,
             snapshot_time TIMESTAMP NOT NULL,
             volatility_1h DOUBLE,
@@ -100,7 +100,7 @@ def create_gold_tables(spark: SparkSession):
 
     # Movers ranking
     spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.movers_ranking (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.movers_ranking (
             symbol STRING NOT NULL,
             rank INT NOT NULL,
             category STRING NOT NULL,
@@ -117,7 +117,7 @@ def create_gold_tables(spark: SparkSession):
 
     # Sector performance
     spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.sector_performance (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.sector_performance (
             sector STRING,
             snapshot_time TIMESTAMP,
             avg_change_pct DOUBLE,
@@ -132,7 +132,7 @@ def create_gold_tables(spark: SparkSession):
 
     # Coin ticker (for API)
     spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.crypto_lakehouse.coin_ticker (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.coin_ticker (
             symbol STRING,
             close DOUBLE,
             h24_price_change_pct DOUBLE,
@@ -450,7 +450,7 @@ def main():
 
         # Read Silver ticker ONCE
         logger.info("Reading silver.ticker_unified...")
-        ticker_df = spark.table("iceberg_catalog.silver.ticker_unified")
+        ticker_df = spark.table("iceberg.crypto_lakehouse.ticker_unified")
 
         # Calculate ALL metrics from single read
         metrics = calculate_all_metrics(ticker_df)
@@ -462,36 +462,36 @@ def main():
         metrics['market_overview'].write \
             .format("iceberg") \
             .mode("append") \
-            .saveAsTable("iceberg_catalog.gold.market_overview")
+            .saveAsTable("iceberg.crypto_lakehouse.market_overview")
 
         logger.info("  Writing market_dominance...")
-        metrics['market_dominance'].writeTo("iceberg_catalog.gold.market_dominance").append()
+        metrics['market_dominance'].writeTo("iceberg.crypto_lakehouse.market_dominance").append()
 
         logger.info("  Writing volatility_ranking...")
         metrics['volatility_ranking'].write \
             .format("iceberg") \
             .mode("overwrite") \
             .option("overwrite-mode", "dynamic") \
-            .saveAsTable("iceberg_catalog.gold.volatility_ranking")
+            .saveAsTable("iceberg.crypto_lakehouse.volatility_ranking")
 
         logger.info("  Writing movers_ranking...")
         metrics['movers_ranking'].write \
             .format("iceberg") \
             .mode("overwrite") \
             .option("overwrite-mode", "dynamic") \
-            .saveAsTable("iceberg_catalog.gold.movers_ranking")
+            .saveAsTable("iceberg.crypto_lakehouse.movers_ranking")
 
         logger.info("  Writing sector_performance...")
         metrics['sector_performance'].write \
             .format("iceberg") \
             .mode("append") \
-            .saveAsTable("iceberg_catalog.gold.sector_performance")
+            .saveAsTable("iceberg.crypto_lakehouse.sector_performance")
 
         logger.info("  Writing coin_ticker...")
         metrics['coin_ticker'].write \
             .format("iceberg") \
             .mode("overwrite") \
-            .saveAsTable("iceberg_catalog.crypto_lakehouse.coin_ticker")
+            .saveAsTable("iceberg.crypto_lakehouse.coin_ticker")
 
         # Summary
         logger.info("=" * 80)

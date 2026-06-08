@@ -42,7 +42,7 @@ def create_spark_session():
 def create_indicators_table(spark: SparkSession):
     """Create momentum_indicators and indicator_history tables."""
     create_sql = """
-    CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.momentum_indicators (
+    CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.momentum_indicators (
         symbol STRING NOT NULL,
         snapshot_time TIMESTAMP NOT NULL,
         current_price DOUBLE,
@@ -71,7 +71,7 @@ def create_indicators_table(spark: SparkSession):
     logger.info("Created gold.momentum_indicators table")
 
     history_sql = """
-    CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.indicator_history (
+    CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.indicator_history (
         exchange STRING NOT NULL,
         symbol STRING NOT NULL,
         interval STRING NOT NULL,
@@ -212,7 +212,7 @@ def main():
         from datetime import datetime, timedelta
         date_7d_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
 
-        klines_df = spark.table("iceberg_catalog.silver.kline_multi_timeframe") \
+        klines_df = spark.table("iceberg.crypto_lakehouse.kline_multi_timeframe") \
             .filter(
                 (col("interval") == "1h") &
                 (col("_partition_date") >= date_7d_ago)
@@ -262,7 +262,7 @@ def main():
         )
 
         logger.info("Writing to gold.indicator_history...")
-        history_df.writeTo("iceberg_catalog.gold.indicator_history").append()
+        history_df.writeTo("iceberg.crypto_lakehouse.indicator_history").append()
 
         # Get latest values per symbol
         window_latest = Window.partitionBy("symbol").orderBy(desc("event_time"))
@@ -296,7 +296,7 @@ def main():
             .format("iceberg") \
             .mode("overwrite") \
             .option("overwrite-mode", "dynamic") \
-            .saveAsTable("iceberg_catalog.gold.momentum_indicators")
+            .saveAsTable("iceberg.crypto_lakehouse.momentum_indicators")
 
         count = result_df.count()
         history_count = history_df.count()

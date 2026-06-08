@@ -19,13 +19,13 @@ class GoldMarketOverview:
 
     def __init__(self, spark: SparkSession):
         self.spark = spark
-        self.silver_table = "iceberg_catalog.silver.ticker_unified"
-        self.gold_table = "iceberg_catalog.gold.market_overview"
+        self.silver_table = "iceberg.crypto_lakehouse.silver_ticker_unified"
+        self.gold_table = "iceberg.crypto_lakehouse.gold_market_overview"
 
     def create_table(self):
         """Create Gold market_overview table"""
         create_sql = """
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.market_overview (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.gold_market_overview (
             snapshot_time TIMESTAMP,
             total_symbols INT,
             total_volume_24h DOUBLE,
@@ -106,14 +106,14 @@ class GoldSymbolStatistics:
 
     def __init__(self, spark: SparkSession):
         self.spark = spark
-        self.silver_kline_table = "iceberg_catalog.silver.kline_multi_timeframe"
-        self.silver_ticker_table = "iceberg_catalog.silver.ticker_unified"
-        self.gold_table = "iceberg_catalog.gold.symbol_stats_daily"
+        self.silver_kline_table = "iceberg.crypto_lakehouse.silver_kline_multi_timeframe"
+        self.silver_ticker_table = "iceberg.crypto_lakehouse.silver_ticker_unified"
+        self.gold_table = "iceberg.crypto_lakehouse.gold_symbol_stats_daily"
 
     def create_table(self):
         """Create Gold symbol_stats_daily table"""
         create_sql = """
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.symbol_stats_daily (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.gold_symbol_stats_daily (
             symbol STRING,
             date DATE,
             open_price DOUBLE,
@@ -179,13 +179,13 @@ class GoldSectorPerformance:
 
     def __init__(self, spark: SparkSession):
         self.spark = spark
-        self.silver_table = "iceberg_catalog.silver.ticker_unified"
-        self.gold_table = "iceberg_catalog.gold.sector_performance"
+        self.silver_table = "iceberg.crypto_lakehouse.silver_ticker_unified"
+        self.gold_table = "iceberg.crypto_lakehouse.gold_sector_performance"
 
     def create_table(self):
         """Create Gold sector_performance table"""
         create_sql = """
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.sector_performance (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.gold_sector_performance (
             sector STRING,
             snapshot_time TIMESTAMP,
             avg_change_pct DOUBLE,

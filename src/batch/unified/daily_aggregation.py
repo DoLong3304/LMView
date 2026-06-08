@@ -50,7 +50,7 @@ def create_spark_session():
 def create_gold_tables(spark: SparkSession):
     """Create Gold symbol_stats_daily table"""
     spark.sql("""
-        CREATE TABLE IF NOT EXISTS iceberg_catalog.gold.symbol_stats_daily (
+        CREATE TABLE IF NOT EXISTS iceberg.crypto_lakehouse.symbol_stats_daily (
             symbol STRING,
             date DATE,
             open_price DOUBLE,
@@ -77,7 +77,7 @@ def aggregate_long_timeframes(spark: SparkSession):
     logger.info("Aggregating long timeframes (1h → 4h → 1d → 1w)...")
 
     # Read 1h klines from Silver
-    kline_1h = spark.table("iceberg_catalog.silver.kline_multi_timeframe") \
+    kline_1h = spark.table("iceberg.crypto_lakehouse.kline_multi_timeframe") \
                    .filter(col("interval") == "1h")
 
     # Cache for multiple aggregations
@@ -175,15 +175,15 @@ def aggregate_long_timeframes(spark: SparkSession):
 
     # Write all timeframes
     logger.info("  Writing 4h candles...")
-    kline_4h.writeTo("iceberg_catalog.silver.kline_multi_timeframe").append()
+    kline_4h.writeTo("iceberg.crypto_lakehouse.kline_multi_timeframe").append()
     count_4h = kline_4h.count()
 
     logger.info("  Writing 1d candles...")
-    kline_1d.writeTo("iceberg_catalog.silver.kline_multi_timeframe").append()
+    kline_1d.writeTo("iceberg.crypto_lakehouse.kline_multi_timeframe").append()
     count_1d = kline_1d.count()
 
     logger.info("  Writing 1w candles...")
-    kline_1w.writeTo("iceberg_catalog.silver.kline_multi_timeframe").append()
+    kline_1w.writeTo("iceberg.crypto_lakehouse.kline_multi_timeframe").append()
     count_1w = kline_1w.count()
 
     # Unpersist caches
@@ -202,11 +202,11 @@ def calculate_symbol_stats_daily(spark: SparkSession):
     today = datetime.now().strftime("%Y-%m-%d")
 
     # Get 1d candles
-    kline_df = spark.table("iceberg_catalog.silver.kline_multi_timeframe") \
+    kline_df = spark.table("iceberg.crypto_lakehouse.kline_multi_timeframe") \
                    .filter((col("interval") == "1d") & (col("_partition_date") == today))
 
     # Get ticker data for spread
-    ticker_df = spark.table("iceberg_catalog.silver.ticker_unified") \
+    ticker_df = spark.table("iceberg.crypto_lakehouse.ticker_unified") \
                     .filter(col("_partition_date") == today)
 
     # Calculate volatility
@@ -239,7 +239,7 @@ def calculate_symbol_stats_daily(spark: SparkSession):
     )
 
     # Write to Gold
-    result.writeTo("iceberg_catalog.gold.symbol_stats_daily").append()
+    result.writeTo("iceberg.crypto_lakehouse.symbol_stats_daily").append()
 
     count = result.count()
     logger.info(f"Calculated daily stats for {count} symbols")
