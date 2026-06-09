@@ -28,7 +28,7 @@ const MarketNews: React.FC = () => {
         ]);
 
         setNews(newsItems);
-        setMetrics(overview);
+        setMetrics(overview?.market_summary || null);
         setGainers(topGainers);
         setLosers(topLosers);
         setError(null);

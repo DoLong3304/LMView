@@ -10,6 +10,7 @@ import {
   Settings,
   Sun,
   UserRound,
+  Filter,
 } from "lucide-react";
 import { getDataSourceLabel, DATA_SOURCE } from "@/constants/env";
 import LanguageSwitcher from "@/components/ui/LanguageSwitcher";
@@ -26,7 +27,7 @@ import {
 
 const SHOW_DEVELOPER_TOOLS = false;
 
-type AppView = "charts" | "marketsNews";
+type AppView = "charts" | "marketsNews" | "screener";
 
 interface HeaderProps {
   themeMode: "dark" | "light";
@@ -150,6 +151,18 @@ const Header: React.FC<HeaderProps> = ({
             >
               <Newspaper size={14} />
               <span className="hidden sm:inline">{t("marketsAndNews")}</span>
+            </button>
+            <button
+              onClick={() => onViewChange("screener")}
+              className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                activeView === "screener"
+                  ? "bg-blue-600 text-white"
+                  : "text-gray-400 hover:bg-gray-700 hover:text-white"
+              }`}
+              title={t("screener")}
+            >
+              <Filter size={14} />
+              <span className="hidden sm:inline">{t("screener")}</span>
             </button>
           </div>
           {SHOW_DEVELOPER_TOOLS && (

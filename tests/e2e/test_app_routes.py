@@ -42,7 +42,7 @@ class TestAppStartup:
     async def test_app_metadata(self):
         """Application metadata is correctly configured."""
         assert app.title == "LMView API"
-        assert app.version == "0.18.0"
+        assert app.version == "0.23.0"
 
     @pytest.mark.asyncio
     async def test_openapi_schema_accessible(self):

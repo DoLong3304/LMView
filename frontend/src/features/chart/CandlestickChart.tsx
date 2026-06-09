@@ -16,9 +16,12 @@ import {
   CandlestickChart as CandleIcon,
   ChevronDown,
   Download,
+  Grid3x3,
+  Layers,
   LineChart,
   Maximize2,
   Minimize2,
+  TrendingUp,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -54,6 +57,10 @@ import {
   calcVolumeMA,
   calcVWAP,
 } from "./indicatorUtils";
+import { toHeikinAshi } from "./transformers/heikinAshi";
+import { toRenko } from "./transformers/renko";
+import { toLineBreak } from "./transformers/lineBreak";
+import { toKagi } from "./transformers/kagi";
 import IndicatorPanel from "./IndicatorPanel";
 import MarketSelector from "./MarketSelector";
 import OHLCVBar from "./OHLCVBar";
@@ -68,13 +75,18 @@ import type {
 } from "@/types";
 import type { TranslationKey } from "@/i18n/translations";
 
-const CHART_TYPE_ORDER: ChartType[] = ["candles", "bars", "line", "area"];
+const CHART_TYPE_ORDER: ChartType[] = ["candles", "bars", "line", "area", "heikinAshi", "renko", "lineBreak", "kagi"];
 
 const CHART_TYPE_ICONS: Record<ChartType, typeof CandleIcon> = {
   candles: CandleIcon,
   bars: BarChart3,
   line: LineChart,
   area: AreaChart,
+  heikinAshi: Layers,
+  renko: Grid3x3,
+  lineBreak: TrendingUp,
+  kagi: Activity,
+  pointFigure: BarChart3,
 };
 
 const CHART_TYPE_LABELS: Record<ChartType, TranslationKey> = {
@@ -82,6 +94,11 @@ const CHART_TYPE_LABELS: Record<ChartType, TranslationKey> = {
   bars: "bars",
   line: "line",
   area: "area",
+  heikinAshi: "heikinAshi",
+  renko: "renko",
+  lineBreak: "lineBreak",
+  kagi: "kagi",
+  pointFigure: "pointFigure",
 };
 
 interface CandlestickChartProps {
@@ -279,13 +296,49 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   const setAllPriceSeriesData = useCallback(
     (data: Candle[]) => {
-      candleRef.current?.setData(data);
-      barRef.current?.setData(data);
-      const closeData = toCloseSeriesData(data);
+      // Transform candles for non-standard chart types
+      let chartData = data;
+      if (chartType === "heikinAshi") {
+        chartData = toHeikinAshi(data);
+      } else if (chartType === "renko") {
+        const renkoData = toRenko(data, { brickSize: "atr", atrPeriod: 14, wicks: true });
+        chartData = renkoData.map((b) => ({
+          time: b.time as any,
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close,
+          volume: 0,
+        }));
+      } else if (chartType === "lineBreak") {
+        const lbData = toLineBreak(data, { lookback: 3 });
+        chartData = lbData.map((b) => ({
+          time: b.time as any,
+          open: b.open,
+          high: b.high,
+          low: b.low,
+          close: b.close,
+          volume: 0,
+        }));
+      } else if (chartType === "kagi") {
+        const kagiData = toKagi(data, { reversalPercent: 4, useClose: true });
+        chartData = kagiData.map((l) => ({
+          time: l.time as any,
+          open: l.price as number,
+          high: l.price as number,
+          low: l.price as number,
+          close: l.price as number,
+          volume: 0,
+        }));
+      }
+
+      candleRef.current?.setData(chartData);
+      barRef.current?.setData(chartData);
+      const closeData = toCloseSeriesData(chartData);
       lineRef.current?.setData(closeData);
       areaRef.current?.setData(closeData);
     },
-    [toCloseSeriesData],
+    [toCloseSeriesData, chartType],
   );
 
   const updateAllPriceSeries = useCallback((candle: Candle) => {
@@ -420,37 +473,47 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         background: { color: chartTheme.background },
         textColor: chartTheme.textColor,
         fontFamily: "'Inter','Segoe UI',sans-serif",
-        fontSize: 12,
+        fontSize: 11,
       },
       localization: {
         locale: navigator.language || "en-US",
         timeFormatter: localTimeFormatter,
       },
       grid: {
-        vertLines: { color: chartTheme.gridColor, style: LineStyle.Solid },
-        horzLines: { color: chartTheme.gridColor, style: LineStyle.Solid },
+        vertLines: { color: chartTheme.gridColor, style: LineStyle.Dashed },
+        horzLines: { color: chartTheme.gridColor, style: LineStyle.Dashed },
       },
       crosshair: {
         mode: CrosshairMode.Normal,
-        vertLine: { color: chartTheme.crosshair, labelBackgroundColor: chartTheme.crosshairLabelBg },
-        horzLine: { color: chartTheme.crosshair, labelBackgroundColor: chartTheme.crosshairLabelBg },
+        vertLine: {
+          color: chartTheme.crosshair,
+          labelBackgroundColor: chartTheme.crosshairLabelBg,
+          style: LineStyle.Dashed,
+        },
+        horzLine: {
+          color: chartTheme.crosshair,
+          labelBackgroundColor: chartTheme.crosshairLabelBg,
+          style: LineStyle.Dashed,
+        },
       },
       rightPriceScale: {
         borderColor: chartTheme.borderColor,
         scaleMargins: { top: 0.05, bottom: 0.25 },
-        minimumWidth: 80,
+        entireTextOnly: true,
+        mode: 0,
       },
       timeScale: {
         borderColor: chartTheme.borderColor,
         timeVisible: true,
         secondsVisible: false,
-        barSpacing: 4,
+        barSpacing: 6,
         minBarSpacing: 2,
-        rightOffset: 12,
+        rightOffset: 8,
         fixLeftEdge: false,
         fixRightEdge: false,
         lockVisibleTimeRangeOnResize: true,
         tickMarkFormatter: localTickMarkFormatter,
+        visible: true,
       },
       handleScroll: { mouseWheel: true, pressedMouseMove: true },
       handleScale: {
@@ -475,7 +538,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       visible: chartType === "bars",
     });
     const ls = chart.addSeries(LineSeries, {
-      color: chartTheme.textColor,
+      color: chartTheme.upColor,
       lineWidth: 2 as 1 | 2 | 3 | 4,
       priceLineVisible: true,
       lastValueVisible: true,

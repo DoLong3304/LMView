@@ -14,153 +14,168 @@ Real-time cryptocurrency technical-analysis platform built on Lambda Architectur
 
 ## Highlights
 
-- **Live market data path** through exchange WebSockets, Kafka, Flink, Redis Sentinel, InfluxDB, FastAPI, and WebSocket streaming.
-- **Multi-timeframe charts**: `1s`, `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`.
-- **Exchange abstraction** with Binance as primary path and OKX present, tested at mapper/subscription-frame level, and disabled by default until remaining interval/exchange caveats are closed.
-- **Lakehouse analytics** with Spark, Iceberg on MinIO, PostgreSQL catalog, and Trino.
-- **High availability infrastructure**: 3 Kafka brokers and Redis Sentinel with 1 master, 2 replicas, 3 Sentinels.
-- **Resilience bypass path**: Direct WebSocket → Redis writes when Kafka/Flink is down (ENABLE_DIRECT_REDIS=true).
-- **Market overview and news**: gold-table metrics, heatmaps, rankings, multi-source news and sentiment cache.
-- **Trading UI**: lightweight-charts v5.2.0, drawing tools, replay mode, i18n, mock/API data mode.
-- **Observability**: Prometheus, Grafana, Loki, exporters, 11 dashboards, alert rules.
-- **Resilience bypass path**: optional direct WebSocket -> Redis writes, plus partial health-monitor auto-failover for Binance ticker writes.
-- **Market overview and news**: gold-table metrics with Redis ticker fallback, heatmaps/rankings, multi-source news and sentiment cache.
-- **Trading UI**: lightweight-charts v5.2.0, drawing tools, replay mode, i18n, auth, settings, notifications, market/news views, and mock/API data mode.
-- **Phase 1 AI Ask Mode**: provider routing, pgvector-powered RAG knowledge base, prompt builder, output guard, context service, mock fallback, and 50 golden evaluation questions.
-- **Observability**: Prometheus, Grafana, Loki, exporters, 22 dashboards, and 18 alert rules.
+- **Live market data** from Binance WebSocket through Kafka, Flink, Redis Sentinel, InfluxDB, FastAPI, and WebSocket streaming.
+- **Multi-timeframe charts**: `1s`, `1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w` with TradingView-like appearance.
+- **Drawing tools**: trendline, horizontal ray, vertical line, fibonacci retracement, rectangle, circle, arrow, text.
+- **Advanced chart types**: Heikin Ashi, Renko, Line Break, Kagi transforms on render.
+- **Pattern recognition engine** and **alert service** (standalone, ready for UI integration).
+- **Enhanced watchlist** with activity score, trend detection, RSI filter, and sortable columns.
+- **Market screener** with search, price/volume/change/RSI filters and multi-column sort.
+- **Market overview** with gold-table metrics, heatmaps, rankings, news, and sentiment.
+- **Multi-chart layout system** (standalone, ready for integration).
+- **Exchange abstraction**: Binance primary, OKX opt-in.
+- **Lakehouse analytics**: Spark, Iceberg on MinIO, PostgreSQL catalog, Trino.
+- **High availability**: 3 Kafka brokers, Redis Sentinel (1 master, 2 replicas, 3 sentinels).
+- **Phase 1 AI Ask Mode**: provider routing, pgvector RAG, prompt builder, output guard, mock fallback.
+- **Observability**: Prometheus, Grafana, Loki, 22 dashboards, 18 alert rules.
 
 ---
 
-## Overview
-
-```text
-Exchange WS/REST -> Producer -> Kafka -> Flink/Spark
-                                  -> Redis + InfluxDB + Iceberg/MinIO
-                                  -> FastAPI -> Nginx -> React
-```
-
-![Data Flow Diagram](docs/crypto.png)
-
-LMView focuses on data engineering first: durable lakehouse data, low-latency Redis features, Trino analytics, and clear FastAPI serving boundaries. Phase 1 AI Ask Mode is wired into core FastAPI with mock fallback by default; real provider/RAG paths require the right env vars, provider keys, pgvector, and optional Python dependencies in the runtime image.
-
----
-
-## Usage
-
-Primary app:
-
-- Dev Nginx: `http://localhost` after `make dev` (plain HTTP on port 80).
-- FastAPI docs: `http://localhost:8080/docs`.
-
-API examples:
-
-```bash
-curl http://localhost:8080/api/health
-curl "http://localhost:8080/api/klines?symbol=BTCUSDT&interval=1m&limit=100"
-curl "http://localhost:8080/api/ticker/BTCUSDT"
-curl "http://localhost:8080/api/orderbook/BTCUSDT/summary"
-curl "http://localhost:8080/api/indicators/supported"
-curl "http://localhost:8080/api/ai/health"
-# Auth required:
-# curl -H "Authorization: Bearer <token>" http://localhost:8080/api/ai/knowledge/health
-```
-
-Web UIs:
-
-| Service | URL |
-|---|---|
-| Frontend/Nginx | `http://localhost` |
-| FastAPI docs | `http://localhost:8080/docs` |
-| Flink | `http://localhost:8081` |
-| Spark | `http://localhost:8082` |
-| Trino | `http://localhost:8083` |
-| InfluxDB | `http://localhost:8086` |
-| Dagster | `http://localhost:3000` |
-| Grafana | `http://localhost:3001` or `/grafana/` through Nginx |
-| Prometheus | `http://localhost:9090` or `/prometheus/` through Nginx |
-| MinIO Console | `http://localhost:9001` |
-
----
-
-## Installation
-
-Prerequisites:
-
-- Docker Engine 24+ or Docker Desktop 4+.
-- 32GB RAM recommended; 24GB minimum for full local stack.
-- 100GB+ disk recommended.
-- 8 CPU cores recommended.
-
-Quick start:
+## Quick Start
 
 ```bash
 git clone https://github.com/DoLong3304/LMView.git
 cd LMView
 cp .env.example .env
-# Edit .env: set strong tokens/passwords, API keys, monitoring credentials, and default admin values.
+# Edit .env: set tokens, passwords, API keys
 make dev
 ```
 
-Profiles:
-
-| Command | Starts |
-|---|---|
-| `make dev` | Core dev stack, 29 services |
-| `make monitoring` | Dev + Prometheus/Grafana/exporters |
-| `make logging` | Dev + monitoring + Loki/Promtail |
-| `make prod` | Production profile + monitoring + logging |
-
-Optional backfill:
-
-```bash
-docker compose run --rm influx-backfill python /app/src/batch/backfill.py --mode populate --days 90
-```
+Then open `http://localhost`.
 
 ---
 
-## Direct Redis Bypass (Resilience)
+## Architecture
 
-When Kafka or Flink is down, the API fallback falls back to Redis cache, but Redis may also be empty. Enable the **Direct Redis Bypass** to have WebSocket streams write directly to Redis as a backup path.
-
-```bash
-# In docker-compose.yml, producer service:
-ENABLE_DIRECT_REDIS: "true"
+```
+Exchange WebSockets / REST
+  -> Producer (Kafka + Direct Redis)
+       -> Kafka: crypto_ticker, crypto_klines, crypto_trades, crypto_depth
+       -> Redis: trade:latest (real-time primary), ticker/candle (batch-flushed)
+       -> Flink: Redis + InfluxDB writers, 1s->1m aggregation
+  -> Spark: Iceberg lakehouse (Bronze/Silver/Gold)
+  -> FastAPI: REST + WebSocket serving
+  -> Nginx: reverse proxy
+  -> React: trading dashboard
 ```
 
-This writes to the same Redis keys as Flink (ticker, candle, trade, orderbook) with matching TTLs. Current auto-failover only activates the Binance ticker path when static `ENABLE_DIRECT_REDIS=false`; kline/trade/depth direct paths still require the env flag.
+### Real-Time Data Flow
 
-For current limitations, see [SYSTEM.md caveats](docs/SYSTEM.md#16-current-caveats-and-gotchas).
+| Stage | Source | Update Rate | Latency |
+|---|---|---|---|
+| Exchange → Producer | Binance WS | per event | ~50-200ms |
+| Producer → Kafka | `src/producer/main.py` | per event | ~5-50ms |
+| Kafka → Flink | Flink Kafka consumer | per event | ~100-500ms |
+| Flink → Redis | `keydb_kline.py` (BATCH) | 500ms flush | ~500-1000ms |
+| Producer → Redis | `redis_writer.py` (trade only) | per trade | ~50ms |
+| Redis → WebSocket | 50ms poll loop | 50ms | ~50ms |
+| WebSocket → Frontend | `subscribeAllTimeframes` | 50ms | ~10-30ms |
+
+**Current target**: < 300ms end-to-end for real-time candle updates.
+
+---
+
+## Service URLs
+
+| Service | URL | Notes |
+|---|---|---|
+| Frontend | `http://localhost` | Dev: plain HTTP on port 80 |
+| FastAPI | `http://localhost:8080/docs` | API docs |
+| Flink | `http://localhost:8081` | JobManager UI |
+| Spark | `http://localhost:8082` | Master UI |
+| Trino | `http://localhost:8083` | Query engine UI |
+| InfluxDB | `http://localhost:8086` | Warm time-series store |
+| Dagster | `http://localhost:3000` | Orchestration UI |
+| Grafana | `http://localhost:3001` | Also `/grafana/` through Nginx |
+| Prometheus | `http://localhost:9090` | Also `/prometheus/` through Nginx |
+| MinIO | `http://localhost:9001` | Object storage console |
+
+---
+
+## API Examples
+
+```bash
+# Health check
+curl http://localhost:8080/api/health
+
+# Klines (candles)
+curl "http://localhost:8080/api/klines?symbol=BTCUSDT&interval=1h&limit=100"
+
+# Ticker
+curl "http://localhost:8080/api/ticker/BTCUSDT"
+curl "http://localhost:8080/api/ticker"
+
+# Order book
+curl "http://localhost:8080/api/orderbook/BTCUSDT/summary"
+
+# WebSocket stream (all timeframes)
+# ws://localhost:8080/api/stream/all?symbol=BTCUSDT
+
+# Indicators
+curl "http://localhost:8080/api/indicators/supported"
+curl "http://localhost:8080/api/indicators/BTCUSDT?interval=1h"
+
+# Screener
+curl "http://localhost:8080/api/screener/symbols?trend=bullish"
+curl "http://localhost:8080/api/screener/watchlist"
+
+# Market overview
+curl "http://localhost:8080/api/market/overview"
+curl "http://localhost:8080/api/market/rankings/gainers"
+
+# News
+curl "http://localhost:8080/api/news/latest?limit=5"
+
+# AI Ask Mode (auth required)
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/ai/health
+curl -X POST -H "Authorization: Bearer <token>" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"What is the RSI for BTCUSDT?"}' \
+  http://localhost:8080/api/ai/chat
+```
 
 ---
 
 ## Testing
 
-Python:
-
-```bash
-make test
-make test-all
-make test-cov
-```
-
-Direct pytest commands:
-
+**Python:**
 ```bash
 PYTHONPATH=. python -m pytest tests/ -v
 PYTHONPATH=. python -m pytest tests/ -m "unit or integration" -v
+make test
+make test-cov
 ```
 
-Use `python3` or a project virtualenv if the host has no `python` shim.
-
-Frontend checks:
-
+**Frontend:**
 ```bash
 cd frontend
 npm run typecheck
 npm run build
 ```
 
-Current source contains 341 pytest test functions across 27 Python test files and 35 frontend hook specs. `frontend/package.json` currently has no frontend test script. Full pytest requires project dependencies on the host or in the target container image.
+---
+
+## Direct Redis Bypass
+
+When Kafka and Flink are both down for 60+ seconds, the producer automatically switches to direct Redis writes for ticker data. Configure manually:
+
+```yaml
+# In docker-compose.yml producer service:
+ENABLE_DIRECT_REDIS: "true"
+```
+
+This writes trade, ticker, candle, and orderbook data directly to Redis as a fallback path.
+
+---
+
+## Profiles
+
+| Command | Services | Notes |
+|---|---|---|
+| `make dev` | 29 core services | Dev stack with hot reload |
+| `make monitoring` | Dev + Prometheus/Grafana | +5 services |
+| `make logging` | Dev + Loki/Promtail | +2 services |
+| `make prod` | Production + monitoring + logging | SSL, certbot, DuckDNS |
 
 ---
 
@@ -168,12 +183,16 @@ Current source contains 341 pytest test functions across 27 Python test files an
 
 | Document | Description |
 |---|---|
-| [SYSTEM.md](docs/SYSTEM.md) | Current system architecture, data flow, APIs, caveats |
-| [CHANGELOG.md](docs/CHANGELOG.md) | Project history |
+| [docs/SYSTEM.md](docs/SYSTEM.md) | Full system architecture, data flow, APIs, caveats |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Project history |
 | [AGENTS.md](AGENTS.md) | AI agent workflow and coding rules |
-| [docs/ai](docs/ai/AI_ARCHITECTURE.md) | Phase 1 AI architecture, API contracts, provider routing, RAG, evaluation, security, roadmap |
+| [docs/ai/AI_ARCHITECTURE.md](docs/ai/AI_ARCHITECTURE.md) | Phase 1 AI architecture, provider routing, RAG, evaluation |
 
-`docs/DOCUMENTATION.md.old` is archived historical material and is not maintained as current truth.
+---
+
+## Version
+
+Current: **v0.23.0** (see [CHANGELOG.md](docs/CHANGELOG.md))
 
 ---
 
@@ -181,12 +200,10 @@ Current source contains 341 pytest test functions across 27 Python test files an
 
 Built and maintained by D22 Fintech, PTIT students:
 
-- [@DoLong3304](https://github.com/DoLong3304): Project Manager, DevOps and AI Engineer.
-- [@StupidDuck64](https://github.com/StupidDuck64): Data Engineer.
-- [@EzraaOP](https://github.com/EzraaOP): Frontend Developer.
+- [@DoLong3304](https://github.com/DoLong3304) — Project Manager, DevOps and AI Engineer
+- [@StupidDuck64](https://github.com/StupidDuck64) — Data Engineer
+- [@EzraaOP](https://github.com/EzraaOP) — Frontend Developer
 
 ---
 
-Status: Active development
-Version: 0.15.3
-License: Not specified in this repository
+Status: Active development | Version: **0.23.0**

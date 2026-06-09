@@ -53,7 +53,7 @@ interface WatchlistItemData {
 }
 
 type ThemeMode = "dark" | "light";
-type AppView = "charts" | "marketsNews";
+type AppView = "charts" | "marketsNews" | "screener";
 
 const DESKTOP_LAYOUT_QUERY = "(min-width: 1024px)";
 const DEFAULT_TIMEFRAME_STORAGE_KEY = "app_defaultTimeframe";
@@ -837,7 +837,7 @@ const TradingDashboard: React.FC = () => {
                                 className="flex-1 flex flex-col overflow-hidden min-w-0"
                                 ref={chartContainerRef}
                             >
-                                <div className="flex min-h-0 flex-1 bg-gray-900">
+                                <div className="relative flex min-h-0 flex-1 bg-gray-900">
                                     <CandlestickChart
                                         symbol={selectedSymbol}
                                         symbols={symbols}

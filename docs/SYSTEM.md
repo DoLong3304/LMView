@@ -2,7 +2,7 @@
 # LMView System Documentation
 
 > Current project map for humans and coding agents.
-> Last reviewed from code: 2026-06-07.
+> Last reviewed from code: **2026-06-09**.
 
 ---
 
@@ -16,12 +16,12 @@ Lambda Architecture:
 - Serving layer: FastAPI REST/WebSocket APIs with Redis/Influx/Trino/PostgreSQL clients.
 - Frontend layer: React 19 trading dashboard with charts, drawings, replay, auth, settings, market/news, and Phase 1 AI Ask Mode surfaces.
 
-Latest project release from `docs/CHANGELOG.md`: **0.18.0**.
+Latest project release from `docs/CHANGELOG.md`: **0.23.0**.
 
 Repository facts from this audit:
 
 - Branch: `main`.
-- FastAPI app metadata version: `0.18.0`.
+- FastAPI app metadata version: `0.23.0`.
 - Frontend package version: `0.3.0`.
 - Compose source of truth: one `docker-compose.yml` with profiles.
 - Core compose services from static YAML audit: 40 concrete services plus 2 template services.
@@ -1007,7 +1007,115 @@ Runtime dependency state from repository files:
 
 ---
 
-## 16. Current Runtime Constraints
+## 16. Real-Time Pipeline — Data Flow
+
+### Overview
+
+LMView has **two parallel real-time paths** feeding Redis:
+
+1. **Kafka → Flink → Redis** (primary, batched)
+2. **Binance WS → Producer → Redis** (trade direct + fallback bypass)
+
+The trade direct path is the **primary price source** for real-time chart updates.
+The Flink path provides historical candles, aggregation, and persistence.
+
+### Data Flow Diagram
+
+```
+BINANCE WEBSOCKET (wss://stream.binance.com:9443/stream)
+  Streams: ticker, aggTrade, kline_1s, depth
+                │
+                ▼
+        ┌──────────────────┐
+        │     PRODUCER     │
+        │ src/producer/    │
+        │     main.py      │
+        ├──────────────────┤
+        │ Kafka (always)   │──► FLINK ──► Redis: ticker, candle:1s, candle:1m
+        │                  │              (500ms batch flush)
+        │ Trade DIRECT     │──► Redis: trade:latest  ← PRIMARY PRICE SOURCE
+        │ (always)         │     (per-trade, ~50ms latency)
+        │                  │
+        │ Kline DIRECT     │──► Redis: candle:*  (when ENABLE_DIRECT_REDIS=true)
+        │ (conditional)   │
+        │                  │
+        │ Ticker DIRECT    │──► Redis: ticker:latest
+        │ (health-gated)   │     (when Kafka+Flink down 60s+)
+        └──────────────────┘
+
+REDIS KEY FAMILIES
+  ticker:latest:{ex}:{sym}      ← Flink KeyDBWriter (BATCH, ~500ms)
+  candle:1s:{ex}:{sym}         ← Flink KeyDBKlineWriter (BATCH, ~500ms)
+  candle:1m:{ex}:{sym}         ← Flink KlineWindowAggregator (BATCH, ~500ms)
+  trade:latest:{ex}:{sym}      ← Producer DirectRedisWriter (PER-TRADE, ~50ms)
+  candle:latest:{ex}:{sym}     ← Flink KeyDBKlineWriter (1m+ only)
+
+        ┌──────────────────┐
+        │   BACKEND WS     │
+        │ backend/api/     │
+        │  websocket.py    │
+        ├──────────────────┤
+        │ 50ms poll loop   │
+        │ trade:latest ────┼──► _merge_trade_to_candles ──► OHLCV update
+        │ candle:1s ───────┤     (current: static base candle merge)
+        │ candle:1m ───────┤     (fix: incremental OHLCV update)
+        └──────────────────┘
+
+        ┌──────────────────┐
+        │    FRONTEND       │
+        ├──────────────────┤
+        │ App.tsx          │  ← 5s REST poll → ticker:latest  (SHOULD BE WS)
+        │ CandlestickChart  │  ← 50ms WS → trade:latest + candle:1s
+        └──────────────────┘
+```
+
+### Latency Chain
+
+| Stage | Mechanism | Latency | File |
+|---|---|---|---|
+| Binance → Producer | Binance WS | ~50-200ms | `src/producer/main.py` |
+| Producer → Kafka | `send_to_kafka()` | ~5-50ms | `src/producer/main.py` |
+| Kafka → Flink | Flink consumer (latest-offset) | ~100-500ms | `src/processing/pipeline.py` |
+| Flink → Redis | `KeyDBWriter._flush()` BATCH | **500ms** | `src/processing/writers/keydb_kline.py:27` |
+| Producer → Redis (trade) | DirectRedisWriter | ~50ms | `src/exchanges/binance/redis_writer.py` |
+| Redis → WebSocket | 50ms poll | 50ms | `backend/api/websocket.py` |
+| WebSocket → Frontend | HTTP/WS | ~10-30ms | nginx proxy |
+| Frontend render | `series.update()` | ~16ms | browser 60fps |
+
+**Bottleneck**: Flink `FLUSH_INTERVAL = 0.5` (500ms batch delay before Redis write).
+**Primary price source**: `trade:latest` Redis sorted set (updated per-trade by producer).
+
+### Frontend Price Sources
+
+The frontend has **5 potential price sources**:
+
+| Source | Redis Key | Update | Location | Used For |
+|---|---|---|---|---|
+| App.tsx ticker state | `ticker:latest:{ex}:{sym}` | 5s REST poll | `App.tsx:182-215` | Watchlist, toolbar |
+| Chart WebSocket | `candle:1s:{ex}:{sym}` | 50ms WS poll | `CandlestickChart.tsx` | Chart candles |
+| Trade merge | `trade:latest:{ex}:{sym}` | 50ms WS poll | `websocket.py:151` | Real-time OHLCV |
+| Ticker REST API | `ticker:latest:{ex}:{sym}` | on-demand | `marketDataService.ts` | Direct calls |
+| Indicator stream | `indicator:latest:{ex}:{sym}:{iv}` | 50ms WS poll | `marketDataService.ts` | Indicators |
+
+**Critical issue**: App.tsx and Chart use **different price sources** with **different update rates**, causing toolbar-chart desync.
+
+### Known Price Desync Causes
+
+| # | Cause | Severity | File |
+|---|---|---|---|
+| 1 | Multiple independent price sources (ticker hash vs candle ZSET vs trade ZSET) | CRITICAL | `App.tsx:182`, `websocket.py:151` |
+| 2 | WebSocket trade merge uses stale base candle from Redis | CRITICAL | `websocket.py:174-197` |
+| 3 | Flink 1m aggregator forward-fills close price instead of actual | HIGH | `kline_aggregator.py:127` |
+| 4 | Flink flush interval 500ms (batch delay before Redis) | HIGH | `keydb_kline.py:27` |
+| 5 | App.tsx 5s ticker poll vs Chart 50ms WebSocket poll | HIGH | `App.tsx:215` |
+| 6 | Producer ticker throttle 30s (heartbeat interval) | MEDIUM | `main.py:125` |
+| 7 | Flink `latest-offset` = no historical data on restart | MEDIUM | `pipeline.py:122` |
+
+See [docs/error_plan.md](docs/error_plan.md) for full fix plan.
+
+---
+
+## 17. Current Runtime Constraints
 
 High-impact current behaviors:
 
@@ -1019,9 +1127,10 @@ High-impact current behaviors:
 6. **AI Phase 1 real path depends on runtime extras.** Core FastAPI requirements do not include `litellm` or `sentence-transformers`, and pgvector must be installed in PostgreSQL for RAG embeddings/search.
 7. **AI overlay support services are separate from embedded FastAPI AI.** `docker-compose.ai.yml` starts LiteLLM/vLLM support services, while `ai-service` exits after an echo command. Phase 1 runs embedded in core FastAPI.
 8. **Direct Redis auto-failover covers one hot path.** Health monitor can toggle the global direct writer state; Binance ticker checks `health_monitor.is_direct_redis_active()` when static `ENABLE_DIRECT_REDIS=false`; kline/trade/depth paths gate on the static env flag.
-9. **WebSocket routes have three shapes.** Backend exposes `/api/stream/{interval}`, `/api/stream/indicators/{interval}`, and `/api/stream/all`. Main chart uses `/api/stream/all`.
+9. **WebSocket routes have three shapes.** Backend exposes `/api/stream/{interval}`, `/api/stream/indicators/{interval}`, and `/api/stream/all`. Main chart uses `/api/stream/all`. Trade direct path (`trade:latest`) is the primary real-time price source.
 10. **PostgreSQL health is separate.** `/api/health` checks Redis, InfluxDB, and Trino; `/api/ai/health` reports PostgreSQL/AI/RAG/provider readiness.
 11. **Test execution depends on environment.** Full local pytest requires project dependencies; the source inventory contains 341 pytest functions.
+12. **Real-time price desync — mitigated in v0.23.0.** App.tsx now reads live prices from WebSocket-driven `marketDataService._livePriceMap` (200ms interval) instead of polling `/ticker` every 5s. WebSocket `_merge_trade_to_candles` uses incremental OHLCV updates from trade stream. Flink flush interval reduced from 500ms to 100ms. Remaining: ticker throttle (0.3s), WebSocket reconnection (handled by CandlestickChart retryCount).
 
 General invariants:
 
@@ -1035,10 +1144,11 @@ General invariants:
 8. Dev Nginx uses plain HTTP on port 80. Prod uses HTTPS on 443 with certbot automation and a fallback certificate path.
 9. Backend/producer/backfill Dockerfiles use Python 3.11.
 10. Do not manually delete Flink checkpoints, InfluxDB data, MinIO/Iceberg objects, Redis volumes, or Kafka volumes without explicit operator approval.
+11. **Single source of truth for real-time price is `trade:latest` Redis ZSET.** All UI components (toolbar, chart, watchlist) should derive price from the WebSocket stream, not from independent REST polls.
 
 ---
 
-## 17. Safe Change Checklist
+## 18. Safe Change Checklist
 
 Backend:
 
@@ -1089,8 +1199,9 @@ Infrastructure:
 | `.env.example` | Environment variable template |
 | `Makefile` | Common operational commands |
 | `schemas/*.avsc` | Kafka data contracts |
+| `docs/error_plan.md` | Price desync root causes, fix plan, verification steps |
 
 ---
 
-Document version: **5.0**
+Document version: **6.0**
 Maintained by: human contributors and AI coding agents.

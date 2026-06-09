@@ -7,7 +7,14 @@ import type { TranslationKey } from "@/i18n/translations";
 const SETTINGS_TOOLS = new Set([
   "trendline", "ray", "extendedLine", "horizontal", "vertical",
   "rectangle", "arrow", "fibRetracement", "ruler",
-  "elliottWave", "harmonicABCD"
+  "elliottWave", "harmonicABCD",
+  // NEW tools
+  "gannBox", "gannFan", "gannSquare",
+  "schiffPitchfork", "modifiedPitchfork", "insidePitchfork",
+  "fibExtension", "fibChannel", "fibArcs", "fibSpiral", "fibTimeZone",
+  "ellipse", "rotatedRectangle", "polyline",
+  "callout", "note", "balloon",
+  "priceRange", "dateRange", "riskReward",
 ]);
 
 interface ToolDef {
@@ -47,7 +54,7 @@ const TOOL_GROUPS: ToolGroup[] = [
     ],
   },
   {
-    labelKey: "trendTools",
+    labelKey: "lineTools",
     tools: [
       {
         id: "trendline",
@@ -77,7 +84,18 @@ const TOOL_GROUPS: ToolGroup[] = [
         icon: (
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
             <path d="M1 22L23 2" />
-            <path d="M1 22l-1 1M23 2l1-1" strokeWidth="1.5" />
+            <path d="M1 22l-1-1M23 2l1-1" strokeWidth="1.5"/>
+          </svg>
+        ),
+      },
+      {
+        id: "horizontalRay",
+        labelKey: "horizontalRay",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M1 12h22" />
+            <path d="M3 8l3 4-3 4" strokeWidth="1.5"/>
+            <path d="M21 8l-3 4 3 4" strokeWidth="1.5"/>
           </svg>
         ),
       },
@@ -123,6 +141,37 @@ const TOOL_GROUPS: ToolGroup[] = [
           </svg>
         ),
       },
+      {
+        id: "ellipse",
+        labelKey: "ellipse",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <ellipse cx="12" cy="12" rx="9" ry="6" />
+          </svg>
+        ),
+      },
+      {
+        id: "rotatedRectangle",
+        labelKey: "rotatedRectangle",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M6 3L18 8L21 20L9 15Z" />
+          </svg>
+        ),
+      },
+      {
+        id: "polyline",
+        labelKey: "polyline",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M4 16L9 8L14 14L20 4" />
+            <circle cx="4" cy="16" r="1.5" fill="currentColor" />
+            <circle cx="9" cy="8" r="1.5" fill="currentColor" />
+            <circle cx="14" cy="14" r="1.5" fill="currentColor" />
+            <circle cx="20" cy="4" r="1.5" fill="currentColor" />
+          </svg>
+        ),
+      },
     ],
   },
   {
@@ -137,6 +186,62 @@ const TOOL_GROUPS: ToolGroup[] = [
             <path d="M2 9h20" opacity="0.7" />
             <path d="M2 14h20" opacity="0.5" />
             <path d="M2 20h20" opacity="0.3" />
+          </svg>
+        ),
+      },
+      {
+        id: "fibExtension",
+        labelKey: "fibExtension",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M2 20h16" />
+            <path d="M2 12h16" opacity="0.6" />
+            <path d="M18 4L22 4" strokeWidth="3" />
+            <path d="M20 4L22 6" strokeWidth="2" opacity="0.7" />
+          </svg>
+        ),
+      },
+      {
+        id: "fibChannel",
+        labelKey: "fibChannel",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M2 18L22 10" />
+            <path d="M2 14L22 6" opacity="0.6" />
+            <path d="M2 10L22 2" opacity="0.3" />
+          </svg>
+        ),
+      },
+      {
+        id: "fibArcs",
+        labelKey: "fibArcs",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M4 20Q12 12 20 4" />
+            <path d="M4 20Q16 12 20 4" opacity="0.6" strokeDasharray="3 2" />
+            <path d="M4 20Q20 12 20 4" opacity="0.3" strokeDasharray="3 2" />
+          </svg>
+        ),
+      },
+      {
+        id: "fibSpiral",
+        labelKey: "fibSpiral",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M12 12c0-4 3-8 8-8s8 4 8 8-4 8-8 8-8-4-8-8" />
+            <path d="M12 12c0 4-4 8-8 8s-8-4-8-8 4-8 8-8 8 4 8 8" opacity="0.5" />
+          </svg>
+        ),
+      },
+      {
+        id: "fibTimeZone",
+        labelKey: "fibTimeZone",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M4 4v16" />
+            <path d="M10 4v16" opacity="0.6" />
+            <path d="M16 4v16" opacity="0.3" />
+            <path d="M22 4v16" opacity="0.2" />
           </svg>
         ),
       },
@@ -156,6 +261,36 @@ const TOOL_GROUPS: ToolGroup[] = [
           </svg>
         ),
       },
+      {
+        id: "callout",
+        labelKey: "callout",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M4 6h16v12H8l-4 4V6z" />
+          </svg>
+        ),
+      },
+      {
+        id: "note",
+        labelKey: "note",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <path d="M14 2v6h6" />
+            <path d="M8 13h8M8 17h5" />
+          </svg>
+        ),
+      },
+      {
+        id: "balloon",
+        labelKey: "balloon",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <ellipse cx="12" cy="8" rx="8" ry="5" />
+            <path d="M12 13c2 2 3 4 4 6M12 13c-2 2-3 4-4 6" />
+          </svg>
+        ),
+      },
     ],
   },
   {
@@ -171,6 +306,41 @@ const TOOL_GROUPS: ToolGroup[] = [
             <path d="M10 14l2-2" />
             <path d="M14 10l2-2" />
             <path d="M18 6l2-2" />
+          </svg>
+        ),
+      },
+      {
+        id: "priceRange",
+        labelKey: "priceRange",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M3 6h18" />
+            <path d="M3 18h18" />
+            <path d="M3 6v12" />
+            <path d="M21 6v12" />
+          </svg>
+        ),
+      },
+      {
+        id: "dateRange",
+        labelKey: "dateRangeTool",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <rect x="3" y="4" width="18" height="18" rx="2" />
+            <path d="M3 10h18" />
+            <path d="M8 2v4M16 2v4" />
+          </svg>
+        ),
+      },
+      {
+        id: "riskReward",
+        labelKey: "riskReward",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M3 20L10 10L13 14L21 4" />
+            <circle cx="10" cy="10" r="2" fill="currentColor" />
+            <circle cx="13" cy="14" r="2" fill="currentColor" />
+            <circle cx="21" cy="4" r="2" fill="currentColor" />
           </svg>
         ),
       },
@@ -201,6 +371,107 @@ const TOOL_GROUPS: ToolGroup[] = [
             <circle cx="8" cy="6" r="1.5" fill="currentColor" />
             <circle cx="13" cy="14" r="1.5" fill="currentColor" />
             <circle cx="20" cy="4" r="1.5" fill="currentColor" />
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
+    labelKey: "channels",
+    tools: [
+      {
+        id: "parallelChannel",
+        labelKey: "parallelChannel",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M3 8L21 14" />
+            <path d="M3 14L21 20" opacity="0.5" />
+          </svg>
+        ),
+      },
+      {
+        id: "pitchfork",
+        labelKey: "pitchfork",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M3 20L12 8L21 20" />
+            <path d="M5 14L19 14" />
+          </svg>
+        ),
+      },
+      {
+        id: "schiffPitchfork",
+        labelKey: "schiffPitchfork",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M3 18L10 6L21 18" />
+            <path d="M5 12L17 12" strokeDasharray="2 2" />
+            <path d="M4 14L18 14" strokeDasharray="2 2" opacity="0.5" />
+          </svg>
+        ),
+      },
+      {
+        id: "modifiedPitchfork",
+        labelKey: "modifiedPitchfork",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M3 20L12 6L21 20" />
+            <path d="M3 14L21 14" />
+            <path d="M7 10L17 18" strokeDasharray="3 2" />
+            <path d="M7 18L17 10" strokeDasharray="3 2" />
+          </svg>
+        ),
+      },
+      {
+        id: "insidePitchfork",
+        labelKey: "insidePitchfork",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M5 20L12 6L19 20" />
+            <path d="M7 16L17 16" strokeDasharray="2 2" />
+            <path d="M8 13L16 13" strokeDasharray="2 2" opacity="0.6" />
+          </svg>
+        ),
+      },
+    ],
+  },
+  {
+    labelKey: "gann",
+    tools: [
+      {
+        id: "gannBox",
+        labelKey: "gannBox",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <rect x="3" y="5" width="18" height="14" rx="1" />
+            <path d="M3 5L21 19" opacity="0.5" />
+            <path d="M3 12L21 12" opacity="0.3" />
+            <path d="M12 5L12 19" opacity="0.3" />
+          </svg>
+        ),
+      },
+      {
+        id: "gannFan",
+        labelKey: "gannFan",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <path d="M4 20L20 4" />
+            <path d="M4 20L18 4" opacity="0.6" />
+            <path d="M4 20L16 4" opacity="0.4" />
+            <path d="M4 20L14 4" opacity="0.3" />
+            <path d="M4 20L12 4" opacity="0.2" />
+          </svg>
+        ),
+      },
+      {
+        id: "gannSquare",
+        labelKey: "gannSquare",
+        icon: (
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-5 h-5">
+            <rect x="4" y="4" width="16" height="16" />
+            <path d="M4 4L20 20" opacity="0.5" />
+            <path d="M4 20L20 4" opacity="0.5" />
+            <circle cx="12" cy="12" r="6" opacity="0.3" />
           </svg>
         ),
       },

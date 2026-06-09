@@ -29,6 +29,7 @@ from backend.api import (
     ai,
     settings,
     admin,
+    screener,
 )
 from backend.services.admin_bootstrap_service import ensure_default_admin
 from backend.tasks.news_fetcher import news_fetcher
@@ -87,7 +88,7 @@ async def lifespan(app: FastAPI):
     await close_pg_pool()
 
 
-app = FastAPI(title="LMView API", version="0.18.0", lifespan=lifespan)
+app = FastAPI(title="LMView API", version="0.23.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -121,5 +122,6 @@ for router_module in (
     ai,
     settings,
     admin,
+    screener,
 ):
     app.include_router(router_module.router)

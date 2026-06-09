@@ -22,30 +22,274 @@ ALL_INTERVALS = ["1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"]
 
 
 @router.websocket("/stream/all")
-async def stream_all_first(websocket: WebSocket, symbol: str = "", exchange: str = "binance"):
-    """Real-time candle streaming for all timeframes.
-
-    This route must be registered before `/stream/{interval}` because FastAPI
-    matches WebSocket routes in declaration order.
+async def stream_all(websocket: WebSocket):
     """
-    await _stream_all_impl(websocket, symbol, exchange)
+    Real-time candle streaming for ALL timeframes simultaneously via a single WebSocket.
 
+    Returns JSON with shape: { "1s": { candle }, "1m": { candle }, "5m": { candle }, ... }
+
+    Real-time source: trade stream drives candle OHLCV updates incrementally.
+    Historical candles come from 1s/1m Redis sorted sets written by Flink.
+    """
+    await websocket.accept()
+    r = await get_redis()
+    symbol = websocket.query_params.get("symbol", "BTCUSDT").upper()
+    exchange = websocket.query_params.get("exchange", "binance").strip().lower() or "binance"
+
+    target_ms_map = {iv: INTERVAL_SECONDS[iv] * 1000 for iv in ALL_INTERVALS}
+
+    # Pre-build Redis keys
+    ticker_key = f"ticker:latest:{exchange}:{symbol}"
+    candle_1s_key = f"candle:1s:{exchange}:{symbol}"
+    candle_1m_key = f"candle:1m:{exchange}:{symbol}"
+    trade_key = f"trade:latest:{exchange}:{symbol}"
+
+    # Real-time candle state — incrementally updated per trade
+    rt_candles: dict[str, dict] = {}
+
+    # Track last trade to detect changes
+    last_trade_ts: int = 0
+    last_trade_price: float = 0
+
+    try:
+        while True:
+            # Fetch each Redis key sequentially to avoid sentinel blocking
+            try:
+                ticker_raw = await r.hgetall(ticker_key)
+            except Exception as e:
+                log.debug("ticker fetch error: %s", e)
+                ticker_raw = {}
+            try:
+                raw_1s = await r.zrevrange(candle_1s_key, 0, 0)
+            except Exception as e:
+                log.debug("1s fetch error: %s", e)
+                raw_1s = []
+            try:
+                raw_1m_scores = await r.zrevrange(candle_1m_key, 0, 0, withscores=True)
+            except Exception as e:
+                log.debug("1m scores fetch error: %s", e)
+                raw_1m_scores = []
+            try:
+                raw_1m = await r.zrevrange(candle_1m_key, 0, 0)
+            except Exception as e:
+                log.debug("1m fetch error: %s", e)
+                raw_1m = []
+            try:
+                raw_trade = await r.zrevrange(trade_key, 0, 0)
+            except Exception as e:
+                log.debug("trade fetch error: %s", e)
+                raw_trade = []
+
+            live_price = float(ticker_raw["price"]) if ticker_raw.get("price") else None
+            live_ts = int(ticker_raw["event_time"]) if ticker_raw.get("event_time") else None
+
+            # Parse latest trade
+            trade_price: float | None = None
+            trade_ts: int = 0
+            if raw_trade:
+                try:
+                    t = json.loads(raw_trade[0])
+                    trade_price = float(t["p"])
+                    trade_ts = int(t["t"])
+                except Exception as e:
+                    log.debug("trade parse error: %s", e)
+
+            # Parse 1s candle from Flink
+            candle_1s: dict | None = None
+            if raw_1s:
+                try:
+                    c = json.loads(raw_1s[0])
+                    candle_1s = {
+                        "openTime": int(c["t"]),
+                        "open": c["o"], "high": c["h"],
+                        "low": c["l"], "close": c["c"],
+                        "volume": c["v"],
+                    }
+                except Exception as e:
+                    log.debug("1s parse error: %s", e)
+
+            # Parse1m candles from Flink
+            candle_1m_window = 0
+            candle_1m_data: list[dict] = []
+            if raw_1m_scores:
+                try:
+                    latest_score = int(raw_1m_scores[0][1])
+                    candle_1m_window = (latest_score // 60000) * 60000
+                except Exception as e:
+                    log.debug("1m window error: %s", e)
+            if raw_1m:
+                try:
+                    candle_1m_data = [json.loads(c) for c in raw_1m]
+                except Exception as e:
+                    log.debug("1m parse error: %s", e)
+
+            # Real-time update from trade — incremental OHLCV
+            trade_changed = (
+                trade_price is not None
+                and (trade_ts != last_trade_ts or trade_price != last_trade_price)
+            )
+            if trade_changed and trade_price is not None:
+                rt_candles = _merge_trade_to_candles(
+                    rt_candles, trade_ts, trade_price,
+                    candle_1s, candle_1m_window, candle_1m_data,
+                    target_ms_map,
+                )
+
+            # Build result for all intervals
+            result: dict[str, dict | None] = {}
+            for iv in ALL_INTERVALS:
+                result[iv] = _get_stream_candle(
+                    iv, rt_candles, candle_1s, candle_1m_window,
+                    candle_1m_data, live_price, live_ts, target_ms_map,
+                )
+
+            await websocket.send_json(result)
+            last_trade_ts = trade_ts
+            last_trade_price = trade_price or 0
+
+            await asyncio.sleep(0.05)
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        log.warning("Stream all error for %s: %s", symbol, e)
+
+
+def _merge_trade_to_candles(
+    rt_candles: dict[str, dict],
+    trade_ts: int,
+    trade_price: float,
+    candle_1s: dict | None,
+    candle_1m_window: int,
+    candle_1m_data: list[dict],
+    target_ms_map: dict[str, int],
+) -> dict[str, dict]:
+    """
+    Incrementally update real-time candle OHLCV from a trade.
+
+    Strategy:
+    - If candle window hasn't changed: update high/low/close incrementally
+    - If candle window has changed: create new candle from base open
+    -1s interval: use Flink 1s candle as base
+    - 1m+: use Flink 1m candles as base
+    """
+    if not rt_candles:
+        # Initialize from Flink historical data
+        for iv in ALL_INTERVALS:
+            target_ms = target_ms_map[iv]
+            if iv == "1s" and candle_1s:
+                rt_candles[iv] = dict(candle_1s)
+            elif candle_1m_data:
+                window = (candle_1m_window // target_ms) * target_ms
+                rt_candles[iv] = {
+                    "openTime": window,
+                    "open": candle_1m_data[0]["o"],
+                    "high": max(c["h"] for c in candle_1m_data),
+                    "low": min(c["l"] for c in candle_1m_data),
+                    "close": candle_1m_data[-1]["c"],
+                    "volume": round(sum(c["v"] for c in candle_1m_data), 8),
+                }
+
+    # Update each interval incrementally from trade price
+    for iv, target_ms in target_ms_map.items():
+        window = (trade_ts // target_ms) * target_ms
+        existing = rt_candles.get(iv)
+
+        if existing and existing["openTime"] == window:
+            # Same candle window — incremental update
+            existing["close"] = trade_price
+            existing["high"] = max(existing["high"], trade_price)
+            existing["low"] = min(existing["low"], trade_price)
+        else:
+            # New candle window — create from base open
+            if iv == "1s" and candle_1s:
+                open_p = candle_1s["open"]
+            elif candle_1m_data:
+                open_p = candle_1m_data[0]["o"]
+            else:
+                open_p = trade_price
+
+            rt_candles[iv] = {
+                "openTime": window,
+                "open": open_p,
+                "high": trade_price,
+                "low": trade_price,
+                "close": trade_price,
+                "volume": 0,
+            }
+
+    return rt_candles
+
+
+def _get_stream_candle(
+    interval: str,
+    rt_candles: dict[str, dict],
+    candle_1s: dict | None,
+    candle_1m_window: int,
+    candle_1m_data: list[dict],
+    live_price: float | None,
+    live_ts: int | None,
+    target_ms_map: dict[str, int],
+) -> dict | None:
+    """Get the latest candle for an interval from real-time state or Flink fallback."""
+    target_ms = target_ms_map[interval]
+
+    # Use real-time state if available (trade-updated)
+    if interval in rt_candles:
+        return rt_candles[interval]
+
+    # Fall back to Flink historical data
+    if interval == "1s":
+        return candle_1s
+
+    if interval == "1m":
+        if not candle_1m_data:
+            return None
+        return {
+            "openTime": candle_1m_window,
+            "open": candle_1m_data[0]["o"],
+            "high": max(c["h"] for c in candle_1m_data),
+            "low": min(c["l"] for c in candle_1m_data),
+            "close": candle_1m_data[-1]["c"],
+            "volume": round(sum(c["v"] for c in candle_1m_data), 8),
+        }
+
+    if not candle_1m_data:
+        return None
+
+    live_window = (live_ts // target_ms) * target_ms if live_ts else 0
+    flink_window = (candle_1m_window // target_ms) * target_ms
+
+    if live_window == flink_window and live_price and live_ts:
+        window_close_ms = flink_window + target_ms
+        if live_ts > int(candle_1m_data[-1]["t"]) and live_ts < window_close_ms:
+            close_p = live_price
+            high_p = max(max(c["h"] for c in candle_1m_data), live_price)
+            low_p = min(min(c["l"] for c in candle_1m_data), live_price)
+        else:
+            close_p = candle_1m_data[-1]["c"]
+            high_p = max(c["h"] for c in candle_1m_data)
+            low_p = min(c["l"] for c in candle_1m_data)
+    else:
+        close_p = candle_1m_data[-1]["c"]
+        high_p = max(c["h"] for c in candle_1m_data)
+        low_p = min(c["l"] for c in candle_1m_data)
+
+    return {
+        "openTime": flink_window,
+        "open": candle_1m_data[0]["o"],
+        "high": high_p,
+        "low": low_p,
+        "close": close_p,
+        "volume": round(sum(c["v"] for c in candle_1m_data), 8),
+    }
 
 
 @router.websocket("/stream/{interval}")
 async def stream_interval(
     websocket: WebSocket,
     interval: str,
-    symbol: str = "",
-    exchange: str = "binance",
 ):
-    """Real-time candle streaming for a single timeframe.
-
-    Frontend connects with:
-        ``ws://host/api/stream/1m?symbol=BTCUSDT&exchange=binance``
-
-    Returns JSON with the latest candle for the requested interval.
-    """
+    """Real-time candle streaming for a single timeframe."""
     interval = interval.strip().lower()
     if interval not in ALL_INTERVALS:
         await websocket.accept()
@@ -55,8 +299,8 @@ async def stream_interval(
 
     await websocket.accept()
     r = await get_redis()
-    symbol = symbol.upper()
-    exchange = exchange.strip().lower() or "binance"
+    symbol = websocket.query_params.get("symbol", "BTCUSDT").upper()
+    exchange = websocket.query_params.get("exchange", "binance").strip().lower() or "binance"
     target_ms = INTERVAL_SECONDS[interval] * 1000
     last_sent = None
 
@@ -84,8 +328,6 @@ async def stream_interval(
 async def stream_indicators(
     websocket: WebSocket,
     interval: str,
-    symbol: str = "",
-    exchange: str = "binance",
 ):
     """Real-time indicator snapshot streaming for a single timeframe."""
     interval = interval.strip().lower()
@@ -97,8 +339,8 @@ async def stream_indicators(
 
     await websocket.accept()
     r = await get_redis()
-    symbol = symbol.upper()
-    exchange = exchange.strip().lower() or "binance"
+    symbol = websocket.query_params.get("symbol", "BTCUSDT").upper()
+    exchange = websocket.query_params.get("exchange", "binance").strip().lower() or "binance"
     last_sent = None
 
     try:
@@ -115,64 +357,6 @@ async def stream_indicators(
         log.warning("Indicator stream %s error for %s: %s", interval, symbol, e)
 
 
-async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str = "binance"):
-    """
-    Real-time candle streaming for ALL timeframes simultaneously via a single WebSocket.
-
-    The frontend connects with:
-        ``ws://host/api/stream/all?symbol=BTCUSDT&exchange=binance``
-
-    Returns JSON with shape:
-        {
-          "1s": { candle },
-          "1m": { candle },
-          "5m": { candle },
-          ...
-        }
-    """
-    await websocket.accept()
-    r = await get_redis()
-    symbol = symbol.upper()
-    exchange = exchange.strip().lower() or "binance"
-
-    # Build target_ms lookup
-    target_ms_map = {iv: INTERVAL_SECONDS[iv] * 1000 for iv in ALL_INTERVALS}
-    last_sent: dict[str, dict | None] = {iv: None for iv in ALL_INTERVALS}
-
-    try:
-        while True:
-            result: dict[str, dict | None] = {}
-            any_changed = False
-
-            # Fetch ticker ONCE for all intervals (avoid N+1 queries)
-            ticker = await r.hgetall(f"ticker:latest:{exchange}:{symbol}")
-            live_price = float(ticker["price"]) if ticker.get("price") else None
-            live_ts = int(ticker["event_time"]) if ticker.get("event_time") else None
-
-            # Only build timeframes that have actually changed (delta updates)
-            for iv in ALL_INTERVALS:
-                # Fetch candle without redundant hgetall calls
-                candle = await _build_candle(r, symbol, iv, target_ms_map[iv], exchange, live_price, live_ts)
-                if candle and candle != last_sent[iv]:
-                    result[iv] = candle
-                    last_sent[iv] = candle
-                    any_changed = True
-                else:
-                    result[iv] = last_sent[iv]
-
-            # Only send if something changed
-            if any_changed:
-                await websocket.send_json(result)
-
-            # CRITICAL: Reduced from 0.3s to 0.05s for real-time responsiveness
-            # This is the primary latency source — tighter loop = faster updates
-            await asyncio.sleep(0.05)
-    except WebSocketDisconnect:
-        pass
-    except Exception as e:
-        log.warning("Stream all error for %s: %s", symbol, e)
-
-
 async def _build_candle(
     r,
     symbol: str,
@@ -182,20 +366,13 @@ async def _build_candle(
     live_price: float | None = None,
     live_ts: int | None = None,
 ) -> dict | None:
-    """Build the latest candle by merging Flink aggregate data with the
-    real-time ticker price.
+    """Build the latest candle by merging Flink aggregate data with real-time ticker."""
 
-    OPTIMIZATION: Caller MUST provide live_price and live_ts (pre-fetched)
-    to avoid redundant Redis hgetall calls. If not provided, fetch once.
-    """
-
-    # If not pre-fetched, fetch once (but caller should provide these)
     if live_price is None or live_ts is None:
         ticker = await r.hgetall(f"ticker:latest:{exchange}:{symbol}")
         live_price = live_price or (float(ticker["price"]) if ticker.get("price") else None)
         live_ts = live_ts or (int(ticker["event_time"]) if ticker.get("event_time") else None)
 
-    # 1s interval: serve directly from KeyDB
     if interval == "1s":
         raw = await r.zrevrange(f"candle:1s:{exchange}:{symbol}", 0, 0)
         if raw:
@@ -218,8 +395,6 @@ async def _build_candle(
             }
         return None
 
-    # 1m+: aggregate from the appropriate source sorted set
-    # KeyDB stores candles with exchange prefix: candle:1s:binance:BTCUSDT
     source_key = f"candle:1s:{exchange}:{symbol}" if interval == "1m" else f"candle:1m:{exchange}:{symbol}"
     latest = await r.zrevrange(source_key, 0, 0, withscores=True)
 
@@ -265,7 +440,6 @@ async def _build_candle(
                 }
         return flink_candle
 
-    # Merge with real-time ticker for 5m+ only
     if live_price and live_ts:
         live_window = (live_ts // target_ms) * target_ms
         if flink_candle and live_window == flink_window:
@@ -286,7 +460,6 @@ async def _build_candle(
     if flink_candle:
         return flink_candle
 
-    # Last resort fallback
     data = await r.hgetall(f"candle:latest:{exchange}:{symbol}")
     if data:
         kline_start = int(data["kline_start"])

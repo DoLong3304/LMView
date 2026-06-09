@@ -3,7 +3,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # Stage 1: Build the React frontend
-FROM node:20-alpine AS build
+FROM node:20-bookworm AS build
 
 WORKDIR /app
 
@@ -16,10 +16,10 @@ COPY frontend/ ./
 RUN npm run build
 
 # Stage 2: Serve with Nginx
-FROM nginx:1.31.0-alpine
+FROM nginx:1.27.5
 
 # Required by entrypoint.sh for self-signed cert (prod) + htpasswd generation
-RUN apk add --no-cache openssl apache2-utils
+RUN apt-get update && apt-get install -y --no-install-recommends openssl apache2-utils && rm -rf /var/lib/apt/lists/*
 
 # Remove default config
 RUN rm /etc/nginx/conf.d/default.conf

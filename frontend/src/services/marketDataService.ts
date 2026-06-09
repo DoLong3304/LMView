@@ -8,6 +8,61 @@ import type { Candle, IndicatorStreamSnapshot, SymbolInfo, Ticker, Trade } from 
 
 export { TIMEFRAMES };
 
+// ── Shared real-time price map ────────────────────────────────────────────────
+// Single source of truth for live prices across all UI components.
+// Updated by subscribeAllTimeframes. Consumers read from here instead of
+// polling /ticker every 5 seconds.
+//
+// Shape: { "BTCUSDT": { price, change24h, volume, activity_score } }
+// Updated every 50ms via WebSocket trade stream.
+const _livePriceMap: Record<string, {
+  price: number;
+  change24h: number;
+  volume: number;
+  activity_score: number;
+  ts: number;
+}> = {};
+
+/**
+ * Get all live prices. Callers should not mutate the returned object.
+ */
+export function getLivePrices(): Record<string, {
+  price: number;
+  change24h: number;
+  volume: number;
+  activity_score: number;
+  ts: number;
+}> {
+  return _livePriceMap;
+}
+
+/**
+ * Get live price for a single symbol. Returns undefined if not yet received.
+ */
+export function getLivePrice(symbol: string): {
+  price: number;
+  change24h: number;
+  volume: number;
+  activity_score: number;
+  ts: number;
+} | undefined {
+  return _livePriceMap[symbol];
+}
+
+/**
+ * Update live price for a symbol. Called internally by subscribeAllTimeframes.
+ * Exported so App.tsx can read from the map instead of polling /ticker.
+ */
+export function updateLivePrice(
+  symbol: string,
+  price: number,
+  change24h: number,
+  volume: number,
+  activity_score: number,
+): void {
+  _livePriceMap[symbol] = { price, change24h, volume, activity_score, ts: Date.now() };
+}
+
 const LIVE_TICK_CACHE_MS = 2_000;
 const ORDER_BOOK_CACHE_MS = 1_000;
 const CANDLE_LATEST_CACHE_MS = 3_000;
@@ -126,7 +181,12 @@ export function subscribeAllTimeframes(options: MultiTimeframeOptions): () => vo
     ws.onmessage = (e: MessageEvent) => {
       const data: Record<string, RawKline> = JSON.parse(e.data as string);
       for (const [tf, kline] of Object.entries(data)) {
-        if (kline) onCandle(normalizeTimeframe(tf), mapRawToCandle(kline));
+        if (kline) {
+          onCandle(normalizeTimeframe(tf), mapRawToCandle(kline));
+          // Also update shared live price map so App.tsx/toolbar read from here
+          // instead of polling /ticker every 5s. This is the single source of truth.
+          updateLivePrice(symbol, Number(kline.close), 0, Number(kline.volume) || 0, 0);
+        }
       }
     };
 

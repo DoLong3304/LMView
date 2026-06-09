@@ -105,21 +105,101 @@ export interface NewsFilters {
 }
 
 export interface MarketMetrics {
+  // Overall Market
   total_symbols: number;
   total_market_cap: number;
   total_volume_24h: number;
   btc_dominance: number;
   eth_dominance?: number;
+  fear_greed_index?: number;
+
+  // BTC Metrics
   btc_price: number;
+  btc_change_24h?: number;
+  btc_high_24h?: number;
+  btc_low_24h?: number;
+
+  // ETH Metrics
+  eth_price?: number;
+  eth_change_24h?: number;
+
+  // Market Breadth
+  advancing_count?: number;
+  declining_count?: number;
+  new_highs_24h?: number;
+  new_lows_24h?: number;
+
+  // Volume Metrics
+  avg_volume_24h?: number;
+  btc_volume_24h?: number;
+  stablecoin_volume_24h?: number;
 }
 
 export interface TopMover {
   symbol: string;
+  name?: string;
   price: number;
   change_24h_pct: number;
+  change_7d_pct?: number;
+  change_30d_pct?: number;
   volume_24h: number;
+  market_cap?: number;
   rank?: number;
+  exchange?: string;
 }
+
+export interface SectorPerformance {
+  sector: string;
+  name: string;
+  change_24h_pct: number;
+  change_7d_pct?: number;
+  market_cap: number;
+  top_coins: string[];
+}
+
+export interface MarketOverview {
+  timestamp: string;
+  timeframe: string;
+  market_summary: MarketMetrics;
+  top_gainers: TopMover[];
+  top_losers: TopMover[];
+  most_volatile: TopMover[];
+  highest_volume: TopMover[];
+  trending_news: TrendingSymbol[];
+  sector_performance: Record<string, SectorPerformance>;
+  heatmap_data: HeatmapItem[];
+  indicators_summary: IndicatorsSummary;
+  metadata: MarketOverviewMetadata;
+}
+
+export interface HeatmapItem {
+  symbol: string;
+  change_pct: number;
+  price: number;
+  volume_24h: number;
+  market_cap: number;
+  volatility?: number;
+}
+
+export interface IndicatorsSummary {
+  total_symbols: number;
+  avg_rsi: number;
+  overbought_count: number;
+  oversold_count: number;
+  bullish_macd_count: number;
+  bearish_macd_count: number;
+}
+
+export interface MarketOverviewMetadata {
+  source: string;
+  data_sources: string[];
+  is_placeholder: boolean;
+  computed_at: string;
+  gold_tables_healthy: boolean;
+  warning?: string | null;
+}
+
+export type MarketPeriod = "1h" | "24h" | "7d" | "30d";
 
 /** Symbol info from /api/symbols */
 export interface SymbolInfo {
@@ -202,7 +282,7 @@ export interface DataPoint {
 /** Drawing object - uses data-space coordinates as source of truth */
 export interface Drawing {
   id: string | number;
-  tool: string;
+  tool: DrawingTool | string;
 
   // Data-space coordinates (SOURCE OF TRUTH)
   dataPoints?: DataPoint[];
@@ -213,10 +293,105 @@ export interface Drawing {
   points?: DrawingPoint[];
 
   // Drawing properties
-  settings?: Record<string, any>;
+  settings?: DrawingSettings;
   text?: string;
   locked?: boolean;
   hidden?: boolean;
+}
+
+/** Drawing tool settings */
+export interface DrawingSettings {
+  color?: string;
+  lineWidth?: number;
+  lineStyle?: "solid" | "dashed" | "dotted";
+  dashArray?: string;
+  showLabel?: boolean;
+  showPrices?: boolean;
+  showTimes?: boolean;
+  fill?: boolean;
+  fillColor?: string;
+  fillOpacity?: number;
+  fontSize?: number;
+  fontFamily?: string;
+  textColor?: string;
+  backgroundColor?: string;
+  // Fibonacci specific
+  levels?: number[];
+  // Gann specific
+  angles?: number[];
+  showGrid?: boolean;
+  showMidlines?: boolean;
+  showArcs?: boolean;
+  showFans?: boolean;
+  // Elliott specific
+  waveType?: "impulse" | "corrective" | string;
+  waveLabels?: string[];
+  fiboLevels?: number[];
+  // Pitchfork specific
+  showMedian?: boolean;
+  showExtensions?: boolean;
+  showChannels?: boolean;
+  // Extended settings
+  extendLeft?: boolean;
+  extendRight?: boolean;
+  bold?: boolean;
+  italic?: boolean;
+  alignment?: "left" | "center" | "right";
+  [key: string]: unknown;
+}
+
+/** Fibonacci level definition */
+export interface FibonacciLevel {
+  level: number;        // e.g., 0.236, 0.382, 0.618
+  color: string;
+  lineWidth: number;
+  style: "solid" | "dashed" | "dotted";
+  label?: string;
+  show?: boolean;
+}
+
+/** Default Fibonacci levels */
+export const FIBONACCI_RETRACEMENT_LEVELS: FibonacciLevel[] = [
+  { level: 0, label: "0%", color: "#787B86", lineWidth: 1, style: "solid" },
+  { level: 0.236, label: "23.6%", color: "#787B86", lineWidth: 1, style: "dashed" },
+  { level: 0.382, label: "38.2%", color: "#7E8A93", lineWidth: 1, style: "dashed" },
+  { level: 0.5, label: "50%", color: "#9E8C6D", lineWidth: 1, style: "dashed" },
+  { level: 0.618, label: "61.8%", color: "#E7863D", lineWidth: 2, style: "solid" },
+  { level: 0.786, label: "78.6%", color: "#7E8A93", lineWidth: 1, style: "dashed" },
+  { level: 1, label: "100%", color: "#787B86", lineWidth: 1, style: "solid" },
+  { level: 1.272, label: "127.2%", color: "#3D793D", lineWidth: 1, style: "solid" },
+  { level: 1.618, label: "161.8%", color: "#3D793D", lineWidth: 2, style: "solid" },
+];
+
+/** Default Gann angles */
+export const GANN_ANGLES = [
+  { name: "1x1", angle: 45, label: "1x1 (45°)" },
+  { name: "1x2", angle: 26.565, label: "1x2 (26.565°)" },
+  { name: "1x3", angle: 18.435, label: "1x3 (18.435°)" },
+  { name: "1x4", angle: 14.036, label: "1x4 (14.036°)" },
+  { name: "1x8", angle: 7.125, label: "1x8 (7.125°)" },
+  { name: "2x1", angle: 63.75, label: "2x1 (63.75°)" },
+  { name: "3x1", angle: 71.565, label: "3x1 (71.565°)" },
+  { name: "4x1", angle: 75.964, label: "4x1 (75.964°)" },
+  { name: "8x1", angle: 82.875, label: "8x1 (82.875°)" },
+];
+
+/** Drawing preset/template interface */
+export interface DrawingPreset {
+  id: string;
+  name: string;
+  description: string;
+  drawings: Drawing[];
+  category: "bullish" | "bearish" | "neutral";
+  applicableTo: "crypto" | "forex" | "stocks" | "all";
+}
+
+/** Tool category grouping for toolbar */
+export interface DrawingCategory {
+  id: string;
+  labelKey: string;  // Using string to avoid circular dependency with i18n
+  tools: DrawingTool[];
+  children?: DrawingTool[];
 }
 
 /** Crosshair tooltip data */
@@ -248,7 +423,41 @@ export interface AuthResult {
 export type TimeframeKey = "1s" | "1m" | "5m" | "15m" | "1h" | "4h" | "1d" | "1w";
 export type Timeframe = TimeframeKey;
 
-export type ChartType = "candles" | "line" | "area" | "bars";
+export type ChartType = "candles" | "line" | "area" | "bars" | "heikinAshi" | "renko" | "lineBreak" | "kagi" | "pointFigure";
+
+/** Chart type config */
+export interface ChartTypeConfig {
+  id: ChartType;
+  labelKey: string;
+  description: string;
+  requiresTransformation: boolean;
+  hasSettings: boolean;
+}
+
+export const CHART_TYPES: ChartTypeConfig[] = [
+  { id: "candles", labelKey: "candlestick", description: "Standard candlestick", requiresTransformation: false, hasSettings: false },
+  { id: "bars", labelKey: "bars", description: "OHLC bars", requiresTransformation: false, hasSettings: false },
+  { id: "line", labelKey: "line", description: "Close line", requiresTransformation: false, hasSettings: false },
+  { id: "area", labelKey: "area", description: "Filled area", requiresTransformation: false, hasSettings: false },
+  { id: "heikinAshi", labelKey: "heikinAshi", description: "Smoothed candles", requiresTransformation: true, hasSettings: false },
+  { id: "renko", labelKey: "renko", description: "Brick-based", requiresTransformation: true, hasSettings: true },
+  { id: "lineBreak", labelKey: "lineBreak", description: "Price blocks", requiresTransformation: true, hasSettings: true },
+  { id: "kagi", labelKey: "kagi", description: "Trend-based lines", requiresTransformation: true, hasSettings: true },
+];
+
+/** Chart type settings for advanced chart types */
+export interface ChartTypeSettings {
+  // Renko
+  brickSizeType?: "fixed" | "atr";
+  fixedBrickSize?: number;
+  atrPeriod?: number;
+  renkoWicks?: boolean;
+  // Kagi
+  reversalPercent?: number;
+  kagiUseClose?: boolean;
+  // Line Break
+  lookback?: number;
+}
 
 export interface FeatureAvailability {
   available: boolean;
@@ -293,10 +502,94 @@ export interface LocalAiHelpSession {
 }
 
 /** Watchlist filter mode */
-export type WatchlistFilter = "all" | "starred";
+export type WatchlistTabFilter = "all" | "starred";
+export type DrawingToolCategory =
+  | "lines"          // Trend lines, Horizontal, Vertical, Angle
+  | "shapes"         // Rectangle, Triangle, Ellipse, Arrow, etc.
+  | "fibonacci"      // Retracement, Extension, Arcs, Spiral, Channel
+  | "gann"           // Box, Fan, Square
+  | "elliott"        // Elliott Wave tools
+  | "pitchfork"      // Pitchfork variants
+  | "text"           // Text, Callout, Rectangle Text, Note
+  | "measurement"    // Ruler, Crossline, DateRange, PriceRange
+  | "channels"       // Parallel, Regression, Pitchfork
+  | "patterns"       // Harmonic, XABCD
+  | "utility";       // Cursor, Magnet, Lock, Hide, Eraser
 
-/** Drawing tool types */
-export type DrawingTool = "cursor" | "trendline" | "horizontal" | "circle" | "rectangle" | "triangle" | "text" | "ruler";
+/** Drawing tool types - comprehensive list matching TradingView */
+export type DrawingTool =
+  // Lines
+  | "cursor"
+  | "crosshair"
+  | "trendline"
+  | "ray"
+  | "extendedLine"
+  | "horizontalRay"
+  | "horizontal"
+  | "vertical"
+  | "angleLine"
+  | "disjointAngle"
+
+  // Shapes
+  | "rectangle"
+  | "rotatedRectangle"
+  | "triangle"
+  | "ellipse"
+  | "arrow"
+  | "polyline"
+  | "parallelChannel"
+  | "priceRange"
+
+  // Fibonacci
+  | "fibRetracement"
+  | "fibExtension"
+  | "fibChannel"
+  | "fibArcs"
+  | "fibSpiral"
+  | "fibTimeZone"
+
+  // Gann
+  | "gannBox"
+  | "gannFan"
+  | "gannSquare"
+  | "gannLine"
+
+  // Elliott Wave
+  | "elliottWave"
+  | "harmonicABCD"
+  | "xabcdPattern"
+
+  // Pitchfork
+  | "pitchfork"
+  | "schiffPitchfork"
+  | "modifiedPitchfork"
+  | "insidePitchfork"
+
+  // Text & Notes
+  | "text"
+  | "callout"
+  | "note"
+  | "balloon"
+  | "anchoredText"
+
+  // Measurement
+  | "ruler"
+  | "crossline"
+  | "dateRange"
+  | "priceRangeTool"
+  | "riskReward"
+
+  // Position & Forecast
+  | "longPosition"
+  | "shortPosition"
+  | "forecast"
+
+  // Utility
+  | "magnet"
+  | "lock"
+  | "hide"
+  | "eraser"
+  | "clearAll";
 
 /** Command types for undo/redo system */
 export type CommandType = 'add' | 'delete' | 'update' | 'move' | 'batch';
@@ -317,6 +610,140 @@ export interface HistoryState {
   commands: Command[];
   currentIndex: number;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase E: Enhanced Watchlist & Screener
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Enhanced watchlist item with full technical data */
+export interface EnhancedWatchlistItem {
+  // Basic Info
+  symbol: string;
+  name?: string;
+  rank?: number;
+
+  // Price Data
+  price: number;
+  change24h: number;
+  change7d?: number;
+  change30d?: number;
+  high24h?: number;
+  low24h?: number;
+
+  // Volume
+  volume24h: number;
+  volumeChange24h?: number;
+
+  // Market Data
+  marketCap?: number;
+  marketCapRank?: number;
+
+  // Technical Indicators
+  rsi14?: number;
+  rsiSignal?: "overbought" | "oversold" | "neutral";
+  trend?: "bullish" | "bearish" | "neutral";
+  sma20?: number;
+  sma50?: number;
+  ema20?: number;
+  support?: number;
+  resistance?: number;
+
+  // Volatility
+  volatility24h?: number;
+  atr14?: number;
+
+  // Classification
+  category?: string;
+  tags?: string[];
+  isNewListing?: boolean;
+  isActive?: boolean;
+
+  // Legacy compatibility
+  change: number;  // alias for change24h
+  activityScore?: number;
+  color: "green" | "red" | "gray";
+}
+
+export interface WatchlistColumn {
+  id: string;
+  labelKey: string;
+  key: keyof EnhancedWatchlistItem;
+  align: "left" | "right" | "center";
+  width?: number;
+  sortable: boolean;
+  format?: "price" | "percent" | "volume" | "marketCap" | "number";
+}
+
+export const WATCHLIST_COLUMNS: WatchlistColumn[] = [
+  { id: "rank", labelKey: "#", key: "rank", align: "center", width: 40, sortable: true },
+  { id: "name", labelKey: "name", key: "symbol", align: "left", width: 120, sortable: true },
+  { id: "price", labelKey: "price", key: "price", align: "right", width: 100, sortable: true, format: "price" },
+  { id: "change24h", labelKey: "24h", key: "change24h", align: "right", width: 80, sortable: true, format: "percent" },
+  { id: "change7d", labelKey: "7d", key: "change7d", align: "right", width: 80, sortable: true, format: "percent" },
+  { id: "volume24h", labelKey: "24hVol", key: "volume24h", align: "right", width: 100, sortable: true, format: "volume" },
+  { id: "marketCap", labelKey: "marketCap", key: "marketCap", align: "right", width: 100, sortable: true, format: "marketCap" },
+  { id: "rsi14", labelKey: "RSI(14)", key: "rsi14", align: "right", width: 60, sortable: true },
+  { id: "trend", labelKey: "trend", key: "trend", align: "center", width: 80, sortable: false },
+  { id: "volatility", labelKey: "volatility", key: "volatility24h", align: "right", width: 80, sortable: true, format: "percent" },
+];
+
+export type WatchlistSortKey = "rank" | "symbol" | "price" | "change24h" | "change7d" | "volume24h" | "marketCap" | "rsi14" | "volatility24h";
+export type WatchlistSortDir = "asc" | "desc";
+
+export interface WatchlistFilter {
+  categories?: string[];
+  minVolume?: number;
+  minPrice?: number;
+  maxPrice?: number;
+  minMarketCap?: number;
+  rsiRange?: { min: number; max: number };
+  changeRange?: { min: number; max: number };
+  trends?: ("bullish" | "bearish" | "neutral")[];
+  tags?: string[];
+  isNewListing?: boolean;
+  isActive?: boolean;
+}
+
+/** Screener filter presets */
+export interface ScreenerPreset {
+  id: string;
+  name: string;
+  description?: string;
+  filters: WatchlistFilter;
+}
+
+export const SCREENER_PRESETS: ScreenerPreset[] = [
+  {
+    id: "oversold",
+    name: "Oversold",
+    description: "RSI below 30",
+    filters: { rsiRange: { min: 0, max: 30 } },
+  },
+  {
+    id: "overbought",
+    name: "Overbought",
+    description: "RSI above 70",
+    filters: { rsiRange: { min: 70, max: 100 } },
+  },
+  {
+    id: "highVolume",
+    name: "High Volume",
+    description: "Volume spike 24h",
+    filters: { volumeChange24h: 100 } as any,
+  },
+  {
+    id: "topGainers",
+    name: "Top Gainers",
+    description: "Top performers 24h",
+    filters: { changeRange: { min: 5, max: 100 } },
+  },
+  {
+    id: "topLosers",
+    name: "Top Losers",
+    description: "Worst performers 24h",
+    filters: { changeRange: { min: -100, max: -5 } },
+  },
+];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Phase 0: Data freshness and metadata types (shared with backend contracts)

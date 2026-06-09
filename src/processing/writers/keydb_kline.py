@@ -31,7 +31,7 @@ class KeyDBKlineWriter(FlatMapFunction):
     TTL_1M = max(KEYDB_1M_RETENTION_DAYS, 1) * 86_400
     CLEANUP_EVERY = 60
     BATCH_SIZE = 50
-    FLUSH_INTERVAL = 0.5
+    FLUSH_INTERVAL = 0.1  # was 0.5 — reduced from 500ms to 100ms for lower latency
 
     def open(self, runtime_context):
         # Get Redis master connection via Sentinel

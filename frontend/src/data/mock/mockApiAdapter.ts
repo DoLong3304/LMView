@@ -20,6 +20,8 @@ import type {
   TopMover,
   Trade,
   TrendingSymbol,
+  EnhancedWatchlistItem,
+  WatchlistFilter,
 } from "@/types";
 import type { AiMessage, ChartContextForAi } from "@/features/ai/types";
 
@@ -96,6 +98,8 @@ export interface DataSourceAdapter {
   fetchLatestNews: (filters: NewsFilters) => Promise<MockNewsResponse>;
   searchNews: (filters: NewsFilters) => Promise<MockNewsResponse>;
   fetchTrendingSymbols: (limit: number) => Promise<MockTrendingSymbolsResponse>;
+  fetchScreenerResults: (filter: import("@/types").WatchlistFilter) => Promise<{ data: import("@/types").EnhancedWatchlistItem[]; timestamp: string }>;
+  fetchWatchlistWithIndicators: (symbols?: string[]) => Promise<{ data: import("@/types").EnhancedWatchlistItem[]; timestamp: string }>;
   generateAiResponse: (
     message: string,
     context?: ChartContextForAi | null,
@@ -312,6 +316,56 @@ export const mockDataAdapter: DataSourceAdapter = {
       ].slice(0, limit),
       metadata: metadata(),
     };
+  },
+
+  async fetchScreenerResults(_filter: WatchlistFilter): Promise<{ data: EnhancedWatchlistItem[]; timestamp: string }> {
+    const tickers = generateMockTickers();
+    const items: EnhancedWatchlistItem[] = tickers.map((t, idx) => {
+      const change24h = t.change24h ?? 0;
+      const base = t.symbol.replace("USDT", "").replace("BTC", "");
+      return {
+        symbol: t.symbol,
+        name: base,
+        rank: idx + 1,
+        price: t.price ?? 0,
+        change24h,
+        change7d: (Math.random() - 0.3) * 20,
+        volume24h: t.volume ?? 0,
+        marketCap: (t.price ?? 0) * (t.volume ?? 0) * 0.01,
+        rsi14: 30 + Math.random() * 40,
+        rsiSignal: "neutral" as const,
+        trend: change24h > 2 ? "bullish" : change24h < -2 ? "bearish" : "neutral" as const,
+        volatility24h: Math.random() * 10,
+        change: change24h,
+        color: (change24h >= 0 ? "green" : "red") as "green" | "red",
+      };
+    });
+    return { data: items, timestamp: new Date().toISOString() };
+  },
+
+  async fetchWatchlistWithIndicators(_symbols?: string[]): Promise<{ data: EnhancedWatchlistItem[]; timestamp: string }> {
+    const tickers = generateMockTickers();
+    const items: EnhancedWatchlistItem[] = tickers.map((t, idx) => {
+      const change24h = t.change24h ?? 0;
+      const base = t.symbol.replace("USDT", "").replace("BTC", "");
+      return {
+        symbol: t.symbol,
+        name: base,
+        rank: idx + 1,
+        price: t.price ?? 0,
+        change24h,
+        change7d: (Math.random() - 0.3) * 20,
+        volume24h: t.volume ?? 0,
+        marketCap: (t.price ?? 0) * (t.volume ?? 0) * 0.01,
+        rsi14: 30 + Math.random() * 40,
+        rsiSignal: "neutral" as const,
+        trend: change24h > 2 ? "bullish" : change24h < -2 ? "bearish" : "neutral" as const,
+        volatility24h: Math.random() * 10,
+        change: change24h,
+        color: (change24h >= 0 ? "green" : "red") as "green" | "red",
+      };
+    });
+    return { data: items, timestamp: new Date().toISOString() };
   },
 
   generateAiResponse(message, context) {

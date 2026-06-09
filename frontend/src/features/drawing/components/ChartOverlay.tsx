@@ -7,7 +7,10 @@ import type { IChartApi, ISeriesApi } from 'lightweight-charts';
 const MULTI_CLICK_NEEDED: Record<string, boolean> = {
   elliottWave: true,
   harmonicABCD: true,
-  xabcdPattern: true
+  xabcdPattern: true,
+  horizontalRay: true,
+  parallelChannel: true,
+  pitchfork: true,
 };
 
 const DRAWING_HIT_TOLERANCE = 8; // pixels
@@ -307,6 +310,35 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
 
         if (drawing.tool === 'ray') {
           return distanceToRay(mousePixel, validPixels[0], validPixels[1]) <= DRAWING_HIT_TOLERANCE;
+        }
+
+        if (drawing.tool === 'parallelChannel') {
+          if (validPixels.length < 3) return false;
+          const [p1, p2, p3] = validPixels;
+          // Hit test both lines of the channel
+          const hit1 = distanceToLine(mousePixel, p1, p2) <= DRAWING_HIT_TOLERANCE;
+          // Calculate parallel line from p3 offset
+          const dx = p2.x - p1.x, dy = p2.y - p1.y;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          if (len === 0) return false;
+          const nx = -dy / len, ny = dx / len;
+          const dot = (p3.x - p1.x) * nx + (p3.y - p1.y) * ny;
+          const q1 = { x: p1.x + nx * dot, y: p1.y + ny * dot };
+          const q2 = { x: p2.x + nx * dot, y: p2.y + ny * dot };
+          const hit2 = distanceToLine(mousePixel, q1, q2) <= DRAWING_HIT_TOLERANCE;
+          return hit1 || hit2;
+        }
+
+        if (drawing.tool === 'pitchfork') {
+          if (validPixels.length < 3) return false;
+          const [pA, pB, pC] = validPixels;
+          const mid = { x: (pB.x + pC.x) / 2, y: (pB.y + pC.y) / 2 };
+          const hitMedian = distanceToInfiniteLine(mousePixel, pA, mid) <= DRAWING_HIT_TOLERANCE;
+          const hitFork1 = distanceToInfiniteLine(mousePixel, pB, pC) <= DRAWING_HIT_TOLERANCE;
+          const hitAnchors = validPixels.some(p =>
+            Math.sqrt((mousePixel.x - p.x) ** 2 + (mousePixel.y - p.y) ** 2) <= DRAWING_HIT_TOLERANCE
+          );
+          return hitMedian || hitFork1 || hitAnchors;
         }
 
         for (let i = 0; i < validPixels.length - 1; i++) {
@@ -774,6 +806,93 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
       }
 
       default: {
+        // Horizontal ray with arrows both sides
+        if (d.tool === 'horizontalRay') {
+          const y = priceToY(d.dataPoints[0].price);
+          if (y === null) return null;
+          return (
+            <g key={key} opacity={opacity}>
+              <line x1={0} y1={y} x2="100%" y2={y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray="8 4" />
+              <polygon points={`8,${y - 6} 0,${y} 8,${y + 6}`} fill={strokeColor} />
+              <polygon points={`16,${y - 6} 24,${y} 16,${y + 6}`} fill={strokeColor} transform="translate(-24,0)" />
+              {s.showLabel !== false && (
+                <>
+                  <rect x={10} y={y - 18} width="60" height="16" rx="3" fill={`${color}30`} />
+                  <text x={40} y={y - 6} textAnchor="middle" fontSize="10" fill={color}>{d.dataPoints[0].price.toFixed(2)}</text>
+                </>
+              )}
+            </g>
+          );
+        }
+
+        // Parallel channel (3-point)
+        if (d.tool === 'parallelChannel') {
+          if (pixels.length < 3 || !pixels[0] || !pixels[1] || !pixels[2]) return null;
+          const [p1, p2, p3] = pixels;
+          const dx = p2.x - p1.x, dy = p2.y - p1.y;
+          const len = Math.sqrt(dx * dx + dy * dy);
+          if (len === 0) return null;
+          const nx = -dy / len, ny = dx / len;
+          const dot = (p3.x - p1.x) * nx + (p3.y - p1.y) * ny;
+          const q1 = { x: p1.x + nx * dot, y: p1.y + ny * dot };
+          const q2 = { x: p2.x + nx * dot, y: p2.y + ny * dot };
+          const fillAlpha = Math.round((s.fillOpacity || 0.08) * 255).toString(16).padStart(2, '0');
+          const channelAnchors = isSelected && !isPreview && !d.locked ? [p1, p2, p3].map((p, index) => (
+            <circle key={`${d.id}-anchor-${index}`} cx={p.x} cy={p.y} r="6" fill={strokeColor} stroke="white" strokeWidth="2" style={{ cursor: 'move' }} onMouseDown={(e) => handleAnchorMouseDown(e, d.id, index)} />
+          )) : null;
+          return (
+            <g key={key} opacity={opacity}>
+              <polygon points={`${p1.x},${p1.y} ${p2.x},${p2.y} ${q2.x},${q2.y} ${q1.x},${q1.y}`} fill={`${color}${fillAlpha}`} stroke="none" />
+              <line x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y} stroke={strokeColor} strokeWidth={strokeWidth} />
+              <line x1={q1.x} y1={q1.y} x2={q2.x} y2={q2.y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray="6 3" opacity={0.6} />
+              {channelAnchors}
+            </g>
+          );
+        }
+
+        // Andrews Pitchfork (3-point)
+        if (d.tool === 'pitchfork') {
+          if (pixels.length < 3 || !pixels[0] || !pixels[1] || !pixels[2]) return null;
+          const [pA, pB, pC] = pixels;
+          const mid = { x: (pB.x + pC.x) / 2, y: (pB.y + pC.y) / 2 };
+          const W = svgRef.current?.clientWidth || 800;
+          const H = svgRef.current?.clientHeight || 600;
+          const extendLine = (x1: number, y1: number, x2: number, y2: number) => {
+            const dx = x2 - x1, dy = y2 - y1;
+            if (Math.abs(dx) < 0.001) return [{ x: x1, y: 0 }, { x: x1, y: H }];
+            if (Math.abs(dy) < 0.001) return [{ x: 0, y: y1 }, { x: W, y: y1 }];
+            const slope = dy / dx;
+            const pts = [];
+            const yAtX0 = y1 + slope * (0 - x1);
+            if (yAtX0 >= 0 && yAtX0 <= H) pts.push({ x: 0, y: yAtX0 });
+            const yAtXW = y1 + slope * (W - x1);
+            if (yAtXW >= 0 && yAtXW <= H) pts.push({ x: W, y: yAtXW });
+            const xAtY0 = x1 + (0 - y1) / slope;
+            if (xAtY0 >= 0 && xAtY0 <= W) pts.push({ x: xAtY0, y: 0 });
+            const xAtYH = x1 + (H - y1) / slope;
+            if (xAtYH >= 0 && xAtYH <= W) pts.push({ x: xAtYH, y: H });
+            return pts.length >= 2 ? pts.sort((a, b) => a.x - b.x) : [{ x: x1, y: y1 }, { x: x2, y: y2 }];
+          };
+          const medExt = extendLine(pA.x, pA.y, mid.x, mid.y);
+          const fDx = mid.x - pA.x, fDy = mid.y - pA.y;
+          const f1End = { x: pB.x + fDx * 10, y: pB.y + fDy * 10 };
+          const f2End = { x: pC.x + fDx * 10, y: pC.y + fDy * 10 };
+          const fork1Ext = extendLine(pB.x, pB.y, f1End.x, f1End.y);
+          const fork2Ext = extendLine(pC.x, pC.y, f2End.x, f2End.y);
+          const pitchforkAnchors = isSelected && !isPreview && !d.locked ? [pA, pB, pC].map((p, index) => (
+            <circle key={`${d.id}-anchor-${index}`} cx={p.x} cy={p.y} r="6" fill={strokeColor} stroke="white" strokeWidth="2" style={{ cursor: 'move' }} onMouseDown={(e) => handleAnchorMouseDown(e, d.id, index)} />
+          )) : null;
+          return (
+            <g key={key} opacity={opacity}>
+              <line x1={medExt[0].x} y1={medExt[0].y} x2={medExt[1].x} y2={medExt[1].y} stroke={strokeColor} strokeWidth={strokeWidth} />
+              <line x1={pA.x} y1={pA.y} x2={mid.x} y2={mid.y} stroke={strokeColor} strokeWidth={strokeWidth * 0.5} strokeDasharray="4 2" />
+              <line x1={fork1Ext[0].x} y1={fork1Ext[0].y} x2={fork1Ext[1].x} y2={fork1Ext[1].y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray="5 3" />
+              <line x1={fork2Ext[0].x} y1={fork2Ext[0].y} x2={fork2Ext[1].x} y2={fork2Ext[1].y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray="5 3" />
+              {pitchforkAnchors}
+            </g>
+          );
+        }
+
         // For other tools, skip if any point is off-screen
         const validPixels = pixels.filter(p => p !== null) as PixelPoint[];
         if (validPixels.length !== pixels.length) return null; // Some points off-screen, don't render

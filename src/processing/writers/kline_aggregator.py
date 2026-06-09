@@ -129,6 +129,15 @@ class KlineWindowAggregator(KeyedProcessFunction):
 
         sorted_candles = [window_candles[k] for k in sorted(window_candles)]
 
+        # Track ACTUAL close: last 1s candle with real volume (not forward-filled)
+        actual_close = None
+        for c in reversed(sorted_candles):
+            if c["v"] > 0:
+                actual_close = c["c"]
+                break
+        if actual_close is None:
+            actual_close = sorted_candles[-1]["c"]
+
         symbol = self._symbol.value() or "unknown"
         exchange = self._exchange.value() or "unknown"
         agg = {
@@ -141,7 +150,7 @@ class KlineWindowAggregator(KeyedProcessFunction):
             "open":         sorted_candles[0]["o"],
             "high":         max(c["h"] for c in sorted_candles),
             "low":          min(c["l"] for c in sorted_candles),
-            "close":        sorted_candles[-1]["c"],
+            "close":        actual_close,  # was sorted_candles[-1]["c"] — last real candle
             "volume":       sum(c["v"] for c in sorted_candles),
             "quote_volume": sum(c["qv"] for c in sorted_candles),
             "trade_count":  sum(c["n"] for c in sorted_candles),
