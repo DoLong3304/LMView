@@ -59,10 +59,10 @@ async def get_klines(
     influx_cutoff_ms = now_ms - (INFLUX_1M_RETENTION_DAYS * 24 * 3600 * 1000)
 
     if interval == "1s":
-        candles = await _fetch_1s_candles(r, symbol, limit, endTime, now_ms)
+        candles = await _fetch_1s_candles(r, symbol, limit, endTime, now_ms, exchange)
     else:
         candles = await _fetch_1m_plus_candles(
-            r, symbol, interval, target_sec, limit, endTime, now_ms, influx_cutoff_ms,
+            r, symbol, interval, target_sec, limit, endTime, now_ms, influx_cutoff_ms, exchange,
         )
 
     # Aggregate for intervals above 1-minute resolution
@@ -122,7 +122,7 @@ async def _fetch_1s_candles(r, symbol: str, limit: int, end_time: int | None, no
 
 async def _fetch_1m_plus_candles(
     r, symbol: str, interval: str, target_sec: int, limit: int,
-    end_time: int | None, now_ms: int, influx_cutoff_ms: int,
+    end_time: int | None, now_ms: int, influx_cutoff_ms: int, exchange: str = "binance",
 ) -> list[dict]:
     """Fetch 1m+ candles from KeyDB → InfluxDB → Trino fallback."""
     candles: list[dict] = []
@@ -140,7 +140,7 @@ async def _fetch_1m_plus_candles(
         raw_needed = min((limit * max(target_sec // 60, 1)) + 2, MAX_RAW_CANDLES)
 
         # Step 1: Try KeyDB candle:1m (fastest, 7 days)
-        keydb_candles = await _fetch_keydb_1m(r, symbol, raw_needed, now_ms)
+        keydb_candles = await _fetch_keydb_1m(r, symbol, raw_needed, now_ms, exchange)
         candles = merge_unique(candles, keydb_candles)
 
         # Step 2: If not enough, fallback to InfluxDB (90 days)

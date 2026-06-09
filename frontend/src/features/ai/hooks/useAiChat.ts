@@ -5,8 +5,20 @@ import {
   loadLocalAiSessions,
   upsertLocalAiSession,
 } from "@/features/ai/localAiSessions";
+import {
+  AI_SESSION_SELECTED_EVENT,
+  getActiveAiSessionId,
+  setActiveAiSessionId,
+} from "@/features/ai/aiSessionSelection";
 import { generateLmviewHelpResponse } from "@/features/ai/localHelpResponder";
-import { shouldUseMockAi, aiChat } from "@/services/aiService";
+import {
+  aiChat,
+  aiGetSessionMessages,
+  aiListSessions,
+  shouldUseMockAi,
+  type AIMessageResponse,
+  type AISessionResponse,
+} from "@/services/aiService";
 import { getMockDataAdapter } from "@/services/dataSourceAdapter";
 import type {
   AiChatState,
@@ -23,7 +35,7 @@ interface UseAiChatReturn extends AiChatState {
   sendMessage: (message: string, context?: ChartContextForAi | null) => Promise<void>;
   clearChat: () => void;
   setMode: (mode: AiMode) => void;
-  loadSession: (session: LocalAiHelpSession) => void;
+  loadSession: (session: LocalAiHelpSession) => Promise<void>;
   deleteSession: (sessionId: string) => void;
 }
 
@@ -31,6 +43,62 @@ function titleFromMessage(message: string): string {
   const trimmed = message.trim();
   if (trimmed.length <= 48) return trimmed || "LMView Help";
   return `${trimmed.slice(0, 45)}...`;
+}
+
+function isApiAi(isAuthenticated: boolean): boolean {
+  return isAuthenticated && !shouldUseMockAi();
+}
+
+function apiSessionTitle(session: AISessionResponse): string {
+  if (session.title) return session.title;
+  const market = [session.symbol, session.timeframe?.toUpperCase()].filter(Boolean).join(" ");
+  return market || "LMView AI session";
+}
+
+function mapApiSession(userId: string, session: AISessionResponse): LocalAiHelpSession {
+  return {
+    id: session.id,
+    userId,
+    title: apiSessionTitle(session),
+    mode: session.mode === "interact" ? "interact" : "ask",
+    messages: [],
+    message_count: session.message_count,
+    symbol: session.symbol ?? undefined,
+    timeframe: session.timeframe ?? undefined,
+    exchange: session.exchange ?? undefined,
+    source: "api",
+    created_at: session.created_at || new Date().toISOString(),
+    updated_at: session.updated_at || session.created_at || new Date().toISOString(),
+  };
+}
+
+function metadataNumber(metadata: Record<string, unknown>, key: string): number | undefined {
+  const value = metadata[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function mapApiMessage(message: AIMessageResponse): AiMessage {
+  const metadata = message.metadata || {};
+  return {
+    id: message.id,
+    role: message.role === "user" || message.role === "system" ? message.role : "assistant",
+    content: message.content,
+    provider: message.provider,
+    model_name: message.model_name,
+    is_mock: message.is_mock,
+    created_at: message.created_at,
+    confidence: metadataNumber(metadata, "confidence"),
+    data_caveats: Array.isArray(metadata.data_caveats)
+      ? metadata.data_caveats.filter((item): item is string => typeof item === "string")
+      : undefined,
+    provider_metadata:
+      metadata.provider_routing && typeof metadata.provider_routing === "object"
+        ? (metadata.provider_routing as Record<string, unknown>)
+        : undefined,
+    token_input: message.token_input ?? metadataNumber(metadata, "token_input"),
+    token_output: message.token_output ?? metadataNumber(metadata, "token_output"),
+    estimated_cost_usd: metadataNumber(metadata, "estimated_cost_usd"),
+  };
 }
 
 export function useAiChat(): UseAiChatReturn {
@@ -42,13 +110,88 @@ export function useAiChat(): UseAiChatReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const loadApiSession = useCallback(
+    async (targetSessionId: string) => {
+      if (!user?.id) return;
+      const payload = await aiGetSessionMessages(targetSessionId);
+      const nextMessages = payload.messages.map(mapApiMessage);
+      setSessionId(targetSessionId);
+      setMessages(nextMessages);
+      setMode("ask");
+      setError(null);
+      setActiveAiSessionId(user.id, targetSessionId);
+    },
+    [user?.id],
+  );
+
+  const refreshApiSessions = useCallback(
+    async (autoLoad: boolean) => {
+      if (!user?.id) return;
+      const payload = await aiListSessions();
+      const nextSessions = payload.sessions.map((session) => mapApiSession(user.id, session));
+      setSessions(nextSessions);
+
+      if (!autoLoad) return;
+      const storedSessionId = getActiveAiSessionId(user.id);
+      const targetSession =
+        nextSessions.find((session) => session.id === storedSessionId) || nextSessions[0];
+      if (targetSession) {
+        await loadApiSession(targetSession.id);
+      } else {
+        setSessionId(null);
+        setMessages([]);
+      }
+    },
+    [loadApiSession, user?.id],
+  );
+
   useEffect(() => {
     if (!user?.id) {
       setSessions([]);
+      setSessionId(null);
+      setMessages([]);
       return;
     }
-    setSessions(loadLocalAiSessions(user.id));
-  }, [user?.id]);
+
+    if (isApiAi(isAuthenticated)) {
+      void refreshApiSessions(true);
+      return;
+    }
+
+    const localSessions = loadLocalAiSessions(user.id);
+    setSessions(localSessions);
+    const storedSessionId = getActiveAiSessionId(user.id);
+    const localSession =
+      localSessions.find((session) => session.id === storedSessionId) || localSessions[0];
+    if (localSession) {
+      setSessionId(localSession.id);
+      setMessages(localSession.messages);
+      setMode(localSession.mode);
+    }
+  }, [isAuthenticated, refreshApiSessions, user?.id]);
+
+  useEffect(() => {
+    const onSelected = (event: Event) => {
+      const detail = (event as CustomEvent<{ userId?: string; sessionId?: string }>).detail;
+      if (!detail?.sessionId || !detail.userId || detail.userId !== user?.id) return;
+      if (isApiAi(isAuthenticated)) {
+        void loadApiSession(detail.sessionId);
+        return;
+      }
+      const localSession = loadLocalAiSessions(detail.userId).find(
+        (session) => session.id === detail.sessionId,
+      );
+      if (localSession) {
+        setSessionId(localSession.id);
+        setMessages(localSession.messages);
+        setMode(localSession.mode);
+        setError(null);
+      }
+    };
+
+    window.addEventListener(AI_SESSION_SELECTED_EVENT, onSelected);
+    return () => window.removeEventListener(AI_SESSION_SELECTED_EVENT, onSelected);
+  }, [isAuthenticated, loadApiSession, user?.id]);
 
   const persistSession = useCallback(
     (nextMessages: AiMessage[], firstMessage: string, nextSessionId: string | null) => {
@@ -60,11 +203,14 @@ export function useAiChat(): UseAiChatReturn {
         mode,
         messages: nextMessages,
       });
-      setSessions(loadLocalAiSessions(user.id));
+      if (!isApiAi(isAuthenticated)) {
+        setSessions(loadLocalAiSessions(user.id));
+      }
       setSessionId(session.id);
+      setActiveAiSessionId(user.id, session.id);
       return session.id;
     },
-    [mode, user?.id],
+    [isAuthenticated, mode, user?.id],
   );
 
   const sendMessage = useCallback(
@@ -85,6 +231,7 @@ export function useAiChat(): UseAiChatReturn {
 
       try {
         let assistantMsg: AiMessage;
+        let nextSessionId = sessionId;
 
         if (!isAuthenticated) {
           assistantMsg = {
@@ -110,7 +257,6 @@ export function useAiChat(): UseAiChatReturn {
         } else if (shouldUseMockAi()) {
           assistantMsg = mockDataAdapter.generateAiResponse(trimmed, context);
         } else {
-          // Phase 1: Call real backend API for Ask Mode
           try {
             const response = await aiChat({
               session_id: sessionId,
@@ -118,6 +264,7 @@ export function useAiChat(): UseAiChatReturn {
               message: trimmed,
               chart_context: context as Record<string, unknown> | null,
             });
+            nextSessionId = response.session_id || sessionId;
             assistantMsg = {
               id: response.message_id || `api-${Date.now()}`,
               role: "assistant",
@@ -136,24 +283,26 @@ export function useAiChat(): UseAiChatReturn {
               token_output: response.token_output ?? undefined,
               estimated_cost_usd: response.estimated_cost_usd ?? undefined,
             };
-            // Update session ID from backend response
-            if (response.session_id && response.session_id !== sessionId) {
-              setSessionId(response.session_id);
+            if (nextSessionId && user?.id) {
+              setSessionId(nextSessionId);
+              setActiveAiSessionId(user.id, nextSessionId);
             }
           } catch (apiErr) {
-            // API failed — fall back to local help responder
             console.warn("AI API failed, using local help:", apiErr);
             assistantMsg = generateLmviewHelpResponse(trimmed, context);
             assistantMsg.warnings = [
               ...(assistantMsg.warnings || []),
-              `API unavailable — using local help mode: ${apiErr instanceof Error ? apiErr.message : "unknown error"}`,
+              `API unavailable - using local help mode: ${
+                apiErr instanceof Error ? apiErr.message : "unknown error"
+              }`,
             ];
           }
         }
 
         const nextMessages = [...baseMessages, assistantMsg];
         setMessages(nextMessages);
-        persistSession(nextMessages, trimmed, sessionId);
+        persistSession(nextMessages, trimmed, nextSessionId);
+        if (isApiAi(isAuthenticated)) void refreshApiSessions(false);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : "AI request failed";
         setError(errMsg);
@@ -179,7 +328,9 @@ export function useAiChat(): UseAiChatReturn {
       messages,
       mode,
       persistSession,
+      refreshApiSessions,
       sessionId,
+      user?.id,
     ],
   );
 
@@ -188,14 +339,23 @@ export function useAiChat(): UseAiChatReturn {
     setSessionId(null);
     setError(null);
     setMode("ask");
-  }, []);
+    if (user?.id) setActiveAiSessionId(user.id, null);
+  }, [user?.id]);
 
-  const loadSession = useCallback((session: LocalAiHelpSession) => {
-    setSessionId(session.id);
-    setMessages(session.messages);
-    setMode(session.mode);
-    setError(null);
-  }, []);
+  const loadSession = useCallback(
+    async (session: LocalAiHelpSession) => {
+      if (session.source === "api") {
+        await loadApiSession(session.id);
+        return;
+      }
+      setSessionId(session.id);
+      setMessages(session.messages);
+      setMode(session.mode);
+      setError(null);
+      if (user?.id) setActiveAiSessionId(user.id, session.id);
+    },
+    [loadApiSession, user?.id],
+  );
 
   const deleteSession = useCallback(
     (targetSessionId: string) => {

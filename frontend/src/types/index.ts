@@ -279,7 +279,15 @@ export interface LocalAiHelpSession {
     content: string;
     created_at?: string | null;
     warnings?: string[];
+    token_input?: number | null;
+    token_output?: number | null;
+    estimated_cost_usd?: number | null;
   }>;
+  message_count?: number;
+  symbol?: string;
+  timeframe?: string;
+  exchange?: string;
+  source?: "local" | "api";
   created_at: string;
   updated_at: string;
 }

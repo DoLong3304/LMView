@@ -8,6 +8,30 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.20.1] - 2026-06-09 - Frontend Runtime Fixes
+
+### Added
+
+- **AI session restore controls** - AI Helper now remembers the active backend session across reloads and Settings can load previous AI Helper sessions.
+- **Customization presets** - Settings now exposes indicator, drawing-tool, layout, default exchange, volume, magnet, and compact-panel presets.
+- **Admin AI usage summary** - Admin users can see total AI input/output tokens and estimated cost in AI Helper settings.
+
+### Fixed
+
+- **Realtime chart updates** - WebSocket candle building now folds fresh ticker prices into 1s/1m candles when kline candle caches lag, so chart candles update alongside indicators.
+- **All-timeframe WebSocket route** - Registered `/api/stream/all` before the catch-all `/api/stream/{interval}` route so the chart receives live candle frames instead of an unsupported `all` interval error.
+- **Chart resize after browser zoom** - Chart resize now uses measured container/stage bounds, observes visual viewport changes, and keeps the chart wrapper shrinkable to avoid bottom clipping after zoom out/in.
+- **AI Ask readability** - AI Helper renders common markdown blocks and inline formatting instead of showing raw markdown text.
+- **AI Helper tab persistence** - The right panel now keeps AI Helper mounted while Overview is active, preserving in-flight responses and preventing remount scroll animation when switching tabs.
+- **AI timestamp confusion** - Ask Mode prompts now include live server time, epoch milliseconds, and UTC-formatted chart timestamps so current candle times are not misclassified as invalid due model cutoff.
+- **Normal-user token leakage** - Per-message token and cost metadata is hidden from non-admin users.
+- **Kline scroll 500s** - Missing optional Trino/Iceberg historical candle tables now degrade to empty fallback results instead of failing `/api/klines` scroll requests.
+- **Notification delivery loop** - Header notifications now reload periodically and can show browser desktop notifications when the user preference and browser permission allow it.
+- **Runtime log noise** - Qwen sentiment scoring now skips real provider calls when `QWEN_API_KEY` is absent and uses the heuristic path directly.
+- **Missing icon 404s** - Removed references to absent `logo192.png`/`logo512.png` assets from the PWA manifest and HTML head.
+
+---
+
 ## [0.20.0] - 2026-06-08 - Phase D: System Audit & Critical Fixes
 
 ### Added

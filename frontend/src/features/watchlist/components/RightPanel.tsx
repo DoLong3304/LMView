@@ -199,15 +199,18 @@ const RightPanel: React.FC<RightPanelProps> = ({
         ))}
       </div>
 
-      {activeTopTab === "aiHelper" ? (
-        <AiAssistantPanel
-          selectedSymbol={selectedSymbol}
-          timeframe={timeframe}
-          candles={candles}
-          onOpenSettings={() => onOpenSettings?.("aiHelper")}
-        />
-      ) : (
-        <>
+      <div className={activeTopTab === "aiHelper" ? "flex min-h-0 flex-1" : "hidden"}>
+        {isAuthenticated && (
+          <AiAssistantPanel
+            selectedSymbol={selectedSymbol}
+            timeframe={timeframe}
+            candles={candles}
+            onOpenSettings={() => onOpenSettings?.("aiHelper")}
+          />
+        )}
+      </div>
+
+      <div className={activeTopTab === "overview" ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "hidden"}>
       {/* Coin Summary - Fixed at top */}
       <div className="px-2.5 py-2 border-b border-gray-800 bg-gray-850">
         {/* Symbol header */}
@@ -455,8 +458,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
           <RecentTrades symbol={selectedSymbol} />
         </div>
       )}
-        </>
-      )}
+      </div>
     </div>
   );
 };

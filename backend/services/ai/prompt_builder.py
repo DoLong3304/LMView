@@ -7,6 +7,7 @@ and output format instructions into a message list for the LLM provider.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from backend.models.ai.providers import LLMMessage
@@ -79,7 +80,16 @@ def build_ask_prompt(
     messages: List[LLMMessage] = []
 
     # System prompt
-    system_content = ASK_MODE_SYSTEM_PROMPT + FINANCIAL_SAFETY_ADDENDUM
+    now_utc = datetime.now(timezone.utc)
+    runtime_context = (
+        "\n## Runtime Context\n"
+        f"- Current server time (UTC): {now_utc.isoformat()}\n"
+        f"- Current epoch milliseconds: {int(now_utc.timestamp() * 1000)}\n"
+        "- Chart candle times are live runtime Unix epoch milliseconds unless explicitly labeled otherwise.\n"
+        "- Do not reject or call chart times invalid because they are later than your model training cutoff.\n"
+        "- If a timestamp is numerically aligned to the requested timeframe, treat it as valid runtime data.\n"
+    )
+    system_content = ASK_MODE_SYSTEM_PROMPT + FINANCIAL_SAFETY_ADDENDUM + runtime_context
 
     if language and language.lower() in ("vi", "vietnamese"):
         system_content += "\nThe user prefers Vietnamese. Respond in Vietnamese when appropriate.\n"
@@ -140,6 +150,8 @@ def _format_chart_context(
         for k, v in candle.items():
             if v is not None:
                 parts.append(f"  - {k}: {v}")
+                if k in {"open_time", "close_time", "timestamp"} and isinstance(v, (int, float)):
+                    parts.append(f"  - {k}_utc: {_format_epoch_ms(v)}")
 
     ob = ctx.get("orderbook_summary")
     if ob and isinstance(ob, dict):
@@ -181,6 +193,14 @@ def _format_chart_context(
             parts.append(f"  - {caveat}")
 
     return "\n".join(parts)
+
+
+def _format_epoch_ms(value: int | float) -> str:
+    """Format epoch milliseconds for prompt readability."""
+    try:
+        return datetime.fromtimestamp(float(value) / 1000, tz=timezone.utc).isoformat()
+    except (OverflowError, OSError, ValueError):
+        return "unparseable"
 
 
 def _format_rag_chunks(chunks: List[RAGChunkResult]) -> str:

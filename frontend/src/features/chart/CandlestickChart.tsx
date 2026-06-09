@@ -208,12 +208,19 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   const resizeChartToContainer = useCallback(() => {
     if (!containerRef.current || !chartRef.current) return;
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const stageRect = chartStageRef.current?.getBoundingClientRect();
+    const width = Math.floor(containerRect.width || stageRect?.width || 0);
+    const height = Math.floor(containerRect.height || stageRect?.height || 0);
+    if (width <= 0 || height <= 0) return;
 
-    chartRef.current.resize(
-      containerRef.current.clientWidth,
-      containerRef.current.clientHeight,
-    );
+    chartRef.current.resize(width, height);
   }, []);
+
+  const scheduleChartResize = useCallback(() => {
+    requestAnimationFrame(resizeChartToContainer);
+    window.setTimeout(resizeChartToContainer, 120);
+  }, [resizeChartToContainer]);
 
   useEffect(() => {
     if (!isTimeframeMenuOpen) return;
@@ -230,13 +237,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(document.fullscreenElement === rootRef.current);
-      requestAnimationFrame(resizeChartToContainer);
-      window.setTimeout(resizeChartToContainer, 120);
+      scheduleChartResize();
     };
 
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, [resizeChartToContainer]);
+  }, [scheduleChartResize]);
 
   const getTimeframeSeconds = useCallback((tf: string) => {
     return SERVICE_TIMEFRAMES[normalizeTimeframe(tf)].seconds;
@@ -737,10 +743,18 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         setTooltip({ ...c, volume: v ? v.value : undefined, timeLabel: lbl });
       }
     });
-    const ro = new ResizeObserver(resizeChartToContainer);
+    const ro = new ResizeObserver(scheduleChartResize);
     ro.observe(containerRef.current);
+    if (chartStageRef.current) {
+      ro.observe(chartStageRef.current);
+    }
+    window.addEventListener("resize", scheduleChartResize);
+    window.visualViewport?.addEventListener("resize", scheduleChartResize);
+    scheduleChartResize();
     return () => {
       ro.disconnect();
+      window.removeEventListener("resize", scheduleChartResize);
+      window.visualViewport?.removeEventListener("resize", scheduleChartResize);
       chart.remove();
       chartRef.current = null;
     };

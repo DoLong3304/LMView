@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
 from backend.core.postgres import get_pg_pool
@@ -30,9 +31,14 @@ Return:
 
 async def score_article_sentiment(title: str, content: str) -> dict:
     prompt = SENTIMENT_PROMPT.format(title=title[:300], content=(content or title)[:600])
+    qwen_key = os.environ.get("QWEN_API_KEY", "")
 
     try:
+        if not qwen_key:
+            return _score_article_heuristic(title, content)
         provider = LiteLLMProvider(provider_name="qwen_api", model_name="openai/qwen-plus")
+        provider.base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        provider.api_key = qwen_key
         request = LLMCompletionRequest(
             messages=[LLMMessage(role="user", content=prompt)],
             max_tokens=120,
@@ -53,33 +59,35 @@ async def score_article_sentiment(title: str, content: str) -> dict:
         return {"score": score, "label": label, "confidence": confidence}
     except Exception as exc:
         logger.warning("Qwen sentiment scoring failed, falling back to heuristic: %s", exc)
-        lower = f"{title} {content}".lower()
-        # Expanded keyword lists for better coverage
-        bullish_terms = [
-            "surge", "rally", "bull", "gain", "breakout", "approval", "high",
-            "soar", "pump", "moon", "ATH", "break", "surpass", "upgrade",
-            "adoption", "institutional", "ETF", "record", "all-time", "launch",
-            "partnership", "bullish", "optimistic", "growth", "sector",
-        ]
-        bearish_terms = [
-            "crash", "dump", "bear", "loss", "hack", "drop", "lawsuit",
-            "liquidation", "plunge", "reject", "fail", "sell", "ban",
-            "SEC", "investigation", "fraud", "scam", "rug", "crackdown",
-            "bearish", "pessimistic", "decline", "warning", "risk", "concern",
-        ]
-        bull_hits = sum(1 for term in bullish_terms if term in lower)
-        bear_hits = sum(1 for term in bearish_terms if term in lower)
+        return _score_article_heuristic(title, content)
 
-        # Scale score based on number of matches (more matches = higher confidence)
-        if bull_hits > bear_hits:
-            score = min(0.5, 0.1 + bull_hits * 0.08)
-            confidence = min(0.6, 0.2 + bull_hits * 0.08)
-            return {"score": score, "label": "bullish", "confidence": confidence}
-        if bear_hits > bull_hits:
-            score = max(-0.5, -(0.1 + bear_hits * 0.08))
-            confidence = min(0.6, 0.2 + bear_hits * 0.08)
-            return {"score": score, "label": "bearish", "confidence": confidence}
-        return {"score": 0.0, "label": "neutral", "confidence": 0.15}
+
+def _score_article_heuristic(title: str, content: str) -> dict:
+    lower = f"{title} {content}".lower()
+    bullish_terms = [
+        "surge", "rally", "bull", "gain", "breakout", "approval", "high",
+        "soar", "pump", "moon", "ath", "break", "surpass", "upgrade",
+        "adoption", "institutional", "etf", "record", "all-time", "launch",
+        "partnership", "bullish", "optimistic", "growth", "sector",
+    ]
+    bearish_terms = [
+        "crash", "dump", "bear", "loss", "hack", "drop", "lawsuit",
+        "liquidation", "plunge", "reject", "fail", "sell", "ban",
+        "sec", "investigation", "fraud", "scam", "rug", "crackdown",
+        "bearish", "pessimistic", "decline", "warning", "risk", "concern",
+    ]
+    bull_hits = sum(1 for term in bullish_terms if term in lower)
+    bear_hits = sum(1 for term in bearish_terms if term in lower)
+
+    if bull_hits > bear_hits:
+        score = min(0.5, 0.1 + bull_hits * 0.08)
+        confidence = min(0.6, 0.2 + bull_hits * 0.08)
+        return {"score": score, "label": "bullish", "confidence": confidence}
+    if bear_hits > bull_hits:
+        score = max(-0.5, -(0.1 + bear_hits * 0.08))
+        confidence = min(0.6, 0.2 + bear_hits * 0.08)
+        return {"score": score, "label": "bearish", "confidence": confidence}
+    return {"score": 0.0, "label": "neutral", "confidence": 0.15}
 
 
 async def batch_score_unscored_articles(batch_size: int = 20) -> int:

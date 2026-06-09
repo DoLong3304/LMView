@@ -18,7 +18,9 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { useI18n } from "@/i18n";
 import {
   fetchNotifications,
+  fetchUserSettings,
   markNotificationsRead,
+  type NotificationPreferences,
   type UserNotification,
 } from "@/services/settingsService";
 
@@ -53,6 +55,8 @@ const Header: React.FC<HeaderProps> = ({
   const [isNotificationsOpen, setIsNotificationsOpen] = React.useState(false);
   const [notifications, setNotifications] = React.useState<UserNotification[]>([]);
   const [unreadCount, setUnreadCount] = React.useState(0);
+  const notifiedIdsRef = React.useRef<Set<string>>(new Set());
+  const notificationPreferencesRef = React.useRef<NotificationPreferences | null>(null);
 
   const loadNotifications = React.useCallback(async () => {
     if (!isAuthenticated) {
@@ -64,6 +68,14 @@ const Header: React.FC<HeaderProps> = ({
       const payload = await fetchNotifications(10);
       setNotifications(payload.notifications);
       setUnreadCount(payload.unread_count);
+      const prefs = notificationPreferencesRef.current;
+      if (prefs?.desktop && typeof Notification !== "undefined" && Notification.permission === "granted") {
+        for (const item of payload.notifications) {
+          if (item.read_at || notifiedIdsRef.current.has(item.id)) continue;
+          notifiedIdsRef.current.add(item.id);
+          new Notification(item.title, { body: item.body || undefined });
+        }
+      }
     } catch {
       setNotifications([]);
       setUnreadCount(0);
@@ -73,6 +85,23 @@ const Header: React.FC<HeaderProps> = ({
   React.useEffect(() => {
     void loadNotifications();
   }, [loadNotifications]);
+
+  React.useEffect(() => {
+    if (!isAuthenticated) return;
+    fetchUserSettings()
+      .then((settings) => {
+        notificationPreferencesRef.current = settings.notification_preferences;
+      })
+      .catch(() => {
+        notificationPreferencesRef.current = null;
+      });
+  }, [isAuthenticated]);
+
+  React.useEffect(() => {
+    if (!isAuthenticated) return;
+    const intervalId = window.setInterval(() => void loadNotifications(), 30_000);
+    return () => window.clearInterval(intervalId);
+  }, [isAuthenticated, loadNotifications]);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -160,7 +189,18 @@ const Header: React.FC<HeaderProps> = ({
             <div className="relative">
               <button
                 type="button"
-                onClick={() => setIsNotificationsOpen((open) => !open)}
+                onClick={() => {
+                  const prefs = notificationPreferencesRef.current;
+                  if (
+                    prefs?.desktop &&
+                    typeof Notification !== "undefined" &&
+                    Notification.permission === "default"
+                  ) {
+                    void Notification.requestPermission();
+                  }
+                  setIsNotificationsOpen((open) => !open);
+                  void loadNotifications();
+                }}
                 className="relative rounded p-1.5 text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
                 title={t("notifications")}
               >

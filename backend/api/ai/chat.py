@@ -26,6 +26,14 @@ router = APIRouter()
 logger = logging.getLogger("backend.api.ai.chat")
 
 
+def _title_from_message(message: str) -> str:
+    """Build a compact session title from the first user message."""
+    trimmed = " ".join(message.strip().split())
+    if not trimmed:
+        return "LMView AI session"
+    return trimmed if len(trimmed) <= 64 else f"{trimmed[:61]}..."
+
+
 @router.post("/chat", response_model=AIChatResponse)
 async def ai_chat(
     body: AIChatRequest,
@@ -63,6 +71,7 @@ async def ai_chat(
         session = await ai_chat_service.create_session(
             user_id=user_id,
             mode=body.mode.value,
+            title=_title_from_message(body.message),
             symbol=body.chart_context.get("symbol") if body.chart_context else None,
             timeframe=body.chart_context.get("timeframe") if body.chart_context else None,
             exchange=body.chart_context.get("exchange", "binance") if body.chart_context else "binance",
@@ -215,6 +224,11 @@ async def _real_llm_response(
 
     # ── 5h. Store assistant message ───────────────────────────────────────
     elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
+    estimated_cost_usd = _estimate_cost(
+        llm_response.token_input,
+        llm_response.token_output,
+        routing.selected_provider,
+    )
 
     assistant_msg = await ai_chat_service.store_message(
         session_id=session_id,
@@ -233,6 +247,9 @@ async def _real_llm_response(
             "data_caveats": data_caveats,
             "provider_routing": routing.model_dump(),
             "confidence": confidence,
+            "token_input": llm_response.token_input,
+            "token_output": llm_response.token_output,
+            "estimated_cost_usd": estimated_cost_usd,
         },
     )
 
@@ -263,7 +280,7 @@ async def _real_llm_response(
         },
         token_input=llm_response.token_input,
         token_output=llm_response.token_output,
-        estimated_cost_usd=_estimate_cost(llm_response.token_input, llm_response.token_output, routing.selected_provider),
+        estimated_cost_usd=estimated_cost_usd,
     )
 
 

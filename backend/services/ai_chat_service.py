@@ -95,7 +95,7 @@ async def get_session_messages(
         rows = await conn.fetch(
             """
             SELECT id, session_id, role, content, model_provider, model_name,
-                   created_at, metadata
+                   token_input, token_output, latency_ms, created_at, metadata
             FROM ai_messages
             WHERE session_id = $1
             ORDER BY created_at ASC
@@ -227,6 +227,9 @@ def _message_to_dict(row) -> dict:
         "provider": row.get("model_provider"),
         "model_name": row.get("model_name"),
         "is_mock": is_mock,
+        "token_input": row.get("token_input"),
+        "token_output": row.get("token_output"),
+        "latency_ms": row.get("latency_ms"),
         "created_at": row["created_at"],
         "metadata": meta,
     }

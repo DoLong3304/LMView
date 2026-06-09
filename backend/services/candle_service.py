@@ -7,6 +7,7 @@ a single source of truth for aggregation, merging, querying, and validation.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -21,6 +22,8 @@ from backend.core.constants import (
     INFLUX_1M_RETENTION_DAYS,
 )
 from backend.core.database import get_influx, get_trino_connection
+
+logger = logging.getLogger("backend.services.candle_service")
 
 
 # ─── Validation ──────────────────────────────────────────────────────────────
@@ -78,6 +81,12 @@ def to_candle_rows(rows: list[tuple]) -> list[dict]:
         }
         for r in rows
     ]
+
+
+def _is_missing_trino_table_error(exc: Exception) -> bool:
+    """Return True when Trino reports an optional historical table is absent."""
+    text = str(exc)
+    return "TABLE_NOT_FOUND" in text or ("Table '" in text and "does not exist" in text)
 
 
 def merge_unique(existing: list[dict], incoming: list[dict]) -> list[dict]:
@@ -281,40 +290,46 @@ def query_trino_1m(
     conn = get_trino_connection()
     try:
         cur = conn.cursor()
-        if start_ms is not None:
-            cur.execute(
-                """
-                SELECT
-                    kline_start AS open_time,
-                    open, high, low, close, volume
-                FROM crypto_lakehouse.coin_klines
-                WHERE symbol = ?
-                  AND interval = '1m'
-                  AND is_closed = true
-                  AND kline_start >= ?
-                  AND kline_start < ?
-                ORDER BY kline_start DESC
-                LIMIT ?
-                """,
-                (symbol, start_ms, end_ms, limit),
-            )
-        else:
-            cur.execute(
-                """
-                SELECT
-                    kline_start AS open_time,
-                    open, high, low, close, volume
-                FROM coin_klines
-                WHERE symbol = ?
-                  AND interval = '1m'
-                  AND is_closed = true
-                  AND kline_start < ?
-                ORDER BY kline_start DESC
-                LIMIT ?
-                """,
-                (symbol, end_ms, limit),
-            )
-        rows = cur.fetchall()
+        try:
+            if start_ms is not None:
+                cur.execute(
+                    """
+                    SELECT
+                        kline_start AS open_time,
+                        open, high, low, close, volume
+                    FROM crypto_lakehouse.coin_klines
+                    WHERE symbol = ?
+                      AND interval = '1m'
+                      AND is_closed = true
+                      AND kline_start >= ?
+                      AND kline_start < ?
+                    ORDER BY kline_start DESC
+                    LIMIT ?
+                    """,
+                    (symbol, start_ms, end_ms, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT
+                        kline_start AS open_time,
+                        open, high, low, close, volume
+                    FROM crypto_lakehouse.coin_klines
+                    WHERE symbol = ?
+                      AND interval = '1m'
+                      AND is_closed = true
+                      AND kline_start < ?
+                    ORDER BY kline_start DESC
+                    LIMIT ?
+                    """,
+                    (symbol, end_ms, limit),
+                )
+            rows = cur.fetchall()
+        except Exception as exc:
+            if _is_missing_trino_table_error(exc):
+                logger.warning("Trino 1m candle table unavailable: %s", exc)
+                return []
+            raise
         rows.reverse()
         return to_candle_rows(rows)
     finally:
@@ -333,36 +348,42 @@ def query_trino_hourly(
     conn = get_trino_connection()
     try:
         cur = conn.cursor()
-        if start_ms is not None:
-            cur.execute(
-                """
-                SELECT
-                    open_time,
-                    open, high, low, close, volume
-                FROM crypto_lakehouse.historical_hourly
-                WHERE symbol = ?
-                  AND open_time >= ?
-                  AND open_time < ?
-                ORDER BY open_time DESC
-                LIMIT ?
-                """,
-                (symbol, start_ms, end_ms, limit),
-            )
-        else:
-            cur.execute(
-                """
-                SELECT
-                    open_time,
-                    open, high, low, close, volume
-                FROM historical_hourly
-                WHERE symbol = ?
-                  AND open_time < ?
-                ORDER BY open_time DESC
-                LIMIT ?
-                """,
-                (symbol, end_ms, limit),
-            )
-        rows = cur.fetchall()
+        try:
+            if start_ms is not None:
+                cur.execute(
+                    """
+                    SELECT
+                        open_time,
+                        open, high, low, close, volume
+                    FROM crypto_lakehouse.historical_hourly
+                    WHERE symbol = ?
+                      AND open_time >= ?
+                      AND open_time < ?
+                    ORDER BY open_time DESC
+                    LIMIT ?
+                    """,
+                    (symbol, start_ms, end_ms, limit),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT
+                        open_time,
+                        open, high, low, close, volume
+                    FROM crypto_lakehouse.historical_hourly
+                    WHERE symbol = ?
+                      AND open_time < ?
+                    ORDER BY open_time DESC
+                    LIMIT ?
+                    """,
+                    (symbol, end_ms, limit),
+                )
+            rows = cur.fetchall()
+        except Exception as exc:
+            if _is_missing_trino_table_error(exc):
+                logger.warning("Trino hourly candle table unavailable: %s", exc)
+                return []
+            raise
         rows.reverse()
         return to_candle_rows(rows)
     finally:

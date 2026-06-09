@@ -80,6 +80,9 @@ export interface AIMessageResponse {
   provider?: string | null;
   model_name?: string | null;
   is_mock: boolean;
+  token_input?: number | null;
+  token_output?: number | null;
+  latency_ms?: number | null;
   created_at?: string | null;
   metadata: Record<string, unknown>;
 }

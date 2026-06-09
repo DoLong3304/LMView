@@ -97,5 +97,8 @@ class AIMessageResponse(BaseModel):
     provider: Optional[str] = None
     model_name: Optional[str] = None
     is_mock: bool = False
+    token_input: Optional[int] = None
+    token_output: Optional[int] = None
+    latency_ms: Optional[int] = None
     created_at: Optional[datetime] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)

@@ -16,13 +16,22 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { DATA_SOURCE } from "@/constants/env";
 import { TIMEFRAMES } from "@/constants/timeframes";
 import { useAuth } from "@/features/auth/AuthContext";
+import { selectAiSession } from "@/features/ai/aiSessionSelection";
 import {
   deleteLocalAiSession,
   loadLocalAiSessions,
 } from "@/features/ai/localAiSessions";
-import { aiHealth, aiValidateActions } from "@/services/aiService";
+import {
+  aiHealth,
+  aiGetSessionMessages,
+  aiListSessions,
+  aiValidateActions,
+  type AIMessageResponse,
+  type AISessionResponse,
+} from "@/services/aiService";
 import { fetchHealthStatus } from "@/services/healthService";
 import {
   DEFAULT_USER_SETTINGS,
@@ -39,6 +48,7 @@ import {
   type UserSettings,
 } from "@/services/settingsService";
 import { useI18n } from "@/i18n";
+import type { TranslationKey } from "@/i18n/translations";
 import type {
   ChartType,
   HealthData,
@@ -61,6 +71,21 @@ interface SettingsModalProps {
 }
 
 const CHART_TYPES: ChartType[] = ["candles", "bars", "line", "area"];
+const INDICATOR_PRESETS: Array<{ id: string; labelKey: TranslationKey; indicators: string[] }> = [
+  { id: "core-trend", labelKey: "presetCoreTrend", indicators: ["sma20", "sma50", "ema12", "ema26", "volumeMa"] },
+  { id: "momentum", labelKey: "presetMomentum", indicators: ["rsi", "macd", "stochastic", "mfi"] },
+  { id: "volatility", labelKey: "presetVolatility", indicators: ["bb", "atr", "supertrend", "psar"] },
+];
+const TOOL_PRESETS: Array<{ id: string; labelKey: TranslationKey }> = [
+  { id: "precision", labelKey: "toolPresetPrecision" },
+  { id: "annotation", labelKey: "toolPresetAnnotation" },
+  { id: "clean", labelKey: "toolPresetClean" },
+];
+const LAYOUT_PRESETS: Array<{ id: string; labelKey: TranslationKey }> = [
+  { id: "balanced", labelKey: "layoutPresetBalanced" },
+  { id: "focus", labelKey: "layoutPresetFocus" },
+  { id: "research", labelKey: "layoutPresetResearch" },
+];
 const DEFAULT_ACTION_TEST = JSON.stringify(
   [
     {
@@ -81,6 +106,44 @@ const DEFAULT_ACTION_TEST = JSON.stringify(
 
 function stringifyDebug(data: unknown): string {
   return JSON.stringify(data, null, 2);
+}
+
+function metadataNumber(metadata: Record<string, unknown>, key: string): number | undefined {
+  const value = metadata[key];
+  return typeof value === "number" ? value : undefined;
+}
+
+function apiMessageToSettingsMessage(message: AIMessageResponse): LocalAiHelpSession["messages"][number] {
+  const metadata = message.metadata || {};
+  return {
+    id: message.id,
+    role: message.role === "user" || message.role === "system" ? message.role : "assistant",
+    content: message.content,
+    created_at: message.created_at,
+    token_input: message.token_input ?? metadataNumber(metadata, "token_input"),
+    token_output: message.token_output ?? metadataNumber(metadata, "token_output"),
+    estimated_cost_usd: metadataNumber(metadata, "estimated_cost_usd"),
+  };
+}
+
+function apiSessionToSettingsSession(userId: string, session: AISessionResponse): LocalAiHelpSession {
+  const fallbackTitle = [session.symbol, session.timeframe?.toUpperCase()]
+    .filter(Boolean)
+    .join(" ");
+  return {
+    id: session.id,
+    userId,
+    title: session.title || fallbackTitle || "LMView AI session",
+    mode: session.mode === "interact" ? "interact" : "ask",
+    messages: [],
+    message_count: session.message_count,
+    symbol: session.symbol ?? undefined,
+    timeframe: session.timeframe ?? undefined,
+    exchange: session.exchange ?? undefined,
+    source: "api",
+    created_at: session.created_at || new Date().toISOString(),
+    updated_at: session.updated_at || session.created_at || new Date().toISOString(),
+  };
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -151,11 +214,37 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       bio: user.bio || "",
       timezone: user.timezone || "",
     });
-    setSessions(loadLocalAiSessions(user.id));
+    if (DATA_SOURCE === "api") {
+      aiListSessions()
+        .then(async (payload) => {
+          const apiSessions = payload.sessions.map((session) => apiSessionToSettingsSession(user.id, session));
+          if (!isAdmin) {
+            setSessions(apiSessions);
+            return;
+          }
+          const sessionsWithMessages = await Promise.all(
+            apiSessions.map(async (session) => {
+              try {
+                const history = await aiGetSessionMessages(session.id);
+                return {
+                  ...session,
+                  messages: history.messages.map(apiMessageToSettingsMessage),
+                };
+              } catch {
+                return session;
+              }
+            }),
+          );
+          setSessions(sessionsWithMessages);
+        })
+        .catch(() => setSessions([]));
+    } else {
+      setSessions(loadLocalAiSessions(user.id));
+    }
     fetchUserSettings()
       .then(setSettings)
       .catch((error) => setStatus(error instanceof Error ? error.message : "Settings failed"));
-  }, [isOpen, user]);
+  }, [isAdmin, isOpen, user]);
 
   useEffect(() => {
     if (!isOpen || !isAdmin || activeTab !== "adminAccounts") return;
@@ -248,6 +337,50 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     deleteLocalAiSession(user.id, sessionId);
     setSessions(loadLocalAiSessions(user.id));
   };
+
+  const handleLoadSession = (targetSessionId: string) => {
+    if (!user?.id) return;
+    selectAiSession(user.id, targetSessionId);
+    setStatus(t("aiSessionLoaded"));
+    onClose();
+  };
+
+  const setCustomizationDefaults = (patch: Partial<UserSettings["customization_defaults"]>) => {
+    setSettings((draft) => ({
+      ...draft,
+      customization_defaults: {
+        ...draft.customization_defaults,
+        ...patch,
+      },
+    }));
+  };
+
+  const setDrawingDefaults = (patch: Record<string, unknown>) => {
+    setSettings((draft) => ({
+      ...draft,
+      customization_defaults: {
+        ...draft.customization_defaults,
+        drawing_defaults: {
+          ...draft.customization_defaults.drawing_defaults,
+          ...patch,
+        },
+      },
+    }));
+  };
+
+  const aiUsage = useMemo(() => {
+    let tokenInput = 0;
+    let tokenOutput = 0;
+    let cost = 0;
+    for (const session of sessions) {
+      for (const message of session.messages) {
+        tokenInput += message.token_input || 0;
+        tokenOutput += message.token_output || 0;
+        cost += message.estimated_cost_usd || 0;
+      }
+    }
+    return { tokenInput, tokenOutput, cost };
+  }, [sessions]);
 
   const runHealthCheck = async () => {
     setDebugLoading("health");
@@ -453,14 +586,57 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
 
             {activeTab === "customization" && (
               isAuthenticated ? (
-                <Panel title={t("savedDefaults")}>
-                  <SelectRow label={t("theme")} value={settings.customization_defaults.theme} options={["dark", "light"]} onChange={(value) => setSettings((draft) => ({ ...draft, customization_defaults: { ...draft.customization_defaults, theme: value as "dark" | "light" } }))} />
-                  <SelectRow label={t("defaultTimeframe")} value={settings.customization_defaults.default_timeframe} options={Object.keys(TIMEFRAMES)} onChange={(value) => setSettings((draft) => ({ ...draft, customization_defaults: { ...draft.customization_defaults, default_timeframe: value } }))} />
-                  <SelectRow label={t("defaultChartType")} value={settings.customization_defaults.default_chart_type} options={CHART_TYPES} onChange={(value) => setSettings((draft) => ({ ...draft, customization_defaults: { ...draft.customization_defaults, default_chart_type: value } }))} />
-                  <TextInput label={t("defaultSymbol")} value={settings.customization_defaults.default_symbol} onChange={(value) => setSettings((draft) => ({ ...draft, customization_defaults: { ...draft.customization_defaults, default_symbol: value.toUpperCase() } }))} />
-                  <p className="text-xs leading-5 text-gray-500">{t("savedDefaultsHint")}</p>
-                  <ActionButton label={t("saveChanges")} icon={<Save size={14} />} loading={saving} onClick={() => saveSettingsPatch(saveCustomizationDefaults(settings.customization_defaults))} />
-                </Panel>
+                <div className="grid gap-4 lg:grid-cols-2">
+                  <Panel title={t("savedDefaults")}>
+                    <SelectRow label={t("theme")} value={settings.customization_defaults.theme} options={["dark", "light"]} onChange={(value) => setCustomizationDefaults({ theme: value as "dark" | "light" })} />
+                    <SelectRow label={t("defaultTimeframe")} value={settings.customization_defaults.default_timeframe} options={Object.keys(TIMEFRAMES)} onChange={(value) => setCustomizationDefaults({ default_timeframe: value })} />
+                    <SelectRow label={t("defaultChartType")} value={settings.customization_defaults.default_chart_type} options={CHART_TYPES} onChange={(value) => setCustomizationDefaults({ default_chart_type: value })} />
+                    <TextInput label={t("defaultSymbol")} value={settings.customization_defaults.default_symbol} onChange={(value) => setCustomizationDefaults({ default_symbol: value.toUpperCase() })} />
+                    <SelectRow label={t("defaultExchange")} value={settings.customization_defaults.default_exchange} options={["binance", "okx"]} onChange={(value) => setCustomizationDefaults({ default_exchange: value })} />
+                    <p className="text-xs leading-5 text-gray-500">{t("savedDefaultsHint")}</p>
+                    <ActionButton label={t("saveChanges")} icon={<Save size={14} />} loading={saving} onClick={() => saveSettingsPatch(saveCustomizationDefaults(settings.customization_defaults))} />
+                  </Panel>
+
+                  <Panel title={t("indicatorTemplates")}>
+                    <PresetButtons
+                      items={INDICATOR_PRESETS.map((preset) => ({ id: preset.id, label: t(preset.labelKey) }))}
+                      activeId={settings.customization_defaults.drawing_defaults.indicator_preset as string | undefined}
+                      onSelect={(id) => {
+                        const preset = INDICATOR_PRESETS.find((item) => item.id === id);
+                        if (!preset) return;
+                        setCustomizationDefaults({ visible_indicators: [...preset.indicators] });
+                        setDrawingDefaults({ indicator_preset: id });
+                      }}
+                    />
+                    <div className="flex flex-wrap gap-1.5">
+                      {settings.customization_defaults.visible_indicators.map((indicator) => (
+                        <span key={indicator} className="rounded border border-gray-700 bg-gray-950 px-2 py-1 text-[11px] text-gray-300">
+                          {indicator}
+                        </span>
+                      ))}
+                    </div>
+                    <Toggle label={t("showVolume")} checked={settings.customization_defaults.drawing_defaults.show_volume !== false} onChange={(value) => setDrawingDefaults({ show_volume: value })} />
+                  </Panel>
+
+                  <Panel title={t("toolPresets")}>
+                    <PresetButtons
+                      items={TOOL_PRESETS.map((preset) => ({ id: preset.id, label: t(preset.labelKey) }))}
+                      activeId={settings.customization_defaults.drawing_defaults.tool_preset as string | undefined}
+                      onSelect={(id) => setDrawingDefaults({ tool_preset: id })}
+                    />
+                    <Toggle label={t("magnetDefault")} checked={settings.customization_defaults.drawing_defaults.magnet_default === true} onChange={(value) => setDrawingDefaults({ magnet_default: value })} />
+                    <Toggle label={t("compactPanels")} checked={settings.customization_defaults.drawing_defaults.compact_panels === true} onChange={(value) => setDrawingDefaults({ compact_panels: value })} />
+                  </Panel>
+
+                  <Panel title={t("layoutPresets")}>
+                    <PresetButtons
+                      items={LAYOUT_PRESETS.map((preset) => ({ id: preset.id, label: t(preset.labelKey) }))}
+                      activeId={settings.customization_defaults.drawing_defaults.layout_preset as string | undefined}
+                      onSelect={(id) => setDrawingDefaults({ layout_preset: id })}
+                    />
+                    <p className="text-xs leading-5 text-gray-500">{t("layoutPresetsHint")}</p>
+                  </Panel>
+                </div>
               ) : loginRequired
             )}
 
@@ -482,16 +658,31 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div key={session.id} className="flex items-center gap-3 border-b border-gray-800 py-2 last:border-b-0">
                         <div className="min-w-0 flex-1">
                           <div className="truncate text-xs font-semibold text-white">{session.title}</div>
-                          <div className="text-[11px] text-gray-500">{session.messages.length} {t("messages")}</div>
+                          <div className="text-[11px] text-gray-500">
+                            {session.message_count ?? session.messages.length} {t("messages")}
+                            {session.symbol && session.timeframe ? ` - ${session.symbol} ${session.timeframe.toUpperCase()}` : ""}
+                          </div>
                         </div>
-                        <button type="button" onClick={() => handleDeleteSession(session.id)} className="rounded p-1.5 text-gray-500 hover:bg-red-500/10 hover:text-red-300" title={t("deleteSession")}>
-                          <Trash2 size={14} />
+                        <button type="button" onClick={() => handleLoadSession(session.id)} className="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 hover:border-blue-500 hover:text-white">
+                          {t("loadSession")}
                         </button>
+                        {session.source !== "api" && (
+                          <button type="button" onClick={() => handleDeleteSession(session.id)} className="rounded p-1.5 text-gray-500 hover:bg-red-500/10 hover:text-red-300" title={t("deleteSession")}>
+                            <Trash2 size={14} />
+                          </button>
+                        )}
                       </div>
                     )) : (
                       <EmptyState text={t("noSavedAiSessions")} />
                     )}
                   </Panel>
+                  {isAdmin && (
+                    <Panel title={t("aiTokenUsage")}>
+                      <InfoRow label={t("totalInputTokens")} value={aiUsage.tokenInput.toLocaleString()} />
+                      <InfoRow label={t("totalOutputTokens")} value={aiUsage.tokenOutput.toLocaleString()} />
+                      <InfoRow label={t("estimatedCost")} value={`$${aiUsage.cost.toFixed(4)}`} />
+                    </Panel>
+                  )}
                 </div>
               ) : loginRequired
             )}
@@ -668,6 +859,35 @@ function SelectRow({
         ))}
       </select>
     </label>
+  );
+}
+
+function PresetButtons({
+  items,
+  activeId,
+  onSelect,
+}: {
+  items: Array<{ id: string; label: string }>;
+  activeId?: string;
+  onSelect: (id: string) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => onSelect(item.id)}
+          className={`rounded border px-2 py-1 text-[11px] font-semibold transition-colors ${
+            activeId === item.id
+              ? "border-blue-500 bg-blue-600 text-white"
+              : "border-gray-700 bg-gray-950 text-gray-300 hover:border-blue-500 hover:text-white"
+          }`}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
   );
 }
 

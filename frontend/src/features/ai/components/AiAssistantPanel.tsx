@@ -19,6 +19,7 @@ import {
   UserRound,
 } from "lucide-react";
 import { DATA_SOURCE } from "@/constants/env";
+import { useAuth } from "@/features/auth/AuthContext";
 import { useI18n } from "@/i18n";
 import { useAiChat } from "@/features/ai/hooks/useAiChat";
 import type { ChartContextForAi } from "@/features/ai/types";
@@ -33,6 +34,133 @@ interface AiAssistantPanelProps {
   onOpenSettings?: () => void;
 }
 
+function renderInlineMarkdown(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(text))) {
+    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
+    const token = match[0];
+    if (token.startsWith("`")) {
+      parts.push(
+        <code key={`${match.index}-code`} className="rounded bg-gray-950 px-1 py-0.5 text-[11px] text-blue-200">
+          {token.slice(1, -1)}
+        </code>,
+      );
+    } else {
+      parts.push(
+        <strong key={`${match.index}-strong`} className="font-semibold text-white">
+          {token.slice(2, -2)}
+        </strong>,
+      );
+    }
+    lastIndex = pattern.lastIndex;
+  }
+
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
+}
+
+function MarkdownContent({ content }: { content: string }) {
+  const lines = content.split(/\r?\n/);
+  const blocks: React.ReactNode[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index].trim();
+    if (!line) {
+      index += 1;
+      continue;
+    }
+
+    if (line.startsWith("```")) {
+      const code: string[] = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+        code.push(lines[index]);
+        index += 1;
+      }
+      index += 1;
+      blocks.push(
+        <pre key={`code-${index}`} className="overflow-x-auto rounded border border-gray-700 bg-gray-950 p-2 text-[11px] leading-5 text-gray-200">
+          <code>{code.join("\n")}</code>
+        </pre>,
+      );
+      continue;
+    }
+
+    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
+    if (heading) {
+      blocks.push(
+        <p key={`heading-${index}`} className="text-[12px] font-semibold text-white">
+          {renderInlineMarkdown(heading[2])}
+        </p>,
+      );
+      index += 1;
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length) {
+        const item = /^[-*]\s+(.+)$/.exec(lines[index].trim());
+        if (!item) break;
+        items.push(item[1]);
+        index += 1;
+      }
+      blocks.push(
+        <ul key={`ul-${index}`} className="list-disc space-y-1 pl-4">
+          {items.map((item, itemIndex) => (
+            <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ul>,
+      );
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(line)) {
+      const items: string[] = [];
+      while (index < lines.length) {
+        const item = /^\d+\.\s+(.+)$/.exec(lines[index].trim());
+        if (!item) break;
+        items.push(item[1]);
+        index += 1;
+      }
+      blocks.push(
+        <ol key={`ol-${index}`} className="list-decimal space-y-1 pl-4">
+          {items.map((item, itemIndex) => (
+            <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ol>,
+      );
+      continue;
+    }
+
+    const paragraph: string[] = [line];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !/^(#{1,3})\s+/.test(lines[index].trim()) &&
+      !/^[-*]\s+/.test(lines[index].trim()) &&
+      !/^\d+\.\s+/.test(lines[index].trim()) &&
+      !lines[index].trim().startsWith("```")
+    ) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push(
+      <p key={`p-${index}`} className="leading-5">
+        {renderInlineMarkdown(paragraph.join(" "))}
+      </p>,
+    );
+  }
+
+  return <div className="space-y-2">{blocks}</div>;
+}
+
 const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
   selectedSymbol,
   timeframe,
@@ -42,9 +170,11 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
   onOpenSettings,
 }) => {
   const { t } = useI18n();
+  const { user } = useAuth();
   const { messages, loading, error, mode, setMode, sendMessage, clearChat } = useAiChat();
   const [inputValue, setInputValue] = React.useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isAdmin = user?.role === "admin";
 
   // Build chart context for AI
   const chartContext: ChartContextForAi = useMemo(() => {
@@ -231,13 +361,13 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
                         : "border border-gray-800 bg-gray-850 text-gray-200"
                     }`}
                   >
-                    {message.content}
+                    <MarkdownContent content={message.content} />
                   </div>
                   {/* Token usage & cost display */}
-                  {!isUser && (message.token_input || message.token_output || message.estimated_cost_usd) && (
+                  {isAdmin && !isUser && (message.token_input || message.token_output || message.estimated_cost_usd) && (
                     <div className="mt-1 flex items-center gap-2 text-[9px] text-gray-600">
                       {message.token_input && message.token_output && (
-                        <span>{message.token_input} → {message.token_output} tokens</span>
+                        <span>{message.token_input}{" -> "}{message.token_output} tokens</span>
                       )}
                       {message.estimated_cost_usd && (
                         <span className="text-green-500">${message.estimated_cost_usd.toFixed(4)}</span>
@@ -262,7 +392,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
               </div>
               <div className="rounded-lg border border-gray-800 bg-gray-850 px-3 py-2 text-xs text-gray-400">
                 <Loader2 size={14} className="animate-spin inline mr-1.5" />
-                Thinking...
+                {t("thinking")}
               </div>
             </div>
           )}

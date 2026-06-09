@@ -21,6 +21,16 @@ log = logging.getLogger(__name__)
 ALL_INTERVALS = ["1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"]
 
 
+@router.websocket("/stream/all")
+async def stream_all_first(websocket: WebSocket, symbol: str = "", exchange: str = "binance"):
+    """Real-time candle streaming for all timeframes.
+
+    This route must be registered before `/stream/{interval}` because FastAPI
+    matches WebSocket routes in declaration order.
+    """
+    await _stream_all_impl(websocket, symbol, exchange)
+
+
 
 @router.websocket("/stream/{interval}")
 async def stream_interval(
@@ -105,8 +115,7 @@ async def stream_indicators(
         log.warning("Indicator stream %s error for %s: %s", interval, symbol, e)
 
 
-@router.websocket("/stream/all")
-async def stream_all(websocket: WebSocket, symbol: str = "", exchange: str = "binance"):
+async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str = "binance"):
     """
     Real-time candle streaming for ALL timeframes simultaneously via a single WebSocket.
 
@@ -197,6 +206,16 @@ async def _build_candle(
                 "low": c["l"], "close": c["c"],
                 "volume": c["v"],
             }
+        if live_price and live_ts:
+            live_window = (live_ts // target_ms) * target_ms
+            return {
+                "openTime": live_window,
+                "open": live_price,
+                "high": live_price,
+                "low": live_price,
+                "close": live_price,
+                "volume": 0,
+            }
         return None
 
     # 1m+: aggregate from the appropriate source sorted set
@@ -225,8 +244,25 @@ async def _build_candle(
                 "volume": round(sum(c["v"] for c in candles), 8),
             }
 
-    # Keep 1m candles exchange-consistent: no ticker-based override
+    # Keep 1m responsive even when kline streams lag by folding in fresh ticker.
     if interval == "1m":
+        if live_price and live_ts:
+            live_window = (live_ts // target_ms) * target_ms
+            if flink_candle and live_window == flink_window:
+                if live_ts > latest_source_ts:
+                    flink_candle["close"] = live_price
+                    flink_candle["high"] = max(flink_candle["high"], live_price)
+                    flink_candle["low"] = min(flink_candle["low"], live_price)
+                return flink_candle
+            if live_window > flink_window:
+                return {
+                    "openTime": live_window,
+                    "open": live_price,
+                    "high": live_price,
+                    "low": live_price,
+                    "close": live_price,
+                    "volume": 0,
+                }
         return flink_candle
 
     # Merge with real-time ticker for 5m+ only
