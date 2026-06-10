@@ -529,6 +529,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       borderDownColor: chartTheme.downColor,
       wickUpColor: chartTheme.upColor,
       wickDownColor: chartTheme.downColor,
+      wickVisible: true,
       visible: chartType === "candles",
     });
     const bs = chart.addSeries(BarSeries, {
@@ -864,6 +865,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       borderDownColor: chartTheme.downColor,
       wickUpColor: chartTheme.upColor,
       wickDownColor: chartTheme.downColor,
+      wickVisible: true,
     });
 
     barRef.current?.applyOptions({
@@ -888,7 +890,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         color: c.close >= c.open ? chartTheme.volumeUp : chartTheme.volumeDown,
       })),
     );
-  }, [themeMode]);
+  // Apply wickVisible based on timeframe: tick (1s) has no wicks, others do
+    const isTickChart = timeframe === "1s";
+    candleRef.current?.applyOptions({
+      wickVisible: !isTickChart,
+    });
+  }, [timeframe, themeMode]);
 
   useEffect(() => {
     chartTypeRef.current = chartType;
