@@ -211,8 +211,8 @@ def _merge_trade_to_candles(
             rt_candles[iv] = {
                 "openTime": window,
                 "open": open_p,
-                "high": trade_price,
-                "low": trade_price,
+                "high": max(open_p, trade_price),
+                "low": min(open_p, trade_price),
                 "close": trade_price,
                 "volume": 0,
             }

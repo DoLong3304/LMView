@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN">
+  <Properties>
+    <Property name="sparkLogPattern">%d{yy/MM/dd HH:mm:ss.SSS} %t %p %c{1}: %m%n%ex</Property>
+  </Properties>
+  <Appenders>
+    <Console name="Console" target="SYSTEM_OUT">
+      <PatternLayout pattern="${sparkLogPattern}"/>
+    </Console>
+    <RollingFile name="RollingFile"
+      fileName="${sys:spark.log.dir:-/tmp}/spark.log"
+      filePattern="${sys:spark.log.dir:-/tmp}/spark-%i.log.gz">
+      <PatternLayout pattern="${sparkLogPattern}"/>
+      <SizeBasedTriggeringPolicy size="50MB"/>
+      <DefaultRolloverStrategy max="3"/>
+      <Delete basePath="${sys:spark.log.dir:-/tmp}" maxDepth="1">
+        <IfFileName glob="spark-*.log.gz"/>
+        <IfLastModified age="7d"/>
+      </Delete>
+    </RollingFile>
+  </Appenders>
+  <Loggers>
+    <Root level="INFO">
+      <AppenderRef ref="Console"/>
+      <AppenderRef ref="RollingFile"/>
+    </Root>
+    <Logger name="org.apache.spark" level="INFO" additivity="false">
+      <AppenderRef ref="Console"/>
+      <AppenderRef ref="RollingFile"/>
+    </Logger>
+    <Logger name="org.apache.hadoop" level="WARN" additivity="false">
+      <AppenderRef ref="Console"/>
+    </Logger>
+    <Logger name="org.sparkproject" level="WARN" additivity="false">
+      <AppenderRef ref="Console"/>
+    </Logger>
+  </Loggers>
+</Configuration>

@@ -81,9 +81,9 @@ scrape_configs:
     scrape_interval: 15s
     static_configs:
       - targets: ['producer:9090']
-    metrics_path: '/
+    metrics_path: '/metrics'
 
-- job_name: 'node-exporter'
+  - job_name: 'node-exporter'
     static_configs:
       - targets: ['node-exporter:9100']
     scrape_interval: 30s
