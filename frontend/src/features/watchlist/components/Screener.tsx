@@ -81,6 +81,7 @@ const Screener: React.FC<ScreenerProps> = ({
   items = [],
   initialFilter,
   title = "Screener",
+  onSymbolSelect,
 }) => {
   const { t } = useI18n();
   const [filter, setFilter] = useState<WatchlistFilter>(initialFilter || {});
@@ -473,7 +474,15 @@ const Screener: React.FC<ScreenerProps> = ({
                   return (
                     <tr
                       key={item.symbol}
-                      onClick={() => {}}
+                      onClick={() => onSymbolSelect?.(item.symbol)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onSymbolSelect?.(item.symbol);
+                        }
+                      }}
+                      tabIndex={onSymbolSelect ? 0 : undefined}
+                      role={onSymbolSelect ? "button" : undefined}
                       className="border-b border-gray-800 hover:bg-gray-800 cursor-pointer transition-colors"
                     >
                       <td className="px-4 py-2">

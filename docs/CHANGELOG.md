@@ -8,6 +8,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.23.1] - 2026-06-10
+
+### Fixed
+
+- **Screener page routing** - Header Screener view now renders `ScreenerPage` instead of falling through to `NewsPage`; result rows now select the symbol and return to chart view.
+- **Advanced chart type rendering** - All chart types use the shared `CHART_TYPES` registry, including `pointFigure`; transformed candle chart types now keep the candle series visible and re-transform immediately when the type changes.
+- **Chart type selector overflow** - Chart type selector now shows four icon buttons at a time with horizontal scrolling, avoiding toolbar crowding as advanced chart types grow.
+- **Default chart type settings** - Settings customization now lists all supported chart types with translated labels instead of only candles/bars/line/area.
+- **Drawing tool visibility and creation** - Rendered left drawing toolbar now exposes supported advanced tools (`horizontalRay`, `parallelChannel`, pitchfork variants, Gann box/fan/square); multi-click tools now wait for the correct number of anchor points.
+- **Chart transformers** - Added Point & Figure transformation and fixed Line Break/Kagi transformer issues found by focused tests.
+- **Transformed chart ordering** - Renko/Point & Figure-style chart data now normalizes duplicate timestamps before `setData`, preventing Lightweight Charts `data must be asc ordered by time` runtime crashes.
+
 ## [0.23.0] - 2026-06-09
 
 ### Added
@@ -46,15 +58,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **TypeScript strict errors** — Fixed unused imports/vars in EnhancedWatchlist, Screener, ScreenerPage, LayoutContext, MultiChartContainer.
 - **Screener data display** — `Screener.tsx` had no data display logic (placeholder UI only). Added `items` prop, filter/sort logic, and results table.
 
-### Notes
-
-- Zero TypeScript errors.
-- `npm run typecheck` + `npm run build` pass.
-- Phase A (Drawing Tools) already 90%+ complete — types, toolbar, overlay rendering, tool settings all implemented.
-- Phase B (Chart Types) — transformers exist and now wired into chart rendering.
-- Phase C (Advanced Indicators) — Volume Profile, Anchored VWAP, MTF indicators documented but require deeper chart integration.
-- Phase I (Mobile) — existing responsive layout system in App.tsx handles breakpoints.
-
 ---
 
 ## [0.22.0] - 2026-06-09
@@ -75,12 +78,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`Drawing.tool` type** — `DrawingTool | string` for backward compat.
 - **`Drawing.settings` type** — `Record<string, any>` → `DrawingSettings`.
 
-### Notes
-
-- Zero TypeScript errors.
-- Backend service reads from Redis `ticker:latest:*:*` keys. Falls back to empty metrics when no tickers available.
-- Phase D backend service uses Redis ticker scan fallback when Trino unavailable.
-
 ---
 
 ## [0.21.0] - 2026-06-09
@@ -92,11 +89,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **ChartTypeSettingsModal** — Modal UI for advanced chart type settings.
 - **Chart type icons** — `CandlestickChart.tsx` maps all 9 chart types to lucide icons.
 - **i18n (en + vi)** — 17 new keys for chart types and settings.
-
-### Notes
-
-- Zero TypeScript errors.
-- Transformers wired into `CandlestickChart.tsx` `setAllPriceSeriesData` — Heikin Ashi, Renko, Line Break, Kagi transform on render.
 
 ---
 

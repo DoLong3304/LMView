@@ -61,9 +61,11 @@ import { toHeikinAshi } from "./transformers/heikinAshi";
 import { toRenko } from "./transformers/renko";
 import { toLineBreak } from "./transformers/lineBreak";
 import { toKagi } from "./transformers/kagi";
+import { toPointFigure } from "./transformers/pointFigure";
 import IndicatorPanel from "./IndicatorPanel";
 import MarketSelector from "./MarketSelector";
 import OHLCVBar from "./OHLCVBar";
+import { CHART_TYPES } from "@/types";
 import type {
   Candle,
   ChartType,
@@ -75,7 +77,41 @@ import type {
 } from "@/types";
 import type { TranslationKey } from "@/i18n/translations";
 
-const CHART_TYPE_ORDER: ChartType[] = ["candles", "bars", "line", "area", "heikinAshi", "renko", "lineBreak", "kagi"];
+const CHART_TYPE_ORDER: ChartType[] = CHART_TYPES.map((chartType) => chartType.id);
+const CANDLE_SERIES_CHART_TYPES = new Set<ChartType>([
+  "candles",
+  "heikinAshi",
+  "renko",
+  "lineBreak",
+  "kagi",
+  "pointFigure",
+]);
+
+function usesCandleSeries(type: ChartType): boolean {
+  return CANDLE_SERIES_CHART_TYPES.has(type);
+}
+
+function usesTransformedCandleData(type: ChartType): boolean {
+  return type !== "candles" && CANDLE_SERIES_CHART_TYPES.has(type);
+}
+
+function ensureStrictAscendingTimes(data: Candle[]): Candle[] {
+  let previousTime = Number.NEGATIVE_INFINITY;
+  let changed = false;
+
+  const ordered = data.map((candle) => {
+    let nextTime = candle.time;
+    if (nextTime <= previousTime) {
+      nextTime = previousTime + 1;
+      changed = true;
+    }
+    previousTime = nextTime;
+
+    return nextTime === candle.time ? candle : { ...candle, time: nextTime };
+  });
+
+  return changed ? ordered : data;
+}
 
 const CHART_TYPE_ICONS: Record<ChartType, typeof CandleIcon> = {
   candles: CandleIcon,
@@ -330,11 +366,15 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           close: l.price as number,
           volume: 0,
         }));
+      } else if (chartType === "pointFigure") {
+        chartData = toPointFigure(data, { boxSize: "atr", atrPeriod: 14, reversalBoxes: 3 });
       }
 
-      candleRef.current?.setData(chartData);
-      barRef.current?.setData(chartData);
-      const closeData = toCloseSeriesData(chartData);
+      const orderedChartData = ensureStrictAscendingTimes(chartData);
+
+      candleRef.current?.setData(orderedChartData);
+      barRef.current?.setData(orderedChartData);
+      const closeData = toCloseSeriesData(orderedChartData);
       lineRef.current?.setData(closeData);
       areaRef.current?.setData(closeData);
     },
@@ -342,12 +382,29 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   );
 
   const updateAllPriceSeries = useCallback((candle: Candle) => {
+    if (usesTransformedCandleData(chartTypeRef.current)) {
+      const current = candlesRef.current;
+      const last = current[current.length - 1];
+      const next = !last
+        ? [candle]
+        : candle.time === last.time
+          ? [...current.slice(0, -1), candle]
+          : candle.time > last.time
+            ? [...current.slice(-(CHART_CONFIG.MAX_BARS_MEMORY - 1)), candle]
+            : current;
+
+      if (next !== current) {
+        setAllPriceSeriesData(next);
+      }
+      return;
+    }
+
     candleRef.current?.update(candle);
     barRef.current?.update(candle);
     const closePoint = { time: candle.time, value: candle.close };
     lineRef.current?.update(closePoint);
     areaRef.current?.update(closePoint);
-  }, []);
+  }, [setAllPriceSeriesData]);
 
   const commitCandlesState = useCallback(
     (next: Candle[]) => {
@@ -530,7 +587,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       wickUpColor: chartTheme.upColor,
       wickDownColor: chartTheme.downColor,
       wickVisible: true,
-      visible: chartType === "candles",
+      visible: usesCandleSeries(chartType),
     });
     const bs = chart.addSeries(BarSeries, {
       upColor: chartTheme.upColor,
@@ -899,11 +956,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   useEffect(() => {
     chartTypeRef.current = chartType;
-    candleRef.current?.applyOptions({ visible: chartType === "candles" });
+    candleRef.current?.applyOptions({ visible: usesCandleSeries(chartType) });
     barRef.current?.applyOptions({ visible: chartType === "bars" });
     lineRef.current?.applyOptions({ visible: chartType === "line" });
     areaRef.current?.applyOptions({ visible: chartType === "area" });
-  }, [chartType]);
+    setAllPriceSeriesData(candlesRef.current);
+  }, [chartType, setAllPriceSeriesData]);
 
   const syncIndicatorData = useCallback((data: Candle[]) => {
     const cfg20 = indSettings.sma20;
@@ -1959,7 +2017,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const toolbarGroupClass = "lm-toolbar-group flex h-8 flex-shrink-0 items-center gap-1 rounded-md border p-0.5";
   const toolbarButtonBase = "lm-toolbar-button flex h-7 flex-shrink-0 items-center justify-center whitespace-nowrap rounded px-2 text-xs font-semibold transition-colors";
   const toolbarIconButtonBase = "lm-toolbar-button flex h-7 w-7 flex-shrink-0 items-center justify-center rounded transition-colors";
-  const chartTypeButtonBase = "lm-toolbar-button flex h-7 flex-shrink-0 items-center justify-center gap-1 rounded px-2 text-xs font-semibold transition-colors";
+  const chartTypeButtonBase = "lm-toolbar-button flex h-7 w-8 flex-shrink-0 items-center justify-center rounded text-xs font-semibold transition-colors";
   const toolbarIdleClass = "";
   const toolbarActiveClass = "is-active shadow-sm shadow-blue-950/20";
 
@@ -2085,7 +2143,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 </button>
               </div>
 
-              <div className={toolbarGroupClass}>
+              <div className={`${toolbarGroupClass} max-w-36 overflow-x-auto overscroll-x-contain`} aria-label={t("chartTypeSettings")}>
                 {CHART_TYPE_ORDER.map((type) => {
                   const Icon = CHART_TYPE_ICONS[type];
                   const label = t(CHART_TYPE_LABELS[type]);
@@ -2101,7 +2159,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                       title={label}
                     >
                       <Icon size={14} />
-                      <span className="hidden 2xl:inline">{label}</span>
+                      <span className="sr-only">{label}</span>
                     </button>
                   );
                 })}

@@ -2,7 +2,7 @@
 # LMView System Documentation
 
 > Current project map for humans and coding agents.
-> Last reviewed from code: **2026-06-09**.
+> Last reviewed from code: **2026-06-10**.
 
 ---
 
@@ -16,12 +16,12 @@ Lambda Architecture:
 - Serving layer: FastAPI REST/WebSocket APIs with Redis/Influx/Trino/PostgreSQL clients.
 - Frontend layer: React 19 trading dashboard with charts, drawings, replay, auth, settings, market/news, and Phase 1 AI Ask Mode surfaces.
 
-Latest project release from `docs/CHANGELOG.md`: **0.23.0**.
+Latest project release from `docs/CHANGELOG.md`: **0.23.1**.
 
 Repository facts from this audit:
 
 - Branch: `main`.
-- FastAPI app metadata version: `0.23.0`.
+- FastAPI app metadata version: `0.23.1`.
 - Frontend package version: `0.3.0`.
 - Compose source of truth: one `docker-compose.yml` with profiles.
 - Core compose services from static YAML audit: 40 concrete services plus 2 template services.

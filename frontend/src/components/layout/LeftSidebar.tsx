@@ -6,6 +6,7 @@ import {
   EyeOff,
   Eraser,
   GitBranch,
+  Grid3x3,
   Lock,
   Magnet,
   MousePointer2,
@@ -67,6 +68,7 @@ const TOOL_GROUPS: ToolGroup[] = [
       { id: "trendline", icon: TrendingUp, labelKey: "trendline" },
       { id: "ray", icon: ArrowUpRight, labelKey: "ray" },
       { id: "extendedLine", icon: GitBranch, labelKey: "extendedLine" },
+      { id: "horizontalRay", icon: ArrowUpRight, labelKey: "horizontalRay" },
       { id: "horizontal", icon: BarChart3, labelKey: "horizontalLine" },
       { id: "vertical", icon: BarChart3, labelKey: "verticalLine" },
       { id: "arrow", icon: ArrowUpRight, labelKey: "arrow" },
@@ -91,6 +93,18 @@ const TOOL_GROUPS: ToolGroup[] = [
     ],
   },
   {
+    id: "channels",
+    icon: GitBranch,
+    labelKey: "channels",
+    tools: [
+      { id: "parallelChannel", icon: GitBranch, labelKey: "parallelChannel" },
+      { id: "pitchfork", icon: GitBranch, labelKey: "pitchfork" },
+      { id: "schiffPitchfork", icon: GitBranch, labelKey: "schiffPitchfork" },
+      { id: "modifiedPitchfork", icon: GitBranch, labelKey: "modifiedPitchfork" },
+      { id: "insidePitchfork", icon: GitBranch, labelKey: "insidePitchfork" },
+    ],
+  },
+  {
     id: "patternTools",
     icon: Triangle,
     labelKey: "patternTools",
@@ -105,6 +119,16 @@ const TOOL_GROUPS: ToolGroup[] = [
     labelKey: "elliottTools",
     tools: [
       { id: "elliottWave", icon: Waves, labelKey: "elliottImpulseWave" },
+    ],
+  },
+  {
+    id: "gann",
+    icon: Grid3x3,
+    labelKey: "gann",
+    tools: [
+      { id: "gannBox", icon: Grid3x3, labelKey: "gannBox" },
+      { id: "gannFan", icon: GitBranch, labelKey: "gannFan" },
+      { id: "gannSquare", icon: Square, labelKey: "gannSquare" },
     ],
   },
   {

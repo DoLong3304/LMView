@@ -3,6 +3,7 @@ import { toHeikinAshi } from "../transformers/heikinAshi";
 import { toRenko } from "../transformers/renko";
 import { toLineBreak } from "../transformers/lineBreak";
 import { toKagi } from "../transformers/kagi";
+import { toPointFigure } from "../transformers/pointFigure";
 import type { Candle } from "@/types";
 
 function makeCandle(time: number, o: number, h: number, l: number, c: number, v = 1000): Candle {
@@ -207,6 +208,24 @@ describe("toKagi", () => {
     for (const line of lines) {
       expect(line.linewidth).toBeDefined();
       expect(typeof line.linewidth).toBe("number");
+    }
+  });
+});
+
+describe("toPointFigure", () => {
+  it("returns empty for < 2 candles", () => {
+    expect(toPointFigure([makeCandle(1000, 100, 110, 90, 105)])).toHaveLength(0);
+  });
+
+  it("produces box columns when price moves by box size", () => {
+    const candles: Candle[] = Array.from({ length: 20 }, (_, i) =>
+      makeCandle(1000 + i * 60, 100 + i, 101 + i, 99 + i, 100 + i, 1000),
+    );
+    const boxes = toPointFigure(candles, { boxSize: 2, reversalBoxes: 3 });
+    expect(boxes.length).toBeGreaterThan(0);
+    for (const box of boxes) {
+      expect(box.high).toBeGreaterThanOrEqual(Math.max(box.open, box.close));
+      expect(box.low).toBeLessThanOrEqual(Math.min(box.open, box.close));
     }
   });
 });

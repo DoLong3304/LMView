@@ -49,6 +49,7 @@ import {
 } from "@/services/settingsService";
 import { useI18n } from "@/i18n";
 import type { TranslationKey } from "@/i18n/translations";
+import { CHART_TYPES as CHART_TYPE_CONFIGS } from "@/types";
 import type {
   ChartType,
   HealthData,
@@ -70,7 +71,10 @@ interface SettingsModalProps {
   onChartTypeChange: (chartType: ChartType) => void;
 }
 
-const CHART_TYPES: ChartType[] = ["candles", "bars", "line", "area"];
+const CHART_TYPE_OPTIONS: ChartType[] = CHART_TYPE_CONFIGS.map((chartType) => chartType.id);
+const CHART_TYPE_LABEL_KEYS = Object.fromEntries(
+  CHART_TYPE_CONFIGS.map((chartType) => [chartType.id, chartType.labelKey]),
+) as Record<ChartType, TranslationKey>;
 const INDICATOR_PRESETS: Array<{ id: string; labelKey: TranslationKey; indicators: string[] }> = [
   { id: "core-trend", labelKey: "presetCoreTrend", indicators: ["sma20", "sma50", "ema12", "ema26", "volumeMa"] },
   { id: "momentum", labelKey: "presetMomentum", indicators: ["rsi", "macd", "stochastic", "mfi"] },
@@ -590,7 +594,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                   <Panel title={t("savedDefaults")}>
                     <SelectRow label={t("theme")} value={settings.customization_defaults.theme} options={["dark", "light"]} onChange={(value) => setCustomizationDefaults({ theme: value as "dark" | "light" })} />
                     <SelectRow label={t("defaultTimeframe")} value={settings.customization_defaults.default_timeframe} options={Object.keys(TIMEFRAMES)} onChange={(value) => setCustomizationDefaults({ default_timeframe: value })} />
-                    <SelectRow label={t("defaultChartType")} value={settings.customization_defaults.default_chart_type} options={CHART_TYPES} onChange={(value) => setCustomizationDefaults({ default_chart_type: value })} />
+                    <SelectRow label={t("defaultChartType")} value={settings.customization_defaults.default_chart_type} options={CHART_TYPE_OPTIONS} getOptionLabel={(value) => t(CHART_TYPE_LABEL_KEYS[value as ChartType])} onChange={(value) => setCustomizationDefaults({ default_chart_type: value })} />
                     <TextInput label={t("defaultSymbol")} value={settings.customization_defaults.default_symbol} onChange={(value) => setCustomizationDefaults({ default_symbol: value.toUpperCase() })} />
                     <SelectRow label={t("defaultExchange")} value={settings.customization_defaults.default_exchange} options={["binance", "okx"]} onChange={(value) => setCustomizationDefaults({ default_exchange: value })} />
                     <p className="text-xs leading-5 text-gray-500">{t("savedDefaultsHint")}</p>
@@ -839,11 +843,13 @@ function SelectRow({
   label,
   value,
   options,
+  getOptionLabel,
   onChange,
 }: {
   label: string;
   value: string;
   options: readonly string[];
+  getOptionLabel?: (value: string) => string;
   onChange: (value: string) => void;
 }) {
   return (
@@ -855,7 +861,7 @@ function SelectRow({
         className="rounded border border-gray-700 bg-gray-950 px-2 py-1.5 text-xs text-white outline-none focus:border-blue-500"
       >
         {options.map((option) => (
-          <option key={option} value={option}>{option}</option>
+          <option key={option} value={option}>{getOptionLabel?.(option) ?? option}</option>
         ))}
       </select>
     </label>

@@ -38,6 +38,7 @@ export function toKagi(
     price: basePrice,
     type: currentType,
     reversal: false,
+    linewidth: currentType === "yang" ? 3 : 1,
   });
 
   for (let i = 1; i < candles.length; i++) {
