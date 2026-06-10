@@ -42,6 +42,12 @@ export function toPointFigure(
   let columnClose = roundedStart;
   let direction: "x" | "o" = candles[1].close >= candles[0].close ? "x" : "o";
   const result: Candle[] = [];
+  let lastEmittedTime = Number.NEGATIVE_INFINITY;
+
+  const nextTime = (baseTime: number): number => {
+    lastEmittedTime = Math.max(baseTime, lastEmittedTime + 1);
+    return lastEmittedTime;
+  };
 
   for (let i = 1; i < candles.length; i += 1) {
     const candle = candles[i];
@@ -52,7 +58,7 @@ export function toPointFigure(
         const boxes = Math.floor((price - columnClose) / boxSize);
         const nextClose = columnClose + boxes * boxSize;
         result.push({
-          time: candle.time,
+          time: nextTime(candle.time),
           open: columnClose,
           high: nextClose,
           low: columnClose,
@@ -64,7 +70,7 @@ export function toPointFigure(
         const boxes = Math.floor((columnClose - price) / boxSize);
         const nextClose = columnClose - boxes * boxSize;
         result.push({
-          time: candle.time,
+          time: nextTime(candle.time),
           open: columnClose,
           high: columnClose,
           low: nextClose,
@@ -78,7 +84,7 @@ export function toPointFigure(
       const boxes = Math.floor((columnClose - price) / boxSize);
       const nextClose = columnClose - boxes * boxSize;
       result.push({
-        time: candle.time,
+        time: nextTime(candle.time),
         open: columnClose,
         high: columnClose,
         low: nextClose,
@@ -90,7 +96,7 @@ export function toPointFigure(
       const boxes = Math.floor((price - columnClose) / boxSize);
       const nextClose = columnClose + boxes * boxSize;
       result.push({
-        time: candle.time,
+        time: nextTime(candle.time),
         open: columnClose,
         high: nextClose,
         low: columnClose,

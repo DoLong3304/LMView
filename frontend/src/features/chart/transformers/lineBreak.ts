@@ -25,13 +25,19 @@ export function toLineBreak(
 
   const blocks: LineBreakBlock[] = [];
   const lookback = config.lookback;
+  let lastEmittedTime = Number.NEGATIVE_INFINITY;
+
+  const nextTime = (baseTime: number): number => {
+    lastEmittedTime = Math.max(baseTime, lastEmittedTime + 1);
+    return lastEmittedTime;
+  };
 
   for (let i = 0; i < candles.length; i++) {
     const candle = candles[i];
     if (blocks.length === 0) {
       const bullish = candle.close >= candle.open;
       blocks.push({
-        time: candle.time,
+        time: nextTime(candle.time),
         open: candle.open,
         close: candle.close,
         high: candle.high,
@@ -48,7 +54,7 @@ export function toLineBreak(
     if (candle.close > Math.max(prevClose, lookbackClose)) {
       // New bullish block
       blocks.push({
-        time: candle.time,
+        time: nextTime(candle.time),
         open: prevClose,
         close: candle.close,
         high: candle.high,
@@ -58,7 +64,7 @@ export function toLineBreak(
     } else if (candle.close < Math.min(prevClose, lookbackClose)) {
       // New bearish block
       blocks.push({
-        time: candle.time,
+        time: nextTime(candle.time),
         open: prevClose,
         close: candle.close,
         high: candle.high,

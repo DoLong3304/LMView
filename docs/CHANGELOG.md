@@ -19,6 +19,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Drawing tool visibility and creation** - Rendered left drawing toolbar now exposes supported advanced tools (`horizontalRay`, `parallelChannel`, pitchfork variants, Gann box/fan/square); multi-click tools now wait for the correct number of anchor points.
 - **Chart transformers** - Added Point & Figure transformation and fixed Line Break/Kagi transformer issues found by focused tests.
 - **Transformed chart ordering** - Renko/Point & Figure-style chart data now normalizes duplicate timestamps before `setData`, preventing Lightweight Charts `data must be asc ordered by time` runtime crashes.
+- **Advanced chart render families** - Kagi now renders on the line series instead of flat candles, while Heikin Ashi/Renko/Line Break/Point & Figure stay on transformed candle/brick data; all advanced transformers emit strict ascending times.
 
 ## [0.23.0] - 2026-06-09
 

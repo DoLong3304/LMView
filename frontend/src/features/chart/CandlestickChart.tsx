@@ -83,9 +83,9 @@ const CANDLE_SERIES_CHART_TYPES = new Set<ChartType>([
   "heikinAshi",
   "renko",
   "lineBreak",
-  "kagi",
   "pointFigure",
 ]);
+const LINE_SERIES_CHART_TYPES = new Set<ChartType>(["line", "kagi"]);
 
 function usesCandleSeries(type: ChartType): boolean {
   return CANDLE_SERIES_CHART_TYPES.has(type);
@@ -95,7 +95,15 @@ function usesTransformedCandleData(type: ChartType): boolean {
   return type !== "candles" && CANDLE_SERIES_CHART_TYPES.has(type);
 }
 
-function ensureStrictAscendingTimes(data: Candle[]): Candle[] {
+function usesDerivedSeriesData(type: ChartType): boolean {
+  return usesTransformedCandleData(type) || type === "kagi";
+}
+
+function usesLineSeries(type: ChartType): boolean {
+  return LINE_SERIES_CHART_TYPES.has(type);
+}
+
+function ensureStrictAscendingTimes<T extends { time: number }>(data: T[]): T[] {
   let previousTime = Number.NEGATIVE_INFINITY;
   let changed = false;
 
@@ -325,7 +333,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   const getActivePriceSeries = useCallback(() => {
     if (chartTypeRef.current === "bars") return barRef.current || candleRef.current;
-    if (chartTypeRef.current === "line") return lineRef.current || candleRef.current;
+    if (usesLineSeries(chartTypeRef.current)) return lineRef.current || candleRef.current;
     if (chartTypeRef.current === "area") return areaRef.current || candleRef.current;
     return candleRef.current;
   }, []);
@@ -356,18 +364,22 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           close: b.close,
           volume: 0,
         }));
-      } else if (chartType === "kagi") {
-        const kagiData = toKagi(data, { reversalPercent: 4, useClose: true });
-        chartData = kagiData.map((l) => ({
-          time: l.time as any,
-          open: l.price as number,
-          high: l.price as number,
-          low: l.price as number,
-          close: l.price as number,
-          volume: 0,
-        }));
       } else if (chartType === "pointFigure") {
         chartData = toPointFigure(data, { boxSize: "atr", atrPeriod: 14, reversalBoxes: 3 });
+      }
+
+      if (chartType === "kagi") {
+        const lineData = ensureStrictAscendingTimes(
+          toKagi(data, { reversalPercent: 4, useClose: true }).map((line) => ({
+            time: line.time as any,
+            value: line.price,
+          })),
+        );
+        candleRef.current?.setData([]);
+        barRef.current?.setData([]);
+        lineRef.current?.setData(lineData);
+        areaRef.current?.setData([]);
+        return;
       }
 
       const orderedChartData = ensureStrictAscendingTimes(chartData);
@@ -382,7 +394,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   );
 
   const updateAllPriceSeries = useCallback((candle: Candle) => {
-    if (usesTransformedCandleData(chartTypeRef.current)) {
+    if (usesDerivedSeriesData(chartTypeRef.current)) {
       const current = candlesRef.current;
       const last = current[current.length - 1];
       const next = !last
@@ -601,7 +613,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       priceLineVisible: true,
       lastValueVisible: true,
       crosshairMarkerVisible: true,
-      visible: chartType === "line",
+      visible: usesLineSeries(chartType),
     });
     const ar = chart.addSeries(AreaSeries, {
       lineColor: chartTheme.upColor,
@@ -958,7 +970,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     chartTypeRef.current = chartType;
     candleRef.current?.applyOptions({ visible: usesCandleSeries(chartType) });
     barRef.current?.applyOptions({ visible: chartType === "bars" });
-    lineRef.current?.applyOptions({ visible: chartType === "line" });
+    lineRef.current?.applyOptions({ visible: usesLineSeries(chartType) });
     areaRef.current?.applyOptions({ visible: chartType === "area" });
     setAllPriceSeriesData(candlesRef.current);
   }, [chartType, setAllPriceSeriesData]);
