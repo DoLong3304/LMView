@@ -15,10 +15,6 @@ class ProviderType(str, Enum):
     LOCAL = "local"
     API = "api"
     NONE = "none"
-    LOCAL_VLLM = "local_vllm"
-    QWEN_API = "qwen_api"
-    LLAMA_API = "llama_api"
-    LITELLM = "litellm"
 
 
 class ProviderInfo(BaseModel):

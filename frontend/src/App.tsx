@@ -818,10 +818,21 @@ const TradingDashboard: React.FC = () => {
                 addDrawing={handleAddDrawing}
                 setTimeframe={handleTimeframeChange}
                 setSymbol={handleSymbolSelect}
+                setChartType={setChartType}
+                setView={setAppView}
+                setRightPanelOpen={setIsRightPanelOpen}
+                openSettings={() => handleOpenSettings()}
+                closeSettings={() => setIsSettingsModalOpen(false)}
+                currentView={appView}
+                rightPanelOpen={isRightPanelOpen}
+                currentTimeframe={currentTimeframe}
+                selectedSymbol={selectedSymbol}
+                chartType={chartType}
                 chartController={aiChartController}
             />
-            <div className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
-                <Header
+            <div data-ai-section="app-shell" className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
+                <div data-ai-section="header">
+                    <Header
                     themeMode={themeMode}
                     onThemeToggle={handleToggleTheme}
                     isRightPanelOpen={isRightPanelOpen}
@@ -833,6 +844,7 @@ const TradingDashboard: React.FC = () => {
                     onLoginClick={() => setIsAuthModalOpen(true)}
                     onSettingsClick={() => handleOpenSettings("account")}
                 />
+                </div>
 
                 {connError && (
                     <div className="px-4 py-2 bg-red-900/50 border-b border-red-700/50 flex items-center justify-between">
@@ -864,11 +876,11 @@ const TradingDashboard: React.FC = () => {
                 {/* Main content area */}
                 <main className="relative flex-1 flex overflow-hidden min-h-0">
                     {appView === "marketsNews" ? (
-                        <div className="flex-1 min-w-0 overflow-hidden">
+                        <div data-ai-section="markets-news-page" className="flex-1 min-w-0 overflow-hidden">
                             <NewsPage />
                         </div>
                     ) : appView === "screener" ? (
-                        <div className="flex-1 min-w-0 overflow-hidden">
+                        <div data-ai-section="screener-page" className="flex-1 min-w-0 overflow-hidden">
                             <ScreenerPage
                                 onBack={() => setAppView("charts")}
                                 onSymbolSelect={(symbol) => {
@@ -1219,12 +1231,32 @@ function AiActionRuntimeBridge({
     addDrawing,
     setTimeframe,
     setSymbol,
+    setChartType,
+    setView,
+    setRightPanelOpen,
+    openSettings,
+    closeSettings,
+    currentView,
+    rightPanelOpen,
+    currentTimeframe,
+    selectedSymbol,
+    chartType,
     chartController,
 }: {
     setDrawingTool: (tool: string) => void;
     addDrawing: (drawing: Drawing) => void;
     setTimeframe: (timeframe: TimeframeKey) => void;
     setSymbol: (symbol: string) => void;
+    setChartType: (chartType: ChartType) => void;
+    setView: (view: AppView) => void;
+    setRightPanelOpen: (open: boolean) => void;
+    openSettings: () => void;
+    closeSettings: () => void;
+    currentView: AppView;
+    rightPanelOpen: boolean;
+    currentTimeframe: TimeframeKey;
+    selectedSymbol: string;
+    chartType: ChartType;
     chartController: AiChartActionController | null;
 }) {
     const { setRuntime } = useAiActions();
@@ -1234,9 +1266,36 @@ function AiActionRuntimeBridge({
             addDrawing,
             setTimeframe,
             setSymbol,
+            setChartType,
+            setView,
+            setRightPanelOpen,
+            openSettings,
+            closeSettings,
+            currentView,
+            rightPanelOpen,
+            currentTimeframe,
+            selectedSymbol,
+            chartType,
             chartController,
         });
-    }, [addDrawing, chartController, setDrawingTool, setRuntime, setSymbol, setTimeframe]);
+    }, [
+        addDrawing,
+        chartController,
+        chartType,
+        closeSettings,
+        currentView,
+        currentTimeframe,
+        openSettings,
+        rightPanelOpen,
+        selectedSymbol,
+        setChartType,
+        setDrawingTool,
+        setRightPanelOpen,
+        setRuntime,
+        setSymbol,
+        setTimeframe,
+        setView,
+    ]);
     return null;
 }
 

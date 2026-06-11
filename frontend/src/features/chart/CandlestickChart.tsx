@@ -78,6 +78,9 @@ import type {
 } from "@/types";
 import type { TranslationKey } from "@/i18n/translations";
 
+const HISTORICAL_FALLBACK_TIMEFRAME: TimeframeKey = "1m";
+const HISTORICAL_TIMEFRAME_KEYS = TIMEFRAME_KEYS.filter((key) => key !== "1s");
+
 const CHART_TYPE_ORDER: ChartType[] = CHART_TYPES.map((chartType) => chartType.id);
 const CANDLE_SERIES_CHART_TYPES = new Set<ChartType>([
   "candles",
@@ -283,6 +286,67 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           if (!prev[key]) return prev;
           return { ...prev, [key]: { ...prev[key], visible: !prev[key].visible } };
         });
+      },
+      zoomChart: (direction, anchorRatio = 0.5) => {
+        const timeScale = chartRef.current?.timeScale();
+        const range = timeScale?.getVisibleLogicalRange();
+        if (!timeScale || !range) return;
+        const anchor = range.from + (range.to - range.from) * Math.max(0, Math.min(1, anchorRatio));
+        const factor = direction === "in" ? 0.8 : 1.25;
+        timeScale.setVisibleLogicalRange({
+          from: anchor - (anchor - range.from) * factor,
+          to: anchor + (range.to - anchor) * factor,
+        });
+      },
+      scrollChart: (target) => {
+        const timeScale = chartRef.current?.timeScale();
+        const range = timeScale?.getVisibleLogicalRange();
+        if (!timeScale || !range) return;
+        const width = range.to - range.from;
+        if (target === "start") {
+          timeScale.setVisibleLogicalRange({ from: 0, to: width });
+          return;
+        }
+        if (target === "end") {
+          const end = Math.max(width, candlesRef.current.length - 1);
+          timeScale.setVisibleLogicalRange({ from: end - width, to: end });
+          return;
+        }
+        const shift = typeof target === "number" ? target : 0;
+        timeScale.setVisibleLogicalRange({ from: range.from + shift, to: range.to + shift });
+      },
+      rangeToChartRegion: (args) => {
+        const current = candlesRef.current;
+        const container = containerRef.current;
+        if (!current.length || !container) return null;
+        const fromIndex = Number(args.from_index);
+        const toIndex = Number(args.to_index);
+        if (Number.isFinite(fromIndex) && Number.isFinite(toIndex)) {
+          const start = Math.max(0, Math.min(current.length - 1, Math.min(fromIndex, toIndex)));
+          const end = Math.max(0, Math.min(current.length - 1, Math.max(fromIndex, toIndex)));
+          const leftPct = (start / current.length) * 100;
+          const widthPct = Math.max(3, ((end - start + 1) / current.length) * 100);
+          return { leftPct, topPct: 12, widthPct, heightPct: 68 };
+        }
+        const startRaw = Number(args.start_time);
+        const endRaw = Number(args.end_time);
+        const timeScale = chartRef.current?.timeScale() as any;
+        if (Number.isFinite(startRaw) && Number.isFinite(endRaw) && timeScale?.timeToCoordinate) {
+          const toSeconds = (value: number) => value > 1_000_000_000_000 ? Math.floor(value / 1000) : value;
+          const x1 = timeScale.timeToCoordinate(toSeconds(startRaw));
+          const x2 = timeScale.timeToCoordinate(toSeconds(endRaw));
+          if (typeof x1 === "number" && typeof x2 === "number") {
+            const left = Math.max(0, Math.min(x1, x2));
+            const right = Math.min(container.clientWidth, Math.max(x1, x2));
+            return {
+              leftPct: (left / container.clientWidth) * 100,
+              topPct: 12,
+              widthPct: Math.max(3, ((right - left) / container.clientWidth) * 100),
+              heightPct: 68,
+            };
+          }
+        }
+        return null;
       },
     };
     onAiActionControllerReady(controller);
@@ -544,9 +608,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   }, [symbol, timeframe]);
 
   const handleTimeframeSelect = useCallback((nextTimeframe: TimeframeKey) => {
-    setTimeframe(nextTimeframe);
+    setTimeframe(!isLiveMode && nextTimeframe === "1s" ? HISTORICAL_FALLBACK_TIMEFRAME : nextTimeframe);
     setIsTimeframeMenuOpen(false);
-  }, []);
+  }, [isLiveMode]);
 
   const handleSymbolChange = useCallback((nextSymbol: string) => {
     setSymbol(nextSymbol);
@@ -629,10 +693,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         tickMarkFormatter: localTickMarkFormatter,
         visible: true,
       },
-      handleScroll: { mouseWheel: true, pressedMouseMove: true },
+      handleScroll: { mouseWheel: false, pressedMouseMove: true },
       handleScale: {
         axisPressedMouseMove: true,
-        mouseWheel: true,
+        mouseWheel: false,
         pinch: true,
       },
     });
@@ -1020,6 +1084,42 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     areaRef.current?.applyOptions({ visible: chartType === "area" });
     setAllPriceSeriesData(candlesRef.current);
   }, [chartType, setAllPriceSeriesData]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const handleWheel = (event: WheelEvent) => {
+      if (!chartRef.current) return;
+      const timeScale = chartRef.current.timeScale();
+      const range = timeScale.getVisibleLogicalRange();
+      if (!range) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      if (!event.ctrlKey) {
+        const rawDelta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
+        if (!rawDelta) return;
+        const shift = Math.max(-80, Math.min(80, rawDelta / 12));
+        timeScale.setVisibleLogicalRange({ from: range.from + shift, to: range.to + shift });
+        return;
+      }
+
+      const rect = container.getBoundingClientRect();
+      const anchorRatio = rect.width > 0
+        ? Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width))
+        : 0.5;
+      const anchor = range.from + (range.to - range.from) * anchorRatio;
+      const zoomDelta = event.deltaY || event.deltaX;
+      const factor = zoomDelta < 0 ? 0.8 : 1.25;
+      timeScale.setVisibleLogicalRange({
+        from: anchor - (anchor - range.from) * factor,
+        to: anchor + (range.to - anchor) * factor,
+      });
+    };
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    return () => container.removeEventListener("wheel", handleWheel);
+  }, []);
 
   const syncIndicatorData = useCallback((data: Candle[]) => {
     const cfg20 = indSettings.sma20;
@@ -1421,11 +1521,15 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       historicalRequestIdRef.current += 1;
       const currentRequestId = historicalRequestIdRef.current;
 
-      // Auto-switch from 1s to 1m in historical mode
-      let effectiveTimeframe = timeframe;
-      if (timeframe === "1s") {
-        effectiveTimeframe = "1m";
-        setTimeframe("1m");
+      const requestedTimeframe = normalizeTimeframe(timeframe);
+      const effectiveTimeframe = requestedTimeframe === "1s"
+        ? HISTORICAL_FALLBACK_TIMEFRAME
+        : requestedTimeframe;
+
+      if (requestedTimeframe !== effectiveTimeframe) {
+        timeframeRef.current = effectiveTimeframe;
+        setTimeframe(effectiveTimeframe);
+        onTimeframeChange?.(effectiveTimeframe);
       }
 
       setHistoricalRange(range);
@@ -1447,7 +1551,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
       try {
         const requestSymbol = symbol;
-        const requestInterval = effectiveTimeframe.toLowerCase();
+        const requestInterval = effectiveTimeframe;
 
         // Fetch historical data
         let data = await fetchHistoricalCandles(
@@ -1464,12 +1568,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         }
 
         // Check if user changed context mid-request
-        if (symbolRef.current !== requestSymbol || timeframeRef.current !== requestInterval) {
-          return;
-        }
-
-        // Check if user went back to live mode
-        if (isLiveMode) {
+        const currentInterval = normalizeTimeframe(timeframeRef.current);
+        if (symbolRef.current !== requestSymbol || currentInterval !== requestInterval) {
           return;
         }
 
@@ -1481,7 +1581,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         });
 
         // Final check before applying data
-        if (currentRequestId !== historicalRequestIdRef.current || isLiveMode) {
+        if (currentRequestId !== historicalRequestIdRef.current) {
           return;
         }
 
@@ -1496,7 +1596,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         }
       }
     },
-    [symbol, timeframe, isLiveMode, preloadInitialCandles, applyDataToChart, t],
+    [symbol, timeframe, onTimeframeChange, preloadInitialCandles, applyDataToChart, t],
   );
 
   const handleBackToLive = useCallback(() => {
@@ -1773,6 +1873,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   // Refetch historical data when symbol/timeframe changes in historical mode
   useEffect(() => {
     if (!isLiveMode && historicalRange) {
+      if (normalizeTimeframe(timeframe) === "1s") {
+        timeframeRef.current = HISTORICAL_FALLBACK_TIMEFRAME;
+        setTimeframe(HISTORICAL_FALLBACK_TIMEFRAME);
+        onTimeframeChange?.(HISTORICAL_FALLBACK_TIMEFRAME);
+        return;
+      }
       handleHistoricalRange(historicalRange);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -2086,7 +2192,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         isFullscreen ? "h-screen rounded-none" : "h-full rounded-lg"
       }`}
     >
-      <div className="lm-toolbar-surface flex-none border-b">
+      <div data-ai-section="chart-toolbar" className="lm-toolbar-surface flex-none border-b">
         <div className="max-xl:overflow-x-auto xl:overflow-visible">
           <div className="flex h-11 w-full min-w-max flex-nowrap items-center gap-2 px-2 py-1.5 sm:px-3 xl:min-w-0">
             <div className="flex flex-shrink-0 items-center gap-2">
@@ -2143,7 +2249,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 </button>
                 {isTimeframeMenuOpen && (
                   <div className="lm-menu-surface absolute left-0 top-full z-[110] mt-2 w-24 max-w-[calc(100vw-1rem)] overflow-hidden rounded border shadow-2xl">
-                    {TIMEFRAME_KEYS.map((key) => {
+                    {(isLiveMode ? TIMEFRAME_KEYS : HISTORICAL_TIMEFRAME_KEYS).map((key) => {
                       const active = normalizeTimeframe(timeframe) === key;
                       return (
                         <button
@@ -2266,7 +2372,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         <div className="flex flex-none items-center justify-between px-3 py-1.5 bg-amber-900/40 border-b border-amber-700/50">
           <span className="text-xs text-amber-300">
             {new Date(historicalRange.startMs).toLocaleString()} &mdash;{" "}
-            {new Date(historicalRange.endMs).toLocaleString()} ({timeframe})
+            {new Date(historicalRange.endMs).toLocaleString()} ({normalizeTimeframe(timeframe) === "1s" ? HISTORICAL_FALLBACK_TIMEFRAME : timeframe})
           </span>
           <button
             onClick={handleBackToLive}
@@ -2285,7 +2391,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           <OHLCVBar data={tooltip} />
         </div>
         {/* Chart canvas + overlay slot */}
-        <div ref={chartStageRef} className="relative min-h-0 flex-1 overflow-hidden">
+        <div ref={chartStageRef} data-ai-section="chart-canvas" className="relative min-h-0 flex-1 overflow-hidden">
           <div ref={containerRef} className="w-full h-full" />
           {isLoading && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--lm-bg-primary)]/60">

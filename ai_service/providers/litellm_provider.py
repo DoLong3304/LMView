@@ -1,18 +1,4 @@
-"""
-LiteLLM provider — unified interface to multiple LLM APIs.
-
-Uses LiteLLM's OpenAI-compatible API to route requests to any configured model:
-- OpenAI (GPT-4, etc.)
-- Anthropic (Claude)
-- Google (Gemini)
-- DeepSeek
-- Qwen API
-- Llama API
-- Local vLLM endpoints
-- Any OpenAI-compatible endpoint
-
-Does not hardcode API keys. Keys come from environment variables read by LiteLLM.
-"""
+"""LiteLLM provider for local and API OpenAI-compatible endpoints."""
 from __future__ import annotations
 
 import logging
@@ -99,6 +85,9 @@ class LiteLLMProvider(BaseProvider):
             elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
             content = response.choices[0].message.content or ""
             usage = getattr(response, "usage", None)
+            prompt_tokens = getattr(usage, "prompt_tokens", None) if usage else None
+            completion_tokens = getattr(usage, "completion_tokens", None) if usage else None
+            total_tokens = getattr(usage, "total_tokens", None) if usage else None
 
             return LLMCompletionResponse(
                 content=content,
@@ -106,10 +95,17 @@ class LiteLLMProvider(BaseProvider):
                 model_name=model,
                 is_mock=False,
                 finish_reason=getattr(response.choices[0], "finish_reason", "stop"),
-                token_input=usage.prompt_tokens if usage else None,
-                token_output=usage.completion_tokens if usage else None,
+                token_input=prompt_tokens,
+                token_output=completion_tokens,
                 latency_ms=elapsed_ms,
-                metadata={"provider_type": "litellm"},
+                metadata={
+                    "provider_type": "litellm",
+                    "usage": {
+                        "prompt_tokens": prompt_tokens,
+                        "completion_tokens": completion_tokens,
+                        "total_tokens": total_tokens,
+                    },
+                },
             )
 
         except Exception as exc:

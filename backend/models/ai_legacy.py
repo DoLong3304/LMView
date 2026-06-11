@@ -112,7 +112,7 @@ class AIChatResponse(BaseModel):
     content: str
     provider: str = "none"
     model_name: Optional[str] = None
-    is_mock: bool = True
+    is_mock: bool = False
     created_at: Optional[datetime] = None
     warnings: List[str] = Field(default_factory=list)
     suggested_actions: Optional[List[str]] = None
@@ -152,7 +152,7 @@ class AIHealthResponse(BaseModel):
     """Response from GET /api/ai/health."""
     auth_required: bool = True
     database_ready: bool = False
-    mock_mode_available: bool = True
+    mock_mode_available: bool = False
     chart_action_schema_version: str = "1.0.0"
     supported_modes: List[str] = Field(default_factory=lambda: ["ask", "interact"])
     supported_action_types: List[str] = Field(default_factory=list)

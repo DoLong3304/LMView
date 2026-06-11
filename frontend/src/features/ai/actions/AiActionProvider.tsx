@@ -3,7 +3,9 @@ import { Move, Play, RotateCcw, X } from "lucide-react";
 import { INDICATORS } from "@/features/chart/IndicatorPanel";
 import { TOOL_GROUPS } from "@/features/drawing/components/DrawingToolbar";
 import { useI18n } from "@/i18n";
-import type { Drawing, IndicatorSettings, TimeframeKey } from "@/types";
+import { fetchHistoricalCandles } from "@/services/marketDataService";
+import { CHART_TYPES } from "@/types";
+import type { ChartType, Drawing, IndicatorSettings, TimeframeKey } from "@/types";
 
 export interface AiActionCall {
   name: string;
@@ -32,6 +34,9 @@ interface AiActionParameter {
 export interface AiChartActionController {
   setIndicatorVisible: (indicator: string, visible: boolean) => void;
   toggleIndicator: (indicator: string) => void;
+  zoomChart: (direction: "in" | "out", anchorRatio?: number) => void;
+  scrollChart: (target: "start" | "end" | "left" | "right" | number) => void;
+  rangeToChartRegion: (args: Record<string, unknown>) => ChartRegion | null;
 }
 
 interface AiActionRuntime {
@@ -40,7 +45,51 @@ interface AiActionRuntime {
   clearDrawings?: () => void;
   setTimeframe?: (timeframe: TimeframeKey) => void;
   setSymbol?: (symbol: string) => void;
+  setChartType?: (chartType: ChartType) => void;
+  setView?: (view: "charts" | "marketsNews" | "screener") => void;
+  setRightPanelOpen?: (open: boolean) => void;
+  openSettings?: () => void;
+  closeSettings?: () => void;
+  currentView?: "charts" | "marketsNews" | "screener";
+  rightPanelOpen?: boolean;
+  currentTimeframe?: TimeframeKey;
+  selectedSymbol?: string;
+  chartType?: ChartType;
   chartController?: AiChartActionController | null;
+}
+
+interface TourSnapshot {
+  timeframe?: TimeframeKey;
+  selectedSymbol?: string;
+  chartType?: ChartType;
+  currentView?: "charts" | "marketsNews" | "screener";
+  rightPanelOpen?: boolean;
+}
+
+interface ChartRegion {
+  leftPct: number;
+  topPct: number;
+  widthPct: number;
+  heightPct: number;
+}
+
+interface HighlightState {
+  target: string;
+  label?: string;
+  message?: string;
+  includeChat?: boolean;
+  region?: ChartRegion;
+}
+
+interface TourStep {
+  target: string;
+  label: string;
+  message: string;
+  includeChat?: boolean;
+  region?: ChartRegion;
+  action?: AiActionCall;
+  pauseForUser?: boolean;
+  task?: "change_timeframe";
 }
 
 interface AiActionContextValue {
@@ -53,21 +102,54 @@ interface AiActionContextValue {
 const AiActionContext = createContext<AiActionContextValue | null>(null);
 
 const SECTION_SELECTORS: Record<string, string> = {
+  app: "[data-ai-section='app-shell']",
+  header: "[data-ai-section='header']",
   chart: "[data-ai-section='chart']",
+  chartToolbar: "[data-ai-section='chart-toolbar']",
+  chartCanvas: "[data-ai-section='chart-canvas']",
   ai: "[data-ai-section='ai-panel']",
   rightPanel: "[data-ai-section='right-panel']",
+  rightPanelOverview: "[data-ai-section='right-panel-overview']",
   watchlist: "[data-ai-section='right-panel']",
+  watchlistList: "[data-ai-section='watchlist-list']",
+  orderBook: "[data-ai-section='order-book-panel']",
+  recentTrades: "[data-ai-section='recent-trades-panel']",
   drawingTools: "[data-ai-section='drawing-toolbar']",
+  marketsNews: "[data-ai-section='markets-news-page']",
+  screener: "[data-ai-section='screener-page']",
   settings: "[data-ai-section='settings-modal']",
+  account: "[data-ai-section='header']",
 };
+
+const TIMEFRAMES: TimeframeKey[] = ["1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"];
+const HISTORICAL_TIMEFRAMES: TimeframeKey[] = TIMEFRAMES.filter((item) => item !== "1s");
 
 function drawingTools(): string[] {
   return TOOL_GROUPS.flatMap((group) => group.tools.map((tool) => tool.id));
 }
 
+function clampPercent(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, value));
+}
+
+function parseDrawingDataPoints(points: unknown[]): Drawing["dataPoints"] | null {
+  const parsed = points.map((point) => {
+    if (!point || typeof point !== "object") return null;
+    const candidate = point as Record<string, unknown>;
+    const time = Number(candidate.time);
+    const price = Number(candidate.price);
+    if (!Number.isFinite(time) || !Number.isFinite(price)) return null;
+    return { time, price };
+  });
+  if (parsed.some((point) => point === null)) return null;
+  return parsed as Drawing["dataPoints"];
+}
+
 function actionDefinitions(): AiActionDefinition[] {
   const indicators = INDICATORS.map((item) => item.key);
   const tools = drawingTools();
+  const chartTypes = CHART_TYPES.map((item) => item.id);
   return [
     {
       name: "add_indicator",
@@ -103,7 +185,7 @@ function actionDefinitions(): AiActionDefinition[] {
         type: "object",
         properties: {
           tool: { type: "string", enum: tools },
-          points: { type: "array", description: "JSON array of data points." },
+          points: { type: "array", description: 'JSON array like [{"time":1717200000,"price":67500}]' },
           text: { type: "string" },
         },
         required: ["tool"],
@@ -111,15 +193,121 @@ function actionDefinitions(): AiActionDefinition[] {
     },
     {
       name: "highlight_section",
-      description: "Dim the UI except the target section and AI response area.",
+      description: "Dim the UI except the target section. Chat stays unhighlighted unless include_chat is true.",
       parameters: {
         type: "object",
         properties: {
           target: { type: "string", enum: Object.keys(SECTION_SELECTORS) },
           label: { type: "string" },
           message: { type: "string" },
+          include_chat: { type: "boolean", default: false },
         },
         required: ["target"],
+      },
+    },
+    {
+      name: "highlight_chart_area",
+      description: "Highlight a rectangular area inside the chart by percentages.",
+      parameters: {
+        type: "object",
+        properties: {
+          left_pct: { type: "number", default: 20, description: "0-100 left position." },
+          top_pct: { type: "number", default: 20, description: "0-100 top position." },
+          width_pct: { type: "number", default: 40, description: "0-100 width." },
+          height_pct: { type: "number", default: 30, description: "0-100 height." },
+          label: { type: "string" },
+          message: { type: "string" },
+        },
+      },
+    },
+    {
+      name: "highlight_candles",
+      description: "Highlight candles by index range or by time range.",
+      parameters: {
+        type: "object",
+        properties: {
+          from_index: { type: "integer", description: "Zero-based candle index." },
+          to_index: { type: "integer", description: "Zero-based candle index." },
+          start_time: { type: "integer", description: "Unix seconds or milliseconds." },
+          end_time: { type: "integer", description: "Unix seconds or milliseconds." },
+          label: { type: "string" },
+          message: { type: "string" },
+        },
+      },
+    },
+    {
+      name: "set_chart_type",
+      description: "Switch chart type.",
+      parameters: {
+        type: "object",
+        properties: { chart_type: { type: "string", enum: chartTypes } },
+        required: ["chart_type"],
+      },
+    },
+    {
+      name: "set_timeframe",
+      description: "Switch chart timeframe.",
+      parameters: {
+        type: "object",
+        properties: { timeframe: { type: "string", enum: TIMEFRAMES } },
+        required: ["timeframe"],
+      },
+    },
+    {
+      name: "set_market",
+      description: "Switch selected market symbol.",
+      parameters: {
+        type: "object",
+        properties: { symbol: { type: "string", default: "BTCUSDT" } },
+        required: ["symbol"],
+      },
+    },
+    {
+      name: "view_section",
+      description: "Open and highlight a major app section.",
+      parameters: {
+        type: "object",
+        properties: { target: { type: "string", enum: Object.keys(SECTION_SELECTORS) } },
+        required: ["target"],
+      },
+    },
+    {
+      name: "zoom_chart",
+      description: "Zoom chart in or out.",
+      parameters: {
+        type: "object",
+        properties: {
+          direction: { type: "string", enum: ["in", "out"] },
+          anchor_ratio: { type: "number", default: 0.5, description: "0 left edge, 1 right edge." },
+        },
+        required: ["direction"],
+      },
+    },
+    {
+      name: "scroll_chart",
+      description: "Scroll chart horizontally.",
+      parameters: {
+        type: "object",
+        properties: {
+          target: { type: "string", enum: ["start", "end", "left", "right"] },
+          bars: { type: "integer", default: 20 },
+        },
+        required: ["target"],
+      },
+    },
+    {
+      name: "fetch_historical_prices",
+      description: "Fetch historical candles for current or requested market. 1s is live-only.",
+      parameters: {
+        type: "object",
+        properties: {
+          symbol: { type: "string", default: "BTCUSDT" },
+          timeframe: { type: "string", enum: HISTORICAL_TIMEFRAMES, default: "1h" },
+          start_ms: { type: "integer" },
+          end_ms: { type: "integer" },
+          limit: { type: "integer", default: 100 },
+        },
+        required: ["start_ms", "end_ms"],
       },
     },
     {
@@ -146,62 +334,205 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
   const definitions = useMemo(actionDefinitions, []);
   const runtimeRef = useRef<AiActionRuntime>({});
   const [debugOpen, setDebugOpen] = useState(false);
-  const [highlight, setHighlight] = useState<{ target: string; label?: string; message?: string } | null>(null);
+  const [highlight, setHighlight] = useState<HighlightState | null>(null);
   const [tourIndex, setTourIndex] = useState<number | null>(null);
   const [tourDone, setTourDone] = useState(false);
+  const [tourBaseline, setTourBaseline] = useState<{ timeframe?: TimeframeKey } | null>(null);
+  const [actionLog, setActionLog] = useState<Array<{ call: AiActionCall; at: number; detail: string }>>([]);
+  const actionLogRef = useRef<Array<{ call: AiActionCall; at: number; detail: string }>>([]);
+  const tourSnapshotRef = useRef<TourSnapshot | null>(null);
+
+  const recordAction = useCallback((call: AiActionCall, detail: string) => {
+    const entry = { call, at: Date.now(), detail };
+    actionLogRef.current = [...actionLogRef.current, entry];
+    setActionLog(actionLogRef.current);
+  }, []);
 
   const setRuntime = useCallback((runtime: Partial<AiActionRuntime>) => {
     runtimeRef.current = { ...runtimeRef.current, ...runtime };
   }, []);
 
+  const showSection = useCallback((target: string) => {
+    const runtime = runtimeRef.current;
+    if (target === "marketsNews") runtime.setView?.("marketsNews");
+    if (target === "screener") runtime.setView?.("screener");
+    if (
+      ["chart", "chartToolbar", "chartCanvas", "drawingTools", "rightPanel", "rightPanelOverview", "watchlist", "watchlistList", "orderBook", "recentTrades", "ai"].includes(target)
+    ) {
+      runtime.setView?.("charts");
+    }
+    if (["rightPanel", "rightPanelOverview", "watchlist", "watchlistList", "orderBook", "recentTrades", "ai"].includes(target)) {
+      runtime.setRightPanelOpen?.(true);
+    }
+    if (target === "ai") {
+      window.dispatchEvent(new CustomEvent("lmview:right-panel-top-tab", { detail: { tab: "aiHelper" } }));
+    }
+    if (["rightPanelOverview", "watchlist", "watchlistList", "orderBook", "recentTrades"].includes(target)) {
+      window.dispatchEvent(new CustomEvent("lmview:right-panel-top-tab", { detail: { tab: "overview" } }));
+    }
+    if (target === "watchlist" || target === "watchlistList") {
+      window.dispatchEvent(new CustomEvent("lmview:right-panel-tab", { detail: { tab: "watchlist" } }));
+    }
+    if (target === "orderBook") {
+      window.dispatchEvent(new CustomEvent("lmview:right-panel-tab", { detail: { tab: "orderBook" } }));
+    }
+    if (target === "recentTrades") {
+      window.dispatchEvent(new CustomEvent("lmview:right-panel-tab", { detail: { tab: "recentTrades" } }));
+    }
+    if (target === "settings" || target === "account") runtime.openSettings?.();
+  }, []);
+
   const executeAction = useCallback(async (call: AiActionCall) => {
     const args = call.arguments || {};
     const runtime = runtimeRef.current;
+    const done = (ok: boolean, detail: string) => {
+      recordAction(call, detail);
+      return { ok, detail };
+    };
     switch (call.name) {
       case "add_indicator":
         runtime.chartController?.setIndicatorVisible(String(args.indicator), true);
-        return { ok: true, detail: `Added indicator ${String(args.indicator)}` };
+        return done(true, `Added indicator ${String(args.indicator)}`);
       case "remove_indicator":
         runtime.chartController?.setIndicatorVisible(String(args.indicator), false);
-        return { ok: true, detail: `Removed indicator ${String(args.indicator)}` };
+        return done(true, `Removed indicator ${String(args.indicator)}`);
       case "toggle_indicator":
         runtime.chartController?.toggleIndicator(String(args.indicator));
-        return { ok: true, detail: `Toggled indicator ${String(args.indicator)}` };
+        return done(true, `Toggled indicator ${String(args.indicator)}`);
       case "draw_tool": {
         const tool = String(args.tool || "cursor");
         runtime.setDrawingTool?.(tool);
         const points = Array.isArray(args.points) ? args.points : [];
         if (points.length && runtime.addDrawing) {
+          const dataPoints = parseDrawingDataPoints(points);
+          if (!dataPoints) {
+            return done(false, 'Drawing points must be [{"time": unixSeconds, "price": value}].');
+          }
           runtime.addDrawing({
             id: `ai-${Date.now()}`,
             tool,
-            dataPoints: points as Drawing["dataPoints"],
+            dataPoints,
             text: typeof args.text === "string" ? args.text : undefined,
             settings: { color: "#38bdf8", lineWidth: 2 },
           });
+          runtime.setDrawingTool?.("cursor");
+          return done(true, `Placed ${tool} drawing`);
         }
-        return { ok: true, detail: `Selected drawing tool ${tool}` };
+        return done(true, `Selected drawing tool ${tool}`);
       }
       case "highlight_section":
+        showSection(String(args.target || "chart"));
         setHighlight({
           target: String(args.target || "chart"),
           label: typeof args.label === "string" ? args.label : undefined,
           message: typeof args.message === "string" ? args.message : undefined,
+          includeChat: args.include_chat === true || String(args.target || "") === "ai",
         });
-        return { ok: true, detail: `Highlighted ${String(args.target || "chart")}` };
+        return done(true, `Highlighted ${String(args.target || "chart")}`);
+      case "highlight_chart_area": {
+        showSection("chart");
+        setHighlight({
+          target: "chartCanvas",
+          label: typeof args.label === "string" ? args.label : "Chart area",
+          message: typeof args.message === "string" ? args.message : undefined,
+          region: {
+            leftPct: clampPercent(Number(args.left_pct ?? 20)),
+            topPct: clampPercent(Number(args.top_pct ?? 20)),
+            widthPct: clampPercent(Number(args.width_pct ?? 40)),
+            heightPct: clampPercent(Number(args.height_pct ?? 30)),
+          },
+        });
+        return done(true, "Highlighted chart area");
+      }
+      case "highlight_candles": {
+        showSection("chart");
+        const region = runtime.chartController?.rangeToChartRegion(args) || {
+          leftPct: 25,
+          topPct: 18,
+          widthPct: 35,
+          heightPct: 58,
+        };
+        setHighlight({
+          target: "chartCanvas",
+          label: typeof args.label === "string" ? args.label : "Candles",
+          message: typeof args.message === "string" ? args.message : undefined,
+          region,
+        });
+        return done(true, "Highlighted candle range");
+      }
+      case "set_chart_type": {
+        const chartType = String(args.chart_type || "candles") as ChartType;
+        runtime.setChartType?.(chartType);
+        showSection("chartToolbar");
+        return done(true, `Changed chart type to ${chartType}`);
+      }
+      case "set_timeframe": {
+        const timeframe = String(args.timeframe || "1h") as TimeframeKey;
+        runtime.setTimeframe?.(timeframe);
+        showSection("chartToolbar");
+        return done(true, `Changed timeframe to ${timeframe}`);
+      }
+      case "set_market": {
+        const symbol = String(args.symbol || "BTCUSDT").toUpperCase();
+        runtime.setSymbol?.(symbol);
+        showSection("chartToolbar");
+        return done(true, `Changed market to ${symbol}`);
+      }
+      case "view_section": {
+        const target = String(args.target || "chart");
+        showSection(target);
+        setHighlight({ target, label: target });
+        return done(true, `Opened ${target}`);
+      }
+      case "zoom_chart": {
+        const direction = String(args.direction || "in") === "out" ? "out" : "in";
+        runtime.chartController?.zoomChart(direction, Number(args.anchor_ratio ?? 0.5));
+        return done(true, `Zoomed chart ${direction}`);
+      }
+      case "scroll_chart": {
+        const target = String(args.target || "end") as "start" | "end" | "left" | "right";
+        const bars = Number(args.bars ?? 20);
+        runtime.chartController?.scrollChart(target === "left" || target === "right" ? (target === "left" ? -Math.abs(bars) : Math.abs(bars)) : target);
+        return done(true, `Scrolled chart ${target}`);
+      }
+      case "fetch_historical_prices": {
+        const symbol = String(args.symbol || runtime.selectedSymbol || "BTCUSDT").toUpperCase();
+        const timeframe = String(args.timeframe || runtime.currentTimeframe || "1h");
+        if (timeframe === "1s") {
+          return done(false, "1s historical candles are not supported. Use live mode or choose 1m+.");
+        }
+        const candles = await fetchHistoricalCandles(
+          symbol,
+          Number(args.start_ms),
+          Number(args.end_ms),
+          Number(args.limit ?? 100),
+          timeframe,
+        );
+        return done(true, `Fetched ${candles.length} historical ${timeframe} candles for ${symbol}`);
+      }
       case "start_tour":
+        tourSnapshotRef.current = {
+          timeframe: runtime.currentTimeframe,
+          selectedSymbol: runtime.selectedSymbol,
+          chartType: runtime.chartType,
+          currentView: runtime.currentView,
+          rightPanelOpen: runtime.rightPanelOpen,
+        };
+        actionLogRef.current = [];
+        setActionLog([]);
+        setTourBaseline({ timeframe: runtime.currentTimeframe });
         setTourDone(false);
         setTourIndex(Number(args.start_step || 0));
-        return { ok: true, detail: "Started tour" };
+        return done(true, "Started tour");
       case "clear_ai_annotations":
         setHighlight(null);
         setTourIndex(null);
         setTourDone(false);
-        return { ok: true, detail: "Cleared AI annotations" };
+        return done(true, "Cleared AI annotations");
       default:
-        return { ok: false, detail: `Unsupported action: ${call.name}` };
+        return done(false, `Unsupported action: ${call.name}`);
     }
-  }, []);
+  }, [recordAction, showSection]);
 
   useEffect(() => {
     const openDebug = () => setDebugOpen(true);
@@ -209,17 +540,77 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("lmview:open-ai-action-debug", openDebug);
   }, []);
 
-  const tourSteps = useMemo(
+  const tourSteps = useMemo<TourStep[]>(
     () => [
-      { target: "chart", label: t("tourChartTitle"), message: t("tourChartBody") },
-      { target: "drawingTools", label: t("tourDrawingTitle"), message: t("tourDrawingBody") },
-      { target: "rightPanel", label: t("tourRightPanelTitle"), message: t("tourRightPanelBody") },
-      { target: "ai", label: t("tourAiTitle"), message: t("tourAiBody") },
+      { target: "app", label: t("tourOverallTitle"), message: t("tourOverallBody") },
+      { target: "chartCanvas", label: t("tourChartTitle"), message: t("tourChartBody") },
+      { target: "chartToolbar", label: t("tourMarketTitle"), message: t("tourMarketBody"), pauseForUser: true },
+      { target: "chartToolbar", label: t("tourTimeframeTitle"), message: t("tourTimeframeBody"), pauseForUser: true, task: "change_timeframe" },
+      { target: "chartToolbar", label: t("tourChartTypeTitle"), message: t("tourChartTypeBody") },
+      { target: "chartToolbar", label: t("tourHistoricalTitle"), message: t("tourHistoricalBody") },
+      { target: "drawingTools", label: t("tourDrawingTitle"), message: t("tourDrawingBody"), action: { name: "draw_tool", arguments: { tool: "rectangle" } }, pauseForUser: true },
+      { target: "chartCanvas", label: t("tourRectangleTitle"), message: t("tourRectangleBody"), region: { leftPct: 24, topPct: 28, widthPct: 36, heightPct: 28 } },
+      { target: "chartToolbar", label: t("tourIndicatorsTitle"), message: t("tourIndicatorsBody") },
+      { target: "chartCanvas", label: t("tourZoomTitle"), message: t("tourZoomBody") },
+      { target: "rightPanelOverview", label: t("tourRightPanelTitle"), message: t("tourRightPanelBody") },
+      { target: "watchlistList", label: t("tourWatchlistTitle"), message: t("tourWatchlistBody"), action: { name: "view_section", arguments: { target: "watchlistList" } } },
+      { target: "orderBook", label: t("tourOrderBookTitle"), message: t("tourOrderBookBody"), action: { name: "view_section", arguments: { target: "orderBook" } } },
+      { target: "recentTrades", label: t("tourTradesTitle"), message: t("tourTradesBody"), action: { name: "view_section", arguments: { target: "recentTrades" } } },
+      { target: "marketsNews", label: t("tourMarketsNewsTitle"), message: t("tourMarketsNewsBody"), action: { name: "view_section", arguments: { target: "marketsNews" } } },
+      { target: "screener", label: t("tourScreenerTitle"), message: t("tourScreenerBody"), action: { name: "view_section", arguments: { target: "screener" } } },
+      { target: "header", label: t("tourHeaderTitle"), message: t("tourHeaderBody") },
+      { target: "settings", label: t("tourSettingsTitle"), message: t("tourSettingsBody"), action: { name: "view_section", arguments: { target: "settings" } } },
+      { target: "ai", label: t("tourAiTitle"), message: t("tourAiBody"), includeChat: true },
     ],
     [t],
   );
   const activeTourStep = tourIndex !== null ? tourSteps[Math.min(tourIndex, tourSteps.length - 1)] : null;
   const activeHighlight = activeTourStep || highlight;
+
+  const restoreTourState = useCallback(() => {
+    const runtime = runtimeRef.current;
+    const snapshot = tourSnapshotRef.current;
+    if (snapshot?.selectedSymbol) runtime.setSymbol?.(snapshot.selectedSymbol);
+    if (snapshot?.timeframe) runtime.setTimeframe?.(snapshot.timeframe);
+    if (snapshot?.chartType) runtime.setChartType?.(snapshot.chartType);
+    runtime.setDrawingTool?.("cursor");
+    runtime.closeSettings?.();
+    runtime.setView?.("charts");
+    runtime.setRightPanelOpen?.(true);
+    window.dispatchEvent(new CustomEvent("lmview:right-panel-top-tab", { detail: { tab: "aiHelper" } }));
+  }, []);
+
+  function completeTour() {
+    restoreTourState();
+    setTourIndex(null);
+    setHighlight(null);
+    setTourDone(true);
+    window.dispatchEvent(new CustomEvent("lmview:ai-tour-complete", {
+      detail: {
+        summary: t("tourRecapBody"),
+        actions: actionLogRef.current,
+      },
+    }));
+  }
+
+  useEffect(() => {
+    if (tourIndex === null) return;
+    const step = tourSteps[tourIndex];
+    if (!step) return;
+    showSection(step.target);
+    if (step.action) {
+      void executeAction(step.action);
+    }
+  }, [executeAction, showSection, tourIndex, tourSteps]);
+
+  const isCurrentTourTaskComplete = useCallback(() => {
+    const step = tourIndex === null ? null : tourSteps[tourIndex];
+    if (!step?.task) return true;
+    if (step.task === "change_timeframe") {
+      return Boolean(tourBaseline?.timeframe && runtimeRef.current.currentTimeframe !== tourBaseline.timeframe);
+    }
+    return true;
+  }, [tourBaseline?.timeframe, tourIndex, tourSteps]);
 
   return (
     <AiActionContext.Provider value={{ definitions, executeAction, openDebugWindow: () => setDebugOpen(true), setRuntime }}>
@@ -229,9 +620,14 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
           target={activeHighlight.target}
           label={activeHighlight.label}
           message={activeHighlight.message}
+          includeChat={activeHighlight.includeChat}
+          region={activeHighlight.region}
           onClose={() => {
             setHighlight(null);
-            setTourIndex(null);
+            if (tourIndex !== null) {
+              restoreTourState();
+              setTourIndex(null);
+            }
           }}
         />
       )}
@@ -239,22 +635,35 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
         <TourControls
           index={tourIndex}
           count={tourSteps.length}
+          paused={Boolean(activeTourStep?.pauseForUser)}
+          taskComplete={isCurrentTourTaskComplete()}
           onPrev={() => setTourIndex((value) => Math.max(0, (value || 0) - 1))}
           onNext={() => {
-            if (tourIndex >= tourSteps.length - 1) {
-              setTourIndex(null);
-              setHighlight(null);
-              setTourDone(true);
-            } else {
-              setTourIndex(tourIndex + 1);
-            }
+            if (tourIndex >= tourSteps.length - 1) completeTour();
+            else setTourIndex(tourIndex + 1);
           }}
-          onClose={() => setTourIndex(null)}
+          onClose={() => {
+            restoreTourState();
+            setTourIndex(null);
+            setHighlight(null);
+          }}
         />
       )}
       {tourDone && (
         <TourRecap
+          actionCount={actionLog.length}
           onReplay={() => {
+            const runtime = runtimeRef.current;
+            tourSnapshotRef.current = {
+              timeframe: runtime.currentTimeframe,
+              selectedSymbol: runtime.selectedSymbol,
+              chartType: runtime.chartType,
+              currentView: runtime.currentView,
+              rightPanelOpen: runtime.rightPanelOpen,
+            };
+            actionLogRef.current = [];
+            setActionLog([]);
+            setTourBaseline({ timeframe: runtime.currentTimeframe });
             setTourDone(false);
             setTourIndex(0);
           }}
@@ -284,11 +693,15 @@ function HighlightOverlay({
   target,
   label,
   message,
+  includeChat = false,
+  region,
   onClose,
 }: {
   target: string;
   label?: string;
   message?: string;
+  includeChat?: boolean;
+  region?: ChartRegion;
   onClose: () => void;
 }) {
   const [rects, setRects] = useState<DOMRect[]>([]);
@@ -297,21 +710,30 @@ function HighlightOverlay({
   useEffect(() => {
     const update = () => {
       const targetEl = document.querySelector(selector);
-      const aiEl = document.querySelector(SECTION_SELECTORS.ai);
-      const next = [targetEl, aiEl]
-        .filter((item): item is Element => Boolean(item))
-        .map((item) => item.getBoundingClientRect())
+      const targetRect = targetEl?.getBoundingClientRect();
+      const primaryRect = targetRect && region
+        ? rectFromRegion(targetRect, region)
+        : targetRect;
+      const aiEl = includeChat ? document.querySelector(SECTION_SELECTORS.ai) : null;
+      const menuRects = Array.from(document.querySelectorAll(".lm-menu-surface, [data-ai-highlight-hole='true']"))
+        .map((element) => element.getBoundingClientRect());
+      const next = [primaryRect, aiEl?.getBoundingClientRect(), ...menuRects]
+        .filter((item): item is DOMRect => Boolean(item))
         .filter((rect) => rect.width > 0 && rect.height > 0);
       setRects(next);
     };
     update();
+    const timer = window.setTimeout(update, 80);
+    const interval = window.setInterval(update, 250);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
     };
-  }, [selector]);
+  }, [includeChat, region, selector]);
 
   const cells = useMemo(() => dimCells(rects), [rects]);
   const primary = rects[0];
@@ -339,8 +761,8 @@ function HighlightOverlay({
       ))}
       {primary && (
         <div
-          className="pointer-events-auto absolute max-w-xs rounded border border-sky-500/50 bg-gray-950 px-3 py-2 text-xs text-gray-100 shadow-2xl"
-          style={{ left: Math.min(primary.left, window.innerWidth - 280), top: Math.min(primary.bottom + 10, window.innerHeight - 120) }}
+          className="pointer-events-auto fixed max-w-xs rounded border border-sky-500/50 bg-gray-950 px-3 py-2 text-xs text-gray-100 shadow-2xl"
+          style={primary.right > window.innerWidth - 360 ? { left: 16, bottom: 78 } : { right: 16, bottom: 78 }}
         >
           <div className="flex items-start justify-between gap-2">
             <div>
@@ -384,15 +806,27 @@ function dimCells(holes: DOMRect[]) {
   return cells;
 }
 
+function rectFromRegion(base: DOMRect, region: ChartRegion): DOMRect {
+  const left = base.left + (base.width * clampPercent(region.leftPct)) / 100;
+  const top = base.top + (base.height * clampPercent(region.topPct)) / 100;
+  const width = (base.width * clampPercent(region.widthPct)) / 100;
+  const height = (base.height * clampPercent(region.heightPct)) / 100;
+  return new DOMRect(left, top, width, height);
+}
+
 function TourControls({
   index,
   count,
+  paused,
+  taskComplete,
   onPrev,
   onNext,
   onClose,
 }: {
   index: number;
   count: number;
+  paused: boolean;
+  taskComplete: boolean;
   onPrev: () => void;
   onNext: () => void;
   onClose: () => void;
@@ -402,13 +836,19 @@ function TourControls({
     <div className="fixed bottom-5 left-1/2 z-[700] flex -translate-x-1/2 items-center gap-2 rounded border border-gray-700 bg-gray-950 px-3 py-2 shadow-2xl">
       <span className="text-xs text-gray-400">{index + 1} / {count}</span>
       <button type="button" onClick={onPrev} disabled={index === 0} className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-200 disabled:opacity-40">{t("previous")}</button>
-      <button type="button" onClick={onNext} className="rounded bg-blue-600 px-2 py-1 text-xs font-semibold text-white">{index === count - 1 ? t("finish") : t("next")}</button>
+      <button
+        type="button"
+        onClick={onNext}
+        className={`rounded px-2 py-1 text-xs font-semibold text-white ${paused && !taskComplete ? "bg-amber-600" : "bg-blue-600"}`}
+      >
+        {index === count - 1 ? t("finish") : paused && !taskComplete ? t("skip") : t("next")}
+      </button>
       <button type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"><X size={14} /></button>
     </div>
   );
 }
 
-function TourRecap({ onReplay, onClose }: { onReplay: () => void; onClose: () => void }) {
+function TourRecap({ actionCount, onReplay, onClose }: { actionCount: number; onReplay: () => void; onClose: () => void }) {
   const { t } = useI18n();
   return (
     <div className="fixed bottom-5 right-5 z-[690] w-80 rounded border border-gray-700 bg-gray-950 p-3 text-sm text-gray-100 shadow-2xl">
@@ -416,6 +856,7 @@ function TourRecap({ onReplay, onClose }: { onReplay: () => void; onClose: () =>
         <div>
           <h3 className="font-semibold text-white">{t("tourRecapTitle")}</h3>
           <p className="mt-1 text-xs leading-5 text-gray-400">{t("tourRecapBody")}</p>
+          <p className="mt-1 text-[11px] text-gray-500">{actionCount} {t("actionsSaved")}</p>
         </div>
         <button type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"><X size={14} /></button>
       </div>
@@ -436,15 +877,19 @@ function AiActionDebugWindow({
   onClose: () => void;
 }) {
   const { t } = useI18n();
-  const [selected, setSelected] = useState(definitions[0]?.name || "");
+  const [selected, setSelected] = useState("");
   const [params, setParams] = useState<Record<string, string>>({});
   const [result, setResult] = useState("");
   const [running, setRunning] = useState(false);
   const [pos, setPos] = useState({ x: 80, y: 80 });
   const dragRef = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
-  const definition = definitions.find((item) => item.name === selected) || definitions[0];
+  const definition = definitions.find((item) => item.name === selected) || null;
 
   const run = async () => {
+    if (!definition) {
+      setResult(`error: ${t("chooseFunction")}`);
+      return;
+    }
     setRunning(true);
     try {
       const parsed = parseParams(definition, params);
@@ -499,21 +944,42 @@ function AiActionDebugWindow({
             }}
             className="mt-1 w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-white"
           >
+            <option value="">{t("chooseFunction")}</option>
             {definitions.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
           </select>
         </label>
         <div className="grid gap-2">
-          {Object.entries(definition.parameters.properties).map(([key, schema]) => (
+          {definition ? Object.entries(definition.parameters.properties).map(([key, schema]) => (
             <label key={key} className="block text-xs text-gray-400">
               {key}{definition.parameters.required?.includes(key) ? " *" : ""}
+              {schema.description && <span className="ml-1 text-[10px] text-gray-600">{schema.description}</span>}
               {schema.enum ? (
                 <select
-                  value={params[key] ?? String(schema.default ?? schema.enum[0] ?? "")}
+                  value={params[key] ?? String(schema.default ?? "")}
                   onChange={(event) => setParams((draft) => ({ ...draft, [key]: event.target.value }))}
                   className="mt-1 w-full rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-xs text-white"
                 >
+                  <option value="">{t("chooseValue")}</option>
                   {schema.enum.map((item) => <option key={item} value={item}>{item}</option>)}
                 </select>
+              ) : key === "points" ? (
+                <div className="mt-1 space-y-1">
+                  <textarea
+                    value={params[key] ?? ""}
+                    onChange={(event) => setParams((draft) => ({ ...draft, [key]: event.target.value }))}
+                    className="h-20 w-full resize-none rounded border border-gray-700 bg-gray-900 px-2 py-1.5 font-mono text-xs text-white"
+                    placeholder='[{"time": 1717200000, "price": 67500}, {"time": 1717203600, "price": 68100}]'
+                  />
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setParams((draft) => ({ ...draft, [key]: '[{"time":1717200000,"price":67500},{"time":1717203600,"price":68100}]' }))}
+                      className="rounded border border-gray-700 px-1.5 py-0.5 text-[10px] text-gray-300"
+                    >
+                      time/price
+                    </button>
+                  </div>
+                </div>
               ) : (
                 <input
                   value={params[key] ?? String(schema.default ?? "")}
@@ -523,7 +989,11 @@ function AiActionDebugWindow({
                 />
               )}
             </label>
-          ))}
+          )) : (
+            <div className="rounded border border-gray-800 bg-gray-900 px-2 py-3 text-xs text-gray-500">
+              {t("chooseFunction")}
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button type="button" onClick={run} disabled={running} className="inline-flex items-center gap-2 rounded bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white disabled:opacity-60">
@@ -547,7 +1017,7 @@ function parseParams(definition: AiActionDefinition, params: Record<string, stri
     const raw = params[key] ?? schema.default;
     if (raw === undefined || raw === "") continue;
     if (schema.type === "number" || schema.type === "integer") out[key] = Number(raw);
-    else if (schema.type === "boolean") out[key] = raw === "true";
+    else if (schema.type === "boolean") out[key] = String(raw) === "true";
     else if (schema.type === "array" || schema.type === "object") out[key] = typeof raw === "string" ? JSON.parse(raw || (schema.type === "array" ? "[]" : "{}")) : raw;
     else out[key] = String(raw);
   }

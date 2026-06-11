@@ -114,6 +114,20 @@ function mapApiMessage(message: AIMessageResponse): AiMessage {
   };
 }
 
+function localInteractToolCalls(message: string, mode: AiMode): AiToolCall[] | undefined {
+  if (mode !== "interact") return undefined;
+  const text = message.toLowerCase();
+  if (/\b(tour|guide|tutorial|demo|learn how|how to use|show me around)\b/.test(text)) {
+    return [{
+      name: "start_tour",
+      arguments: { tour_id: "lmview-overview" },
+      reason: "User asked to learn LMView interactively.",
+      requires_approval: false,
+    }];
+  }
+  return undefined;
+}
+
 export function useAiChat(): UseAiChatReturn {
   const { user, isAuthenticated } = useAuth();
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -259,6 +273,7 @@ export function useAiChat(): UseAiChatReturn {
           setError("You must log in to use AI Helper.");
         } else if (shouldUseMockAi()) {
           assistantMsg = mockDataAdapter.generateAiResponse(trimmed, context);
+          assistantMsg.tool_calls = localInteractToolCalls(trimmed, mode);
         } else {
           try {
             const response = await aiChat({
@@ -295,6 +310,7 @@ export function useAiChat(): UseAiChatReturn {
           } catch (apiErr) {
             console.warn("AI API failed, using local help:", apiErr);
             assistantMsg = generateLmviewHelpResponse(trimmed, context);
+            assistantMsg.tool_calls = localInteractToolCalls(trimmed, mode);
             assistantMsg.warnings = [
               ...(assistantMsg.warnings || []),
               `API unavailable - using local help mode: ${

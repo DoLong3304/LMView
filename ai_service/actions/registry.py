@@ -9,9 +9,17 @@ import re
 from typing import Any, Dict, List
 
 from backend.models.ai.chart_actions import AIChartAction, AIChartActionType
-from ai_service.actions.validator import KNOWN_INDICATORS, VALID_DRAWING_TOOLS
+from ai_service.actions.validator import KNOWN_INDICATORS, VALID_CHART_TYPES, VALID_DRAWING_TOOLS
 
-ACTION_CATALOG_VERSION = "2.0.0"
+ACTION_CATALOG_VERSION = "2.1.1"
+
+SECTION_KEYS = [
+    "app", "header", "chart", "chartToolbar", "chartCanvas", "drawingTools",
+    "rightPanel", "rightPanelOverview", "watchlist", "watchlistList",
+    "orderBook", "recentTrades", "marketsNews", "screener", "settings", "ai",
+]
+TIMEFRAMES = ["1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"]
+HISTORICAL_TIMEFRAMES = [timeframe for timeframe in TIMEFRAMES if timeframe != "1s"]
 
 
 def _schema(
@@ -68,7 +76,7 @@ def get_action_catalog() -> Dict[str, Any]:
                 "points": {
                     "type": "array",
                     "items": {"type": "object"},
-                    "description": "Optional chart points with time/price.",
+                    "description": "Optional chart points like [{\"time\":1717200000,\"price\":67500}].",
                 },
             },
             ["tool"],
@@ -78,12 +86,102 @@ def get_action_catalog() -> Dict[str, Any]:
             "highlight_section",
             "Highlight a section of the LMView interface for guided help.",
             {
-                "target": {"type": "string", "description": "Stable DOM selector or section key."},
+                "target": {"type": "string", "enum": SECTION_KEYS},
                 "label": {"type": "string"},
                 "message": {"type": "string"},
+                "include_chat": {"type": "boolean", "default": False},
             },
             ["target"],
             "highlight_section",
+        ),
+        _schema(
+            "highlight_chart_area",
+            "Highlight a rectangular area inside the chart by percentages.",
+            {
+                "left_pct": {"type": "number", "minimum": 0, "maximum": 100, "default": 20},
+                "top_pct": {"type": "number", "minimum": 0, "maximum": 100, "default": 20},
+                "width_pct": {"type": "number", "minimum": 1, "maximum": 100, "default": 40},
+                "height_pct": {"type": "number", "minimum": 1, "maximum": 100, "default": 30},
+                "label": {"type": "string"},
+                "message": {"type": "string"},
+            },
+            [],
+            AIChartActionType.HIGHLIGHT_AREA.value,
+        ),
+        _schema(
+            "highlight_candles",
+            "Highlight candles by index range or timestamp range.",
+            {
+                "from_index": {"type": "integer", "minimum": 0},
+                "to_index": {"type": "integer", "minimum": 0},
+                "start_time": {"type": "integer"},
+                "end_time": {"type": "integer"},
+                "label": {"type": "string"},
+                "message": {"type": "string"},
+            },
+            [],
+            AIChartActionType.HIGHLIGHT_CANDLE.value,
+        ),
+        _schema(
+            "set_chart_type",
+            "Switch chart type.",
+            {"chart_type": {"type": "string", "enum": sorted(VALID_CHART_TYPES)}},
+            ["chart_type"],
+            AIChartActionType.TOGGLE_CHART.value,
+        ),
+        _schema(
+            "set_timeframe",
+            "Switch chart timeframe.",
+            {"timeframe": {"type": "string", "enum": TIMEFRAMES}},
+            ["timeframe"],
+            AIChartActionType.TOGGLE_TIMEFRAME.value,
+        ),
+        _schema(
+            "set_market",
+            "Switch selected market symbol.",
+            {"symbol": {"type": "string", "pattern": "^[A-Z0-9]{1,20}$"}},
+            ["symbol"],
+            AIChartActionType.TOGGLE_MARKET.value,
+        ),
+        _schema(
+            "view_section",
+            "Open and highlight a major LMView section.",
+            {"target": {"type": "string", "enum": SECTION_KEYS}},
+            ["target"],
+            "view_section",
+        ),
+        _schema(
+            "zoom_chart",
+            "Zoom chart in or out.",
+            {
+                "direction": {"type": "string", "enum": ["in", "out"]},
+                "anchor_ratio": {"type": "number", "minimum": 0, "maximum": 1, "default": 0.5},
+            },
+            ["direction"],
+            AIChartActionType.MOVE_RESIZE_CHART.value,
+        ),
+        _schema(
+            "scroll_chart",
+            "Scroll chart horizontally.",
+            {
+                "target": {"type": "string", "enum": ["start", "end", "left", "right"]},
+                "bars": {"type": "integer", "default": 20},
+            },
+            ["target"],
+            AIChartActionType.SET_VISIBLE_RANGE.value,
+        ),
+        _schema(
+            "fetch_historical_prices",
+            "Fetch historical prices for the current or requested market. 1s is live-only.",
+            {
+                "symbol": {"type": "string"},
+                "timeframe": {"type": "string", "enum": HISTORICAL_TIMEFRAMES},
+                "start_ms": {"type": "integer"},
+                "end_ms": {"type": "integer"},
+                "limit": {"type": "integer", "default": 100},
+            },
+            ["start_ms", "end_ms"],
+            "fetch_historical_prices",
         ),
         _schema(
             "start_tour",
@@ -105,7 +203,7 @@ def get_action_catalog() -> Dict[str, Any]:
         _schema(
             "toggle_timeframe",
             "Switch chart timeframe.",
-            {"timeframe": {"type": "string", "enum": ["1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"]}},
+            {"timeframe": {"type": "string", "enum": TIMEFRAMES}},
             ["timeframe"],
             AIChartActionType.TOGGLE_TIMEFRAME.value,
         ),
@@ -128,13 +226,38 @@ def propose_tool_calls(message: str, mode: str) -> List[Dict[str, Any]]:
     text = message.lower()
     calls: List[Dict[str, Any]] = []
 
-    if "tour" in text or "guide" in text or "tutorial" in text:
+    if any(term in text for term in ("tour", "guide", "tutorial", "demo", "learn how", "how to use", "show me around")):
         calls.append({
             "name": "start_tour",
             "arguments": {"tour_id": "lmview-overview"},
             "reason": "User asked for a guided walkthrough.",
             "requires_approval": False,
         })
+
+    section_terms = {
+        "overview": "rightPanelOverview",
+        "watchlist": "watchlistList",
+        "order book": "orderBook",
+        "trades": "recentTrades",
+        "recent trades": "recentTrades",
+        "market": "marketsNews",
+        "news": "marketsNews",
+        "screener": "screener",
+        "settings": "settings",
+        "header": "header",
+        "chart": "chart",
+        "tools": "drawingTools",
+    }
+    if "show" in text or "view" in text or "open" in text or "highlight" in text:
+        for term, target in section_terms.items():
+            if term in text:
+                calls.append({
+                    "name": "view_section",
+                    "arguments": {"target": target},
+                    "reason": f"User referenced {term}.",
+                    "requires_approval": False,
+                })
+                break
 
     for indicator in sorted(KNOWN_INDICATORS, key=len, reverse=True):
         compact = indicator.replace("_", " ")
@@ -165,6 +288,37 @@ def propose_tool_calls(message: str, mode: str) -> List[Dict[str, Any]]:
             "arguments": {"target": "chart", "label": "Chart"},
             "reason": "User requested a highlight.",
             "requires_approval": False,
+        })
+
+    for timeframe in TIMEFRAMES:
+        if re.search(rf"\b{re.escape(timeframe)}\b", text):
+            calls.append({
+                "name": "set_timeframe",
+                "arguments": {"timeframe": timeframe},
+                "reason": f"User referenced timeframe {timeframe}.",
+                "requires_approval": True,
+            })
+            break
+
+    chart_types = sorted(VALID_CHART_TYPES, key=len, reverse=True)
+    for chart_type in chart_types:
+        phrase = chart_type.replace("_", " ").lower()
+        if phrase.lower() in text:
+            calls.append({
+                "name": "set_chart_type",
+                "arguments": {"chart_type": chart_type},
+                "reason": f"User referenced chart type {chart_type}.",
+                "requires_approval": True,
+            })
+            break
+
+    match = re.search(r"\b([A-Z]{2,12}USDT)\b", message.upper())
+    if match:
+        calls.append({
+            "name": "set_market",
+            "arguments": {"symbol": match.group(1)},
+            "reason": "User referenced a market symbol.",
+            "requires_approval": True,
         })
 
     return calls

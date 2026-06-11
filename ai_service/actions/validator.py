@@ -40,12 +40,21 @@ SYMBOL_RE = re.compile(r"^[A-Z0-9]{1,20}$")
 # Valid timeframes
 VALID_TIMEFRAMES = {"1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"}
 
-VALID_CHART_TYPES = {"candles", "bars", "line", "area"}
+VALID_CHART_TYPES = {
+    "candles", "bars", "line", "area", "heikinAshi", "renko",
+    "lineBreak", "kagi", "pointFigure",
+}
 
 VALID_DRAWING_TOOLS = {
     "trendline", "ray", "extendedLine", "horizontal", "vertical",
-    "rectangle", "arrow", "fibRetracement", "text", "ruler",
-    "elliottWave", "harmonicABCD",
+    "rectangle", "arrow", "ellipse", "rotatedRectangle", "polyline",
+    "fibRetracement", "fibExtension", "fibChannel", "fibArcs",
+    "fibSpiral", "fibTimeZone", "text", "callout", "note", "balloon",
+    "ruler", "priceRange", "dateRange", "riskReward", "elliottWave",
+    "harmonicABCD", "horizontalRay", "parallelChannel", "pitchfork",
+    "schiffPitchfork", "modifiedPitchfork", "insidePitchfork",
+    "gannBox", "gannFan", "gannSquare", "cursor", "crosshair",
+    "magnet", "lock", "hide", "eraser", "clearAll",
 }
 
 # Max payload size (characters)
@@ -157,8 +166,10 @@ def _validate_single_action(action: AIChartAction, index: int) -> List[str]:
 
     elif action_type == AIChartActionType.HIGHLIGHT_CANDLE:
         candle_time = params.get("time")
-        if not isinstance(candle_time, (int, float)):
-            errors.append(f"{prefix}: numeric 'time' parameter required")
+        has_index_range = isinstance(params.get("from_index"), int) and isinstance(params.get("to_index"), int)
+        has_time_range = isinstance(params.get("start_time"), (int, float)) and isinstance(params.get("end_time"), (int, float))
+        if not isinstance(candle_time, (int, float)) and not has_index_range and not has_time_range:
+            errors.append(f"{prefix}: numeric 'time', index range, or time range required")
 
     elif action_type == AIChartActionType.HIGHLIGHT_INDICATOR:
         indicator_name = params.get("indicator", "").lower()
@@ -183,8 +194,12 @@ def _validate_single_action(action: AIChartAction, index: int) -> List[str]:
         points = params.get("points")
         if tool not in VALID_DRAWING_TOOLS:
             errors.append(f"{prefix}: unsupported drawing tool")
-        if not isinstance(points, list) or not points:
-            errors.append(f"{prefix}: non-empty 'points' array required")
+        if points is not None and not isinstance(points, list):
+            errors.append(f"{prefix}: 'points' must be an array when provided")
+        elif isinstance(points, list):
+            for point_index, point in enumerate(points):
+                if not isinstance(point, dict) or "time" not in point or "price" not in point:
+                    errors.append(f"{prefix}: points[{point_index}] must have 'time' and 'price'")
 
     elif action_type == AIChartActionType.TOGGLE_TIMEFRAME:
         timeframe = params.get("timeframe")
@@ -202,6 +217,10 @@ def _validate_single_action(action: AIChartAction, index: int) -> List[str]:
             errors.append(f"{prefix}: valid 'symbol' parameter required")
 
     elif action_type == AIChartActionType.MOVE_RESIZE_CHART:
+        if "direction" in params:
+            if params.get("direction") not in {"in", "out"}:
+                errors.append(f"{prefix}: zoom 'direction' must be in or out")
+            return errors
         if "pane_id" not in params:
             errors.append(f"{prefix}: 'pane_id' parameter required")
         for key in ("x", "y", "width", "height"):

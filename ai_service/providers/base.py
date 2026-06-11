@@ -3,7 +3,7 @@ Base provider interface for LLM completions.
 
 All provider implementations must implement this interface.
 The system does not care whether the underlying model is local vLLM,
-online API, or deterministic mock — the contract is the same.
+online API, or the none fallback - the contract is the same.
 """
 from __future__ import annotations
 

@@ -57,7 +57,9 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
   const [inputValue, setInputValue] = useState("");
   const [suggestionsOpen, setSuggestionsOpen] = useState(true);
   const [actionResult, setActionResult] = useState("");
+  const [tourSummary, setTourSummary] = useState<{ summary: string; actions: number } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const autoExecutedRef = useRef<Set<string>>(new Set());
   const isAdmin = user?.role === "admin";
 
   const chartContext: ChartContextForAi = useMemo(() => {
@@ -86,6 +88,33 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     if (messages.some((message) => message.role === "user")) setSuggestionsOpen(false);
   }, [messages]);
+
+  useEffect(() => {
+    if (mode !== "interact") return;
+    const latest = messages[messages.length - 1];
+    if (!latest || latest.role !== "assistant" || !latest.tool_calls?.length) return;
+    latest.tool_calls.forEach((call, index) => {
+      const key = `${latest.id}-${index}`;
+      if (autoExecutedRef.current.has(key) || call.requires_approval) return;
+      autoExecutedRef.current.add(key);
+      void executeAction({ name: call.name, arguments: call.arguments || {}, reason: call.reason }).then((result) => {
+        setActionResult(result.detail);
+      });
+    });
+  }, [executeAction, messages, mode]);
+
+  useEffect(() => {
+    const onTourComplete = (event: Event) => {
+      const detail = (event as CustomEvent<{ summary?: string; actions?: unknown[] }>).detail;
+      setTourSummary({
+        summary: detail?.summary || t("tourRecapBody"),
+        actions: Array.isArray(detail?.actions) ? detail.actions.length : 0,
+      });
+      setActionResult(t("tourCompleted"));
+    };
+    window.addEventListener("lmview:ai-tour-complete", onTourComplete);
+    return () => window.removeEventListener("lmview:ai-tour-complete", onTourComplete);
+  }, [t]);
 
   const handleSend = () => {
     const trimmed = inputValue.trim();
@@ -227,6 +256,21 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
 
           {actionResult && (
             <div className="rounded border border-blue-500/25 bg-blue-500/10 px-3 py-2 text-[11px] text-blue-100">{actionResult}</div>
+          )}
+
+          {tourSummary && (
+            <div className="rounded border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] leading-5 text-emerald-100">
+              <div className="font-semibold">{t("tourRecapTitle")}</div>
+              <div className="mt-1 text-emerald-100/80">{tourSummary.summary}</div>
+              <div className="mt-1 text-emerald-100/60">{tourSummary.actions} {t("actionsSaved")}</div>
+              <button
+                type="button"
+                onClick={() => void executeAction({ name: "start_tour", arguments: { tour_id: "lmview-overview" } })}
+                className="mt-2 rounded bg-emerald-600 px-2 py-1 text-[10px] font-semibold text-white"
+              >
+                {t("replay")}
+              </button>
+            </div>
           )}
 
           <div className="rounded border border-dashed border-gray-800 bg-gray-850/70">
