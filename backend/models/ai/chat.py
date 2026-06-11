@@ -54,12 +54,13 @@ class AIChatResponse(BaseModel):
     message_id: str
     role: str = "assistant"
     content: str
-    provider: str = "phase0_mock"
+    provider: str = "none"
     model_name: Optional[str] = None
-    is_mock: bool = True
+    is_mock: bool = False
     created_at: Optional[datetime] = None
     warnings: List[str] = Field(default_factory=list)
     suggested_actions: Optional[List[str]] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
     chart_actions: Optional[List[Any]] = None
     grounded_context_used: bool = False
     # Phase 1 additions

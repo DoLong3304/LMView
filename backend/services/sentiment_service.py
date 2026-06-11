@@ -5,12 +5,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime, timezone
 
 from backend.core.postgres import get_pg_pool
 from backend.models.ai.providers import LLMCompletionRequest, LLMMessage
-from backend.services.ai.litellm_provider import LiteLLMProvider
+from ai_service.config import DEFAULT_QWEN_BASE_URL, get_api_key
+from ai_service.providers.litellm_provider import LiteLLMProvider
 
 logger = logging.getLogger(__name__)
 
@@ -31,13 +31,13 @@ Return:
 
 async def score_article_sentiment(title: str, content: str) -> dict:
     prompt = SENTIMENT_PROMPT.format(title=title[:300], content=(content or title)[:600])
-    qwen_key = os.environ.get("QWEN_API_KEY", "")
+    qwen_key = get_api_key("DASHSCOPE_API_KEY")
 
     try:
         if not qwen_key:
             return _score_article_heuristic(title, content)
-        provider = LiteLLMProvider(provider_name="qwen_api", model_name="openai/qwen-plus")
-        provider.base_url = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+        provider = LiteLLMProvider(provider_name="api", model_name="openai/qwen3.5-plus")
+        provider.base_url = DEFAULT_QWEN_BASE_URL
         provider.api_key = qwen_key
         request = LLMCompletionRequest(
             messages=[LLMMessage(role="user", content=prompt)],

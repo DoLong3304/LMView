@@ -26,7 +26,7 @@ Real-time cryptocurrency technical-analysis platform built on Lambda Architectur
 - **Exchange abstraction**: Binance primary, OKX opt-in.
 - **Lakehouse analytics**: Spark, Iceberg on MinIO, PostgreSQL catalog, Trino.
 - **High availability**: 3 Kafka brokers, Redis Sentinel (1 master, 2 replicas, 3 sentinels).
-- **Phase 1 AI Ask Mode**: provider routing, pgvector RAG, prompt builder, output guard, mock fallback.
+- **AI Ask/Interact Helper**: centralized `ai_service` orchestration, local/API/none provider routing, approved-only pgvector RAG, Markdown chat, and reusable function actions.
 - **Observability**: Prometheus, Grafana, Loki, 22 dashboards, 18 alert rules.
 
 ---
@@ -126,11 +126,12 @@ curl "http://localhost:8080/api/market/rankings/gainers"
 # News
 curl "http://localhost:8080/api/news/latest?limit=5"
 
-# AI Ask Mode (auth required)
+# AI Helper (auth required)
 curl -H "Authorization: Bearer <token>" http://localhost:8080/api/ai/health
+curl -H "Authorization: Bearer <token>" http://localhost:8080/api/ai/actions/catalog
 curl -X POST -H "Authorization: Bearer <token>" \
   -H "Content-Type: application/json" \
-  -d '{"message":"What is the RSI for BTCUSDT?"}' \
+  -d '{"mode":"ask","message":"What is the RSI for BTCUSDT?"}' \
   http://localhost:8080/api/ai/chat
 ```
 
@@ -186,13 +187,13 @@ This writes trade, ticker, candle, and orderbook data directly to Redis as a fal
 | [docs/SYSTEM.md](docs/SYSTEM.md) | Full system architecture, data flow, APIs, caveats |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | Project history |
 | [AGENTS.md](AGENTS.md) | AI agent workflow and coding rules |
-| [docs/ai/AI_ARCHITECTURE.md](docs/ai/AI_ARCHITECTURE.md) | Phase 1 AI architecture, provider routing, RAG, evaluation |
+| [docs/ai/AI_ARCHITECTURE.md](docs/ai/AI_ARCHITECTURE.md) | AI architecture, provider routing, RAG, actions, and safety |
 
 ---
 
 ## Version
 
-Current: **v0.23.0** (see [CHANGELOG.md](docs/CHANGELOG.md))
+Current: **v0.24.0** (see [CHANGELOG.md](docs/CHANGELOG.md))
 
 ---
 
@@ -206,4 +207,4 @@ Built and maintained by D22 Fintech, PTIT students:
 
 ---
 
-Status: Active development | Version: **0.23.0**
+Status: Active development | Version: **0.24.0**

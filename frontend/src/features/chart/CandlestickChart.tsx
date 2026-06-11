@@ -65,6 +65,7 @@ import { toPointFigure } from "./transformers/pointFigure";
 import IndicatorPanel from "./IndicatorPanel";
 import MarketSelector from "./MarketSelector";
 import OHLCVBar from "./OHLCVBar";
+import type { AiChartActionController } from "@/features/ai/actions/AiActionProvider";
 import { CHART_TYPES } from "@/types";
 import type {
   Candle,
@@ -145,6 +146,26 @@ const CHART_TYPE_LABELS: Record<ChartType, TranslationKey> = {
   pointFigure: "pointFigure",
 };
 
+const AI_INDICATOR_ALIASES: Record<string, string> = {
+  sma: "sma20",
+  sma20: "sma20",
+  sma50: "sma50",
+  ema: "ema12",
+  ema12: "ema12",
+  ema26: "ema26",
+  rsi14: "rsi",
+  bollinger: "bb",
+  bollinger_bands: "bb",
+  volume_ma: "volumeMa",
+  parabolic_sar: "psar",
+  atr14: "atr",
+};
+
+function normalizeAiIndicatorKey(indicator: string): string {
+  const key = indicator.trim().replace(/\s+/g, "_").toLowerCase();
+  return AI_INDICATOR_ALIASES[key] || key;
+}
+
 interface CandlestickChartProps {
   defaultSymbol?: string;
   symbol?: string;
@@ -161,6 +182,7 @@ interface CandlestickChartProps {
   onChartTypeChange?: (type: ChartType) => void;
   newsItems?: NewsArticle[];
   showNewsMarkers?: boolean;
+  onAiActionControllerReady?: (controller: AiChartActionController | null) => void;
   // Replay mode props
   isReplayActive?: boolean;
 }
@@ -190,6 +212,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   onChartTypeChange,
   newsItems = [],
   showNewsMarkers = true,
+  onAiActionControllerReady,
   isReplayActive = false,
 }) => {
   const { t } = useI18n();
@@ -243,6 +266,28 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   );
   const [candles, setCandles] = useState<Candle[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!onAiActionControllerReady) return;
+    const controller: AiChartActionController = {
+      setIndicatorVisible: (indicator, visible) => {
+        const key = normalizeAiIndicatorKey(indicator);
+        setIndSettings((prev) => {
+          if (!prev[key]) return prev;
+          return { ...prev, [key]: { ...prev[key], visible } };
+        });
+      },
+      toggleIndicator: (indicator) => {
+        const key = normalizeAiIndicatorKey(indicator);
+        setIndSettings((prev) => {
+          if (!prev[key]) return prev;
+          return { ...prev, [key]: { ...prev[key], visible: !prev[key].visible } };
+        });
+      },
+    };
+    onAiActionControllerReady(controller);
+    return () => onAiActionControllerReady(null);
+  }, [onAiActionControllerReady]);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [historicalRange, setHistoricalRange] = useState<HistoricalRange | null>(null);

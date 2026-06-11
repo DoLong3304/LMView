@@ -11,6 +11,11 @@ import LeftSidebar from "@/components/layout/LeftSidebar";
 import AuthModal from "@/features/auth/AuthModal";
 import { useAuth } from "@/features/auth/AuthContext";
 import SettingsModal from "@/features/settings/SettingsModal";
+import {
+    AiActionProvider,
+    useAiActions,
+    type AiChartActionController,
+} from "@/features/ai/actions/AiActionProvider";
 import { CandlestickChart } from "@/features/chart";
 import ChartOverlay from "@/features/drawing/components/ChartOverlay";
 import DrawingContextToolbar from "@/features/drawing/components/DrawingContextToolbar";
@@ -148,6 +153,8 @@ const TradingDashboard: React.FC = () => {
     const [currentTimeframe, setCurrentTimeframe] =
         useState<TimeframeKey>(getInitialTimeframe);
     const [chartType, setChartType] = useState<ChartType>(getInitialChartType);
+    const [aiChartController, setAiChartController] =
+        useState<AiChartActionController | null>(null);
     const [isDrawing, setIsDrawing] = useState(false);
     const [selectedSymbol, setSelectedSymbol] = useState<string>(() => {
         const stored = loadFromStorage("app_selectedSymbol", "BTCUSDT");
@@ -728,9 +735,9 @@ const TradingDashboard: React.FC = () => {
     }, [selectedDrawing, t]);
 
     // Resizable right sidebar
-    const SIDEBAR_MIN = 240;
-    const SIDEBAR_MAX = 380;
-    const SIDEBAR_DEFAULT = 286;
+    const SIDEBAR_MIN = 320;
+    const SIDEBAR_MAX = 520;
+    const SIDEBAR_DEFAULT = 360;
     const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
     const dragging = useRef(false);
 
@@ -756,8 +763,8 @@ const TradingDashboard: React.FC = () => {
     const showRightPanel = isChartsView && isRightPanelOpen;
     const compactRightPanelWidth =
         typeof window === "undefined"
-            ? 300
-            : Math.min(300, Math.floor(window.innerWidth * 0.86));
+            ? 420
+            : Math.min(420, Math.floor(window.innerWidth * 0.92));
 
     const clearDrawingsConfirmModal = isClearDrawingsConfirmOpen ? (
         <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/60 px-4">
@@ -805,6 +812,14 @@ const TradingDashboard: React.FC = () => {
 
     return (
         <ErrorBoundary>
+            <AiActionProvider>
+            <AiActionRuntimeBridge
+                setDrawingTool={handleToolChange}
+                addDrawing={handleAddDrawing}
+                setTimeframe={handleTimeframeChange}
+                setSymbol={handleSymbolSelect}
+                chartController={aiChartController}
+            />
             <div className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
                 <Header
                     themeMode={themeMode}
@@ -866,6 +881,7 @@ const TradingDashboard: React.FC = () => {
                         <>
                             {/* Chart area */}
                             <div
+                                data-ai-section="chart"
                                 className="flex-1 flex flex-col overflow-hidden min-w-0"
                                 ref={chartContainerRef}
                             >
@@ -887,6 +903,9 @@ const TradingDashboard: React.FC = () => {
                                         isReplayActive={isReplayActive}
                                         newsItems={newsArticles}
                                         showNewsMarkers={true}
+                                        onAiActionControllerReady={
+                                            setAiChartController
+                                        }
                                     >
                                         {(chartApiRef, candleSeriesRef) => {
                                             if (chartApiRef !== chartApi)
@@ -902,6 +921,7 @@ const TradingDashboard: React.FC = () => {
                                                 <>
                                                     {showDrawingToolbar && (
                                                         <div
+                                                            data-ai-section="drawing-toolbar"
                                                             className="pointer-events-none absolute left-3 top-3 z-[130] max-h-[calc(100%-1.5rem)] overflow-visible"
                                                             style={{
                                                                 width: 56,
@@ -1133,8 +1153,9 @@ const TradingDashboard: React.FC = () => {
                                         className={
                                             isDesktop
                                                 ? "flex-shrink-0"
-                                                : "fixed right-0 top-0 z-[190] h-screen max-w-[86vw] shadow-2xl"
+                                            : "fixed right-0 top-0 z-[190] h-screen max-w-[92vw] shadow-2xl"
                                         }
+                                        data-ai-section="right-panel"
                                     >
                                         <RightPanel
                                             items={watchlistItems}
@@ -1188,9 +1209,36 @@ const TradingDashboard: React.FC = () => {
                     onChartTypeChange={setChartType}
                 />
             </div>
+            </AiActionProvider>
         </ErrorBoundary>
     );
 };
+
+function AiActionRuntimeBridge({
+    setDrawingTool,
+    addDrawing,
+    setTimeframe,
+    setSymbol,
+    chartController,
+}: {
+    setDrawingTool: (tool: string) => void;
+    addDrawing: (drawing: Drawing) => void;
+    setTimeframe: (timeframe: TimeframeKey) => void;
+    setSymbol: (symbol: string) => void;
+    chartController: AiChartActionController | null;
+}) {
+    const { setRuntime } = useAiActions();
+    useEffect(() => {
+        setRuntime({
+            setDrawingTool,
+            addDrawing,
+            setTimeframe,
+            setSymbol,
+            chartController,
+        });
+    }, [addDrawing, chartController, setDrawingTool, setRuntime, setSymbol, setTimeframe]);
+    return null;
+}
 
 function ForcedPasswordChangeModal({
     onSubmit,

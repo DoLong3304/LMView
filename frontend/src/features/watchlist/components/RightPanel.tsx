@@ -60,7 +60,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
   starredSymbols,
   onSymbolSelect,
   onToggleStar,
-  width = 286,
+  width = 360,
   candles = [],
   timeframe = "1m",
   onOpenSettings,

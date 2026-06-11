@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pytest
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # Provider Router Tests
@@ -14,72 +15,87 @@ from unittest.mock import AsyncMock, MagicMock, patch
 class TestProviderRouter:
     """Test provider routing and fallback logic."""
 
-    def test_mock_provider_always_available(self):
-        """Mock provider should always be available and healthy."""
-        from backend.services.ai.mock_provider import MockProvider
+    def _settings(self, mode: str = "none"):
+        from ai_service.config import AISettings
 
-        provider = MockProvider()
+        return AISettings(
+            mode=mode,
+            config_path=Path("ai_service/configs/ai.test.yaml"),
+            providers=[],
+            rag_enabled=False,
+            rag_top_k=0,
+            rag_min_score=0.0,
+            embedding_model="none",
+            temperature=0.0,
+            max_tokens=256,
+            top_p=1.0,
+            timeout_seconds=5,
+        )
+
+    def test_none_provider_always_available(self):
+        """None provider should always be available and healthy."""
+        from ai_service.providers.none_provider import NoneProvider
+
+        provider = NoneProvider()
         info = provider.get_info()
         assert info.is_available is True
-        assert info.provider_name == "mock"
+        assert info.provider_name == "none"
         assert info.is_local is True
 
-    def test_mock_provider_generates_response(self):
-        """Mock provider should return a deterministic response."""
-        from backend.services.ai.mock_provider import MockProvider
+    def test_none_provider_generates_response(self):
+        """None provider should return bounded generic system guidance."""
+        from ai_service.providers.none_provider import NoneProvider
         from backend.models.ai.providers import LLMCompletionRequest, LLMMessage
 
         async def _run():
-            provider = MockProvider()
+            provider = NoneProvider()
             request = LLMCompletionRequest(
                 messages=[LLMMessage(role="user", content="What is RSI?")],
             )
             return await provider.generate_chat_completion(request)
 
         response = asyncio.run(_run())
-        assert response.is_mock is True
-        assert response.provider == "mock"
-        assert "mock" in response.content.lower() or "Mock" in response.content
+        assert response.is_mock is False
+        assert response.provider == "none"
+        assert "no local or API model" in response.content
         assert response.latency_ms is not None
 
-    def test_mock_provider_health_check(self):
-        """Mock provider health check should always succeed."""
-        from backend.services.ai.mock_provider import MockProvider
+    def test_none_provider_health_check(self):
+        """None provider health check should always succeed."""
+        from ai_service.providers.none_provider import NoneProvider
 
         async def _run():
-            provider = MockProvider()
+            provider = NoneProvider()
             return await provider.health_check()
 
         health = asyncio.run(_run())
         assert health.is_healthy is True
-        assert health.provider_name == "mock"
+        assert health.provider_name == "none"
 
-    def test_provider_router_initializes_with_mock(self):
-        """Router should always have mock provider."""
-        from backend.services.ai.provider_router import ProviderRouter
+    def test_provider_router_initializes_with_none(self):
+        """Router should always have none provider."""
+        from ai_service.providers.router import ProviderRouter
 
-        router = ProviderRouter()
+        router = ProviderRouter(self._settings())
         providers = router.get_available_providers()
-        assert "mock" in providers
+        assert "none" in providers
 
-    def test_provider_router_mock_mode(self):
-        """In mock mode, router should only use mock provider."""
-        from backend.services.ai.provider_router import ProviderRouter
+    def test_provider_router_none_mode(self):
+        """In none mode, router should only use none provider."""
+        from ai_service.providers.router import ProviderRouter
         from backend.models.ai.providers import LLMCompletionRequest, LLMMessage
 
         async def _run():
-            with patch("backend.services.ai.provider_router.AI_MODE", "mock"), \
-                 patch("backend.services.ai.provider_router.AI_ENABLE_REAL_LLM", False):
-                router = ProviderRouter()
-                request = LLMCompletionRequest(
-                    messages=[LLMMessage(role="user", content="Test")],
-                )
-                return await router.route_completion(request)
+            router = ProviderRouter(self._settings("none"))
+            request = LLMCompletionRequest(
+                messages=[LLMMessage(role="user", content="Test")],
+            )
+            return await router.route_completion(request)
 
         response, routing = asyncio.run(_run())
-        assert response.is_mock is True
-        assert routing.selected_provider == "mock"
-        assert routing.is_mock is True
+        assert response.is_mock is False
+        assert routing.selected_provider == "none"
+        assert routing.is_mock is False
 
 
 # Prompt Builder Tests
@@ -304,6 +320,94 @@ class TestKnowledgeService:
         assert h1 != h3
 
 
+class TestKnowledgeRegistryPolicy:
+    """Test approved-only RAG policy and registry consistency."""
+
+    def test_current_registry_metadata_valid(self):
+        from ai_service.rag.registry import load_registry, validate_registry
+
+        errors = validate_registry(load_registry())
+        assert errors == []
+
+    def test_pending_docs_not_allowed_for_ingestion(self):
+        from ai_service.rag.registry import allowed_for_ingestion, knowledge_base_root
+
+        root = knowledge_base_root()
+        pending_file = root / "pending" / "lmview_platform_guide.md"
+        assert pending_file.exists()
+        assert allowed_for_ingestion(pending_file) is False
+
+    def test_registry_file_paths_exist(self):
+        from ai_service.rag.registry import knowledge_base_root, registry_entries
+
+        root = knowledge_base_root()
+        for entry in registry_entries():
+            assert (root / entry["file_path"]).exists()
+
+    def test_deprecated_document_excluded(self, tmp_path):
+        from ai_service.rag.registry import allowed_for_ingestion, validate_registry
+
+        doc = tmp_path / "deprecated.md"
+        doc.write_text("# Deprecated\n", encoding="utf-8")
+        registry = {
+            "sources": [
+                {
+                    "source_id": "old",
+                    "title": "Old",
+                    "domain": "project",
+                    "language": "en",
+                    "source_type": "system_doc",
+                    "credibility_level": "unknown",
+                    "review_status": "deprecated",
+                    "reviewer": None,
+                    "reviewed_date": None,
+                    "lmview_version_scope": "0.1.0",
+                    "source_urls": [],
+                    "tags": [],
+                    "allowed_for_rag": False,
+                    "file_path": doc.as_posix(),
+                }
+            ]
+        }
+        registry_path = tmp_path / "registry.yml"
+        registry_path.write_text(
+            f"""
+schema_version: 2
+sources:
+  - source_id: old
+    title: Old
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: unknown
+    review_status: deprecated
+    reviewer: null
+    reviewed_date: null
+    lmview_version_scope: 0.1.0
+    source_urls: []
+    tags: []
+    allowed_for_rag: false
+    file_path: "{doc.as_posix()}"
+""",
+            encoding="utf-8",
+        )
+        assert validate_registry(registry) == []
+        assert allowed_for_ingestion(doc, registry_path) is False
+
+    def test_retrieval_query_requires_approved_allowed_source(self):
+        from ai_service.rag.retrieval_service import _build_retrieval_query
+
+        sql, _ = _build_retrieval_query(
+            embedding_str="[0.1,0.2]",
+            top_k=3,
+            min_score=0.2,
+            review_status="approved",
+        )
+        assert "s.review_status = 'approved'" in sql
+        assert "s.allowed_for_rag = TRUE" in sql
+        assert "OR s.id IS NULL" not in sql
+
+
 # Scope Gate + Safety Tests
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -384,7 +488,7 @@ class TestModelBackwardCompat:
             LLMCompletionRequest,
             LLMCompletionResponse,
         )
-        info = ProviderInfo(provider_name="test", provider_type="mock")
+        info = ProviderInfo(provider_name="test", provider_type="none")
         assert info.provider_name == "test"
 
     def test_phase1_rag_models(self):
@@ -410,7 +514,8 @@ class TestModelBackwardCompat:
             KnowledgeSearchResponse,
         )
         source = KnowledgeSourceMeta(source_id="test", title="Test")
-        assert source.review_status == "approved"
+        assert source.review_status == "pending"
+        assert source.allowed_for_rag is False
 
     def test_chat_response_has_phase1_fields(self):
         """AIChatResponse should have new Phase 1 optional fields."""
@@ -431,7 +536,7 @@ class TestModelBackwardCompat:
 
         health = AIHealthResponse(
             ai_mode="api", rag_enabled=True,
-            available_providers=["mock", "qwen_api"],
+            available_providers=["none", "api"],
             pgvector_ready=True, knowledge_source_count=5,
         )
         assert health.ai_mode == "api"

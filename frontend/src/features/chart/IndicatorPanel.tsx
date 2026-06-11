@@ -6,7 +6,7 @@ import type { TranslationKey } from "@/i18n/translations";
 
 type IndicatorGroup = "trend" | "momentum" | "volatility" | "volume";
 
-interface IndicatorDef {
+export interface IndicatorDef {
   key: string;
   labelKey: TranslationKey;
   group: IndicatorGroup;
@@ -27,7 +27,7 @@ const PANE_LABEL_KEYS: Record<IndicatorDef["pane"], TranslationKey> = {
   volume: "volumePane",
 };
 
-const INDICATORS: IndicatorDef[] = [
+export const INDICATORS: IndicatorDef[] = [
   { key: "sma20", labelKey: "indicatorSma20", group: "trend", pane: "chart", descriptionKey: "indicatorDescSimpleMovingAverage" },
   { key: "sma50", labelKey: "indicatorSma50", group: "trend", pane: "chart", descriptionKey: "indicatorDescSimpleMovingAverage" },
   { key: "ema12", labelKey: "indicatorEma12", group: "trend", pane: "chart", descriptionKey: "indicatorDescExponentialMovingAverage" },

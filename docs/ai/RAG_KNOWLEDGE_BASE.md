@@ -1,98 +1,107 @@
-# RAG Knowledge Base — LMView
+# RAG Knowledge Base - LMView
 
 ## Overview
 
-LMView's RAG (Retrieval-Augmented Generation) system uses PostgreSQL + pgvector for vector similarity search over a curated knowledge base.
+LMView uses PostgreSQL + pgvector for Retrieval-Augmented Generation (RAG). Production RAG is intentionally conservative: only human-approved sources may be ingested or retrieved.
 
-## Schema
+Current bundled knowledge notes were AI-generated and do not include verified human review metadata. They were moved to `pending/`, marked `review_status: pending`, and set `allowed_for_rag: false`. Production RAG will not use them until a reviewer approves them in `registry.yml`.
 
-### Tables (Migration: `003_phase1_ai_rag.sql`)
+## Directory Layout
 
-| Table | Purpose |
-|-------|---------|
-| `ai_knowledge_sources` | Registry of knowledge collections with metadata |
-| `ai_knowledge_documents` | Individual documents (extended from Phase 0) |
-| `ai_knowledge_chunks` | Text chunks with heading context |
-| `ai_knowledge_embeddings` | 384-dim vectors (all-MiniLM-L6-v2) with HNSW index |
-| `ai_knowledge_retrieval_logs` | Audit trail for all retrieval queries |
-
-### Embedding Index
-- Type: HNSW (Hierarchical Navigable Small World)
-- Distance: Cosine
-- Parameters: m=16, ef_construction=64
-- Dimension: 384 (matches all-MiniLM-L6-v2)
-
-## Knowledge Sources
-
-| Source ID | Domain | Documents |
-|-----------|--------|-----------|
-| lmview-platform | platform | LMView Platform Guide |
-| technical-analysis | technical_analysis | Technical Analysis Fundamentals |
-| crypto-market-structure | market_structure | Cryptocurrency Market Structure |
-| risk-management | risk_management | Risk Management Guide |
-| bilingual-glossary | glossary | EN/VI Crypto Trading Glossary |
-
-## Ingestion Pipeline
-
+```text
+docs/ai/knowledge_base/
+  source_library/       Raw source captures, URLs, PDFs, exported docs, and notes
+  canonical/
+    project/
+    crypto/
+    technical_analysis/
+    market_microstructure/
+    finance_risk/
+    news_and_sentiment/
+    glossary/
+  approved/             Human-reviewed documents allowed for production RAG
+  pending/              Awaiting review
+  draft/                Work in progress
+  deprecated/           Retired and excluded
+  manifests/            Source manifests, import logs, review evidence
+  registry.yml          Required metadata registry
 ```
+
+## Registry Metadata
+
+Each source entry in `registry.yml` must include:
+
+| Field | Purpose |
+|---|---|
+| `source_id` | Stable source identifier |
+| `title` | Human-readable title |
+| `domain` | Domain such as `project`, `technical_analysis`, or `finance_risk` |
+| `language` | Source language |
+| `source_type` | System doc, glossary, technical note, external reference, etc. |
+| `credibility_level` | `verified`, `reviewed`, `reference`, `ai_generated`, `draft`, or `unknown` |
+| `review_status` | `approved`, `pending`, `draft`, or `deprecated` |
+| `reviewer` | Human reviewer name or handle; required for approved sources |
+| `reviewed_date` | Review date; required for approved sources |
+| `lmview_version_scope` | LMView versions the source applies to |
+| `source_urls` | Original source URLs, if any |
+| `tags` | Retrieval/filter tags |
+| `allowed_for_rag` | Must be `true` for production RAG |
+| `file_path` | Markdown path relative to `docs/ai/knowledge_base/` |
+
+## Approval Workflow
+
+1. Place raw material in `source_library/` or draft notes in the matching `canonical/<domain>/` folder.
+2. Create or update a `registry.yml` entry with `review_status: draft` or `pending` and `allowed_for_rag: false`.
+3. Human reviewer checks accuracy, citations, LMView version scope, and source quality.
+4. Move the final document to `approved/`.
+5. Set `review_status: approved`, `allowed_for_rag: true`, `reviewer`, and `reviewed_date`.
+6. Run admin ingestion with `POST /api/ai/knowledge/ingest`.
+
+Documents in `pending/`, `draft/`, and `deprecated/` are excluded by default. Deprecated documents must stay `allowed_for_rag: false`.
+
+## Source Quality Policy
+
+Production RAG should prefer sources in this order:
+
+1. LMView project docs reviewed for the current version.
+2. Primary technical references and exchange/API documentation.
+3. Human-reviewed educational finance or market-structure notes.
+4. AI-generated drafts only after human review and explicit approval.
+
+Every approved source needs enough metadata to explain where it came from, who reviewed it, when it was reviewed, and which LMView versions it applies to.
+
+## Ingestion And Retrieval
+
+Ingestion:
+
+```text
 Markdown file
-→ Frontmatter parsing (title, domain, language, tags)
-→ Content hash computation (SHA-256 dedup)
-→ Heading-aware semantic chunking (1200 chars, 200 overlap)
-→ Embedding generation (sentence-transformers)
-→ PostgreSQL storage (document + chunks + embeddings)
+-> registry gate: approved + allowed_for_rag
+-> content hash computation
+-> heading-aware chunking
+-> embedding generation
+-> PostgreSQL storage
 ```
 
-### Chunking Strategy
-1. Split by headings (## or ###) first
-2. If section > max_chunk_chars, split by paragraphs
-3. If paragraph still too long, split by sentences with overlap
+Retrieval SQL requires:
 
-### Deduplication
-- Content hash prevents re-ingesting unchanged documents
-- Old versions archived, not deleted
+```sql
+s.review_status = 'approved'
+AND s.allowed_for_rag = TRUE
+```
 
-## Retrieval
-
-### Filters
-- `language` — chunk language
-- `domain` — document domain
-- `tags` — source tags
-- `source_type` — document type
-- `credibility_level` — source credibility
-- `review_status` — defaults to "approved"
-
-### Return Fields
-- chunk_id, text, score
-- document_title, source_title
-- heading, language, domain
-- citation payload
-
-### Quality Warnings
-- `no_results` — no relevant chunks found
-- `few_results` — fewer than 3 chunks
+There is no null-source bypass. If no approved source exists, production RAG returns no chunks and the AI answers from live chart/system context only.
 
 ## API Endpoints
 
 | Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/api/ai/knowledge/ingest` | POST | Admin | Ingest markdown files |
-| `/api/ai/knowledge/search` | POST | User | Vector similarity search |
+|---|---|---|---|
+| `/api/ai/knowledge/ingest` | POST | Admin | Ingest approved markdown files |
+| `/api/ai/knowledge/search` | POST | User | Vector similarity search over approved sources |
 | `/api/ai/knowledge/sources` | GET | User | List knowledge sources |
 | `/api/ai/knowledge/health` | GET | User | Knowledge base status |
+| `/api/ai/knowledge/registry/validate` | GET | Admin | Validate registry metadata |
 
-## Adding New Knowledge
+## Tests
 
-1. Create a markdown file in `docs/ai/knowledge_base/approved/`
-2. Add optional YAML frontmatter (title, domain, language, source_type)
-3. Register the source in `docs/ai/knowledge_base/registry.yml`
-4. Call `POST /api/ai/knowledge/ingest` as admin
-
-## File Layout
-```
-docs/ai/knowledge_base/
-  registry.yml          — Source metadata registry
-  approved/             — Production-ready documents
-  draft/                — Under review
-  deprecated/           — No longer used
-```
+Focused tests cover approved-only ingestion, approved-only retrieval, metadata validation, deprecated exclusion, registry consistency, and null-source exclusion.

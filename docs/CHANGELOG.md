@@ -8,7 +8,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.23.1] - 2026-06-11
+## [0.24.0] - 2026-06-11
+
+### Added
+- **Central AI service package** - Moved production AI orchestration, provider routing, prompt/context logic, RAG services, action schemas, safety checks, and chat persistence behind importable `ai_service/*` modules. Backend `/api/ai/*` routes now stay thin authenticated adapters.
+- **Unified Ask/Interact orchestration** - `/api/ai/chat` now runs both modes through one pipeline: scope gate, chart context, approved-only RAG, prompt building, provider routing, output guard, action proposal, and audit metadata.
+- **AI action catalog** - Added `/api/ai/actions/catalog` plus reusable action schemas for indicators, drawing tools, page highlights, tours, annotation clearing, and debug execution.
+- **Frontend AI actions runtime** - Added an `AiActionProvider`, auto-generated indicator/drawing function definitions, dim-and-highlight overlay, user-paced tour engine with recap/replay, and an admin draggable action test window from Debug settings.
+- **Markdown AI chat rendering** - Replaced custom chat Markdown parsing with `react-markdown`, `remark-gfm`, and `rehype-sanitize` for tables, emphasis, horizontal rules, code, and links in user and assistant messages.
+
+### Changed
+- **Provider model simplified** - Production providers are now `local`, `api`, and `none`; `auto` prioritizes local, then API, then none. Backend mock fallback was removed from production and mock remains a frontend data mode concern.
+- **Qwen API defaults updated** - API mode defaults to DashScope International OpenAI-compatible `qwen3.5-plus` on `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`; `DASHSCOPE_API_KEY` is primary and `QWEN_API_KEY` remains a legacy alias.
+- **Temporal prompt grounding** - Shared AI prompts now include current server time, epoch milliseconds, chart timestamp conversion notes, data freshness, and a rule that live runtime data can be newer than model training cutoff.
+- **Knowledge base workflow hardened** - Rebuilt `docs/ai/knowledge_base/` into `source_library/`, `canonical/`, `approved/`, `pending/`, `draft/`, `deprecated/`, and `manifests/`; current unreviewed AI-generated docs were demoted to `pending` and disabled for production RAG.
+- **Registry metadata strengthened** - `registry.yml` now tracks source ID, title, domain, language, source type, credibility, review status, reviewer, reviewed date, LMView version scope, source URLs, tags, `allowed_for_rag`, and file path.
+- **AI panel UX updated** - Desktop right panel defaults to `360px` with `320px-520px` bounds, mobile caps at `min(420px, 92vw)`, Ask/Interact moved below the input, and suggested prompts are collapsible.
+- **AI env surface reduced** - `.env.example` now keeps core AI config to `AI_MODE`, `AI_CONFIG_PATH`, `DASHSCOPE_API_KEY`, and legacy `QWEN_API_KEY`, with provider/model catalogs in YAML under `ai_service/configs/`.
+
+### Fixed
+- **RAG approval leak** - Retrieval SQL now requires `review_status = 'approved'` and `allowed_for_rag = true`, removing the previous null-source allowance.
+- **Unapproved ingestion** - Knowledge ingestion skips unapproved, pending, draft, or deprecated documents by default.
+
+### Tests
+- Added/updated AI tests for `auto/local/api/none` routing, no production mock provider, temporal prompt context, action validation, approved-only ingestion/retrieval, metadata validation, deprecated exclusion, and registry consistency.
+
+---
+
+## [0.23.2] - 2026-06-11
 
 ### Fixed
 - **Ticker dedup missing exchange key** — `src/lakehouse/pipeline.py` ticker stream dedup used only `["symbol", "event_timestamp"]`. Fixed to `["exchange", "symbol", "event_timestamp"]` to prevent multi-exchange collapse.

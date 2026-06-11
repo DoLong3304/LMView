@@ -110,7 +110,7 @@ class AIChatResponse(BaseModel):
     message_id: str
     role: str = "assistant"
     content: str
-    provider: str = "phase0_mock"
+    provider: str = "none"
     model_name: Optional[str] = None
     is_mock: bool = True
     created_at: Optional[datetime] = None

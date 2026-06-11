@@ -1,35 +1,14 @@
-# LiteLLM Configuration — LMView AI
-# This config is used by the LiteLLM proxy container.
-# API keys are read from environment variables.
+# LiteLLM proxy catalog for LMView AI.
+# Main backend routing reads ai.api.yaml/ai.local.yaml directly.
 
 model_list:
-  - model_name: qwen-plus
+  - model_name: qwen3.5-plus
     litellm_params:
-      model: openai/qwen-plus
+      model: openai/qwen3.5-plus
       api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-      api_key: os.environ/QWEN_API_KEY
-
-  - model_name: llama-maverick
-    litellm_params:
-      model: openai/Llama-4-Maverick-17B-128E-Instruct-FP8
-      api_base: https://api.llama.com/compat/v1
-      api_key: os.environ/LLAMA_API_KEY
-
-  - model_name: gpt-4o-mini
-    litellm_params:
-      model: gpt-4o-mini
-      api_key: os.environ/OPENAI_API_KEY
-
-  - model_name: gemini-flash
-    litellm_params:
-      model: gemini/gemini-2.0-flash
-      api_key: os.environ/GEMINI_API_KEY
-
-  - model_name: deepseek-chat
-    litellm_params:
-      model: openai/deepseek-chat
-      api_base: https://api.deepseek.com/v1
-      api_key: os.environ/DEEPSEEK_API_KEY
+      api_key: os.environ/DASHSCOPE_API_KEY
+    model_info:
+      notes: OpenAI-compatible usage uses prompt_tokens/completion_tokens/total_tokens.
 
   - model_name: local-vllm
     litellm_params:

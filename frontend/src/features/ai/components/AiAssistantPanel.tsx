@@ -1,27 +1,25 @@
-/**
- * AiAssistantPanel — extracted AI assistant chat panel.
- *
- * Previously embedded in RightPanel. Now a standalone feature component
- * that uses useAiChat hook and aiService for backend communication.
- */
-
-import React, { useRef, useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import rehypeSanitize from "rehype-sanitize";
+import remarkGfm from "remark-gfm";
 import {
   Bot,
+  ChevronDown,
+  ChevronUp,
   CircleDot,
   CornerDownLeft,
-  Lock,
   Loader2,
   MoreHorizontal,
+  Play,
   Plus,
   Send,
   Sparkles,
   UserRound,
 } from "lucide-react";
-import { DATA_SOURCE } from "@/constants/env";
 import { useAuth } from "@/features/auth/AuthContext";
-import { useI18n } from "@/i18n";
+import { useAiActions } from "@/features/ai/actions/AiActionProvider";
 import { useAiChat } from "@/features/ai/hooks/useAiChat";
+import { useI18n } from "@/i18n";
 import type { ChartContextForAi } from "@/features/ai/types";
 import type { Candle } from "@/types";
 
@@ -34,131 +32,14 @@ interface AiAssistantPanelProps {
   onOpenSettings?: () => void;
 }
 
-function renderInlineMarkdown(text: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  const pattern = /(`[^`]+`|\*\*[^*]+\*\*)/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = pattern.exec(text))) {
-    if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
-    const token = match[0];
-    if (token.startsWith("`")) {
-      parts.push(
-        <code key={`${match.index}-code`} className="rounded bg-gray-950 px-1 py-0.5 text-[11px] text-blue-200">
-          {token.slice(1, -1)}
-        </code>,
-      );
-    } else {
-      parts.push(
-        <strong key={`${match.index}-strong`} className="font-semibold text-white">
-          {token.slice(2, -2)}
-        </strong>,
-      );
-    }
-    lastIndex = pattern.lastIndex;
-  }
-
-  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
-  return parts;
-}
-
-function MarkdownContent({ content }: { content: string }) {
-  const lines = content.split(/\r?\n/);
-  const blocks: React.ReactNode[] = [];
-  let index = 0;
-
-  while (index < lines.length) {
-    const line = lines[index].trim();
-    if (!line) {
-      index += 1;
-      continue;
-    }
-
-    if (line.startsWith("```")) {
-      const code: string[] = [];
-      index += 1;
-      while (index < lines.length && !lines[index].trim().startsWith("```")) {
-        code.push(lines[index]);
-        index += 1;
-      }
-      index += 1;
-      blocks.push(
-        <pre key={`code-${index}`} className="overflow-x-auto rounded border border-gray-700 bg-gray-950 p-2 text-[11px] leading-5 text-gray-200">
-          <code>{code.join("\n")}</code>
-        </pre>,
-      );
-      continue;
-    }
-
-    const heading = /^(#{1,3})\s+(.+)$/.exec(line);
-    if (heading) {
-      blocks.push(
-        <p key={`heading-${index}`} className="text-[12px] font-semibold text-white">
-          {renderInlineMarkdown(heading[2])}
-        </p>,
-      );
-      index += 1;
-      continue;
-    }
-
-    if (/^[-*]\s+/.test(line)) {
-      const items: string[] = [];
-      while (index < lines.length) {
-        const item = /^[-*]\s+(.+)$/.exec(lines[index].trim());
-        if (!item) break;
-        items.push(item[1]);
-        index += 1;
-      }
-      blocks.push(
-        <ul key={`ul-${index}`} className="list-disc space-y-1 pl-4">
-          {items.map((item, itemIndex) => (
-            <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
-          ))}
-        </ul>,
-      );
-      continue;
-    }
-
-    if (/^\d+\.\s+/.test(line)) {
-      const items: string[] = [];
-      while (index < lines.length) {
-        const item = /^\d+\.\s+(.+)$/.exec(lines[index].trim());
-        if (!item) break;
-        items.push(item[1]);
-        index += 1;
-      }
-      blocks.push(
-        <ol key={`ol-${index}`} className="list-decimal space-y-1 pl-4">
-          {items.map((item, itemIndex) => (
-            <li key={`${item}-${itemIndex}`}>{renderInlineMarkdown(item)}</li>
-          ))}
-        </ol>,
-      );
-      continue;
-    }
-
-    const paragraph: string[] = [line];
-    index += 1;
-    while (
-      index < lines.length &&
-      lines[index].trim() &&
-      !/^(#{1,3})\s+/.test(lines[index].trim()) &&
-      !/^[-*]\s+/.test(lines[index].trim()) &&
-      !/^\d+\.\s+/.test(lines[index].trim()) &&
-      !lines[index].trim().startsWith("```")
-    ) {
-      paragraph.push(lines[index].trim());
-      index += 1;
-    }
-    blocks.push(
-      <p key={`p-${index}`} className="leading-5">
-        {renderInlineMarkdown(paragraph.join(" "))}
-      </p>,
-    );
-  }
-
-  return <div className="space-y-2">{blocks}</div>;
+function MarkdownContent({ content, compact = false }: { content: string; compact?: boolean }) {
+  return (
+    <div className={compact ? "ai-md ai-md-compact" : "ai-md"}>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSanitize]}>
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
 }
 
 const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
@@ -171,18 +52,21 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
 }) => {
   const { t } = useI18n();
   const { user } = useAuth();
+  const { executeAction } = useAiActions();
   const { messages, loading, error, mode, setMode, sendMessage, clearChat } = useAiChat();
-  const [inputValue, setInputValue] = React.useState("");
+  const [inputValue, setInputValue] = useState("");
+  const [suggestionsOpen, setSuggestionsOpen] = useState(true);
+  const [actionResult, setActionResult] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isAdmin = user?.role === "admin";
 
-  // Build chart context for AI
   const chartContext: ChartContextForAi = useMemo(() => {
     const lastCandle = candles[candles.length - 1];
     return {
       symbol: selectedSymbol,
       exchange,
       timeframe,
+      chart_type: "candles",
       selected_indicators: selectedIndicators,
       latest_candle: lastCandle
         ? {
@@ -194,25 +78,25 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
             volume: lastCandle.volume,
           }
         : null,
-      frontend_context_version: "1.0.0",
+      frontend_context_version: "2.0.0",
     };
   }, [selectedSymbol, exchange, timeframe, selectedIndicators, candles]);
 
-  // Auto-scroll to latest message
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (messages.some((message) => message.role === "user")) setSuggestionsOpen(false);
   }, [messages]);
 
   const handleSend = () => {
     const trimmed = inputValue.trim();
     if (!trimmed || loading) return;
     setInputValue("");
-    sendMessage(trimmed, chartContext);
+    void sendMessage(trimmed, chartContext);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
       handleSend();
     }
   };
@@ -226,17 +110,14 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
     t("aiSuggestionDrawingTools"),
     t("aiSuggestionIndicatorsHelp"),
   ];
-  const assistantLabel = DATA_SOURCE === "api" ? t("lmviewHelpMode") : t("assistantName");
-
-  // Combine intro + messages
+  const assistantLabel = t("assistantName");
   const allMessages = [
     { id: "intro", role: "assistant" as const, content: introMessage },
     ...messages,
   ];
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-gray-900">
-      {/* Header */}
+    <div data-ai-section="ai-panel" className="flex min-h-0 flex-1 flex-col bg-gray-900">
       <div className="border-b border-gray-800 bg-gray-850 px-3 py-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
@@ -244,134 +125,82 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
               <Sparkles size={15} />
             </div>
             <div className="min-w-0">
-              <h2 className="truncate text-sm font-semibold text-white">
-                {t("lmviewAi")}
-              </h2>
-              <p className="truncate text-[11px] text-gray-500">
-                {t("assistantWorkspace")}
-              </p>
+              <h2 className="truncate text-sm font-semibold text-white">{t("lmviewAi")}</h2>
+              <p className="truncate text-[11px] text-gray-500">{t("assistantWorkspace")}</p>
             </div>
           </div>
           <div className="flex items-center gap-1">
-            <button
-              type="button"
-              onClick={clearChat}
-              className="flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
-              title={t("newChat")}
-            >
+            <button type="button" onClick={clearChat} className="flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:bg-gray-800 hover:text-white" title={t("newChat")}>
               <Plus size={14} />
             </button>
-            <button
-              type="button"
-              onClick={onOpenSettings}
-              className="flex h-7 w-7 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-800 hover:text-white"
-              title={t("assistantOptions")}
-            >
+            <button type="button" onClick={onOpenSettings} className="flex h-7 w-7 items-center justify-center rounded text-gray-400 hover:bg-gray-800 hover:text-white" title={t("assistantOptions")}>
               <MoreHorizontal size={15} />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Context chips */}
       <div className="border-b border-gray-800 bg-gray-900 px-3 py-2">
         <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
           <CircleDot size={10} /> {t("chartContext")}
         </div>
         <div className="flex flex-wrap gap-1.5">
-          <span className="rounded border border-gray-700 bg-gray-850 px-2 py-1 text-[10px] font-medium text-gray-300">
-            {selectedSymbol}
-          </span>
-          <span className="rounded border border-gray-700 bg-gray-850 px-2 py-1 text-[10px] font-medium text-gray-300">
-            {timeframe.toUpperCase()}
-          </span>
-          <span className="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-medium text-blue-300">
-            {mode === "ask" ? t("lmviewHelpMode") : t("aiInteractUnavailable")}
-          </span>
+          <span className="rounded border border-gray-700 bg-gray-850 px-2 py-1 text-[10px] font-medium text-gray-300">{selectedSymbol}</span>
+          <span className="rounded border border-gray-700 bg-gray-850 px-2 py-1 text-[10px] font-medium text-gray-300">{timeframe.toUpperCase()}</span>
+          <span className="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] font-medium text-blue-300">{mode === "ask" ? t("askMode") : t("interactMode")}</span>
           {selectedIndicators.length > 0 && (
             <span className="rounded border border-gray-700 bg-gray-850 px-2 py-1 text-[10px] font-medium text-gray-300">
-              {selectedIndicators.length} indicators
+              {selectedIndicators.length} {t("indicators")}
             </span>
           )}
         </div>
       </div>
 
-      {/* Messages */}
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
-          <div className="flex rounded border border-gray-800 bg-gray-850 p-1">
-            <button
-              type="button"
-              onClick={() => setMode("ask")}
-              className={`flex flex-1 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[11px] font-semibold transition-colors ${
-                mode === "ask"
-                  ? "bg-blue-600 text-white"
-                  : "text-gray-400 hover:bg-gray-800 hover:text-white"
-              }`}
-            >
-              <Sparkles size={12} />
-              {t("askMode")}
-            </button>
-            <button
-              type="button"
-              disabled
-              className="flex flex-1 cursor-not-allowed items-center justify-center gap-1.5 rounded px-2 py-1.5 text-[11px] font-semibold text-gray-600"
-              title={t("aiInteractUnavailable")}
-            >
-              <Lock size={12} />
-              {t("interactMode")}
-            </button>
-          </div>
-
-          {DATA_SOURCE === "api" && (
-            <div className="rounded border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-[11px] leading-5 text-amber-100">
-              {t("aiApiUnavailableHelpOnly")}
-            </div>
-          )}
-
           {error && (
-            <div className="rounded border border-red-500/25 bg-red-500/10 px-3 py-2 text-[11px] leading-5 text-red-200">
-              {error}
-            </div>
+            <div className="rounded border border-red-500/25 bg-red-500/10 px-3 py-2 text-[11px] leading-5 text-red-200">{error}</div>
           )}
 
           {allMessages.map((message) => {
             const isUser = message.role === "user";
+            const actionCalls = "tool_calls" in message && Array.isArray(message.tool_calls) ? message.tool_calls : [];
             return (
-              <div
-                key={message.id}
-                className={`flex gap-2 ${isUser ? "justify-end" : "justify-start"}`}
-              >
+              <div key={message.id} className={`flex gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
                 {!isUser && (
                   <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-blue-500/10 text-blue-300">
                     <Bot size={13} />
                   </div>
                 )}
-                <div className={`max-w-[86%] ${isUser ? "items-end" : "items-start"}`}>
-                  <div
-                    className={`mb-1 flex items-center gap-1.5 text-[10px] text-gray-500 ${isUser ? "justify-end" : ""}`}
-                  >
+                <div className={`max-w-[88%] ${isUser ? "items-end" : "items-start"}`}>
+                  <div className={`mb-1 flex items-center gap-1.5 text-[10px] text-gray-500 ${isUser ? "justify-end" : ""}`}>
                     {isUser ? <UserRound size={10} /> : <Sparkles size={10} />}
                     <span>{isUser ? t("you") : assistantLabel}</span>
                   </div>
-                  <div
-                    className={`rounded-lg px-3 py-2 text-xs leading-5 shadow-sm ${
-                      isUser
-                        ? "bg-blue-600 text-white"
-                        : "border border-gray-800 bg-gray-850 text-gray-200"
-                    }`}
-                  >
-                    <MarkdownContent content={message.content} />
+                  <div className={`rounded px-3 py-2 text-xs leading-5 shadow-sm ${isUser ? "bg-blue-600 text-white" : "border border-gray-800 bg-gray-850 text-gray-200"}`}>
+                    <MarkdownContent content={message.content} compact={isUser} />
                   </div>
-                  {/* Token usage & cost display */}
+                  {!isUser && actionCalls.length > 0 && (
+                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                      {actionCalls.map((call, index) => (
+                        <button
+                          key={`${call.name}-${index}`}
+                          type="button"
+                          onClick={async () => {
+                            const result = await executeAction({ name: call.name, arguments: call.arguments || {} });
+                            setActionResult(result.detail);
+                          }}
+                          className="inline-flex items-center gap-1 rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[11px] font-semibold text-blue-200 hover:bg-blue-500/20"
+                        >
+                          <Play size={11} /> {call.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   {isAdmin && !isUser && (message.token_input || message.token_output || message.estimated_cost_usd) && (
                     <div className="mt-1 flex items-center gap-2 text-[9px] text-gray-600">
-                      {message.token_input && message.token_output && (
-                        <span>{message.token_input}{" -> "}{message.token_output} tokens</span>
-                      )}
-                      {message.estimated_cost_usd && (
-                        <span className="text-green-500">${message.estimated_cost_usd.toFixed(4)}</span>
-                      )}
+                      {message.token_input && message.token_output && <span>{message.token_input}{" -> "}{message.token_output} tokens</span>}
+                      {message.estimated_cost_usd && <span className="text-green-500">${message.estimated_cost_usd.toFixed(4)}</span>}
                     </div>
                   )}
                 </div>
@@ -384,78 +213,109 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
             );
           })}
 
-          {/* Loading indicator */}
           {loading && (
-            <div className="flex gap-2 justify-start">
+            <div className="flex justify-start gap-2">
               <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-blue-500/10 text-blue-300">
                 <Bot size={13} />
               </div>
-              <div className="rounded-lg border border-gray-800 bg-gray-850 px-3 py-2 text-xs text-gray-400">
-                <Loader2 size={14} className="animate-spin inline mr-1.5" />
+              <div className="rounded border border-gray-800 bg-gray-850 px-3 py-2 text-xs text-gray-400">
+                <Loader2 size={14} className="mr-1.5 inline animate-spin" />
                 {t("thinking")}
               </div>
             </div>
           )}
 
-          {/* Suggestions */}
-          <div className="rounded-lg border border-dashed border-gray-800 bg-gray-850/70 p-2">
-            <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+          {actionResult && (
+            <div className="rounded border border-blue-500/25 bg-blue-500/10 px-3 py-2 text-[11px] text-blue-100">{actionResult}</div>
+          )}
+
+          <div className="rounded border border-dashed border-gray-800 bg-gray-850/70">
+            <button
+              type="button"
+              onClick={() => setSuggestionsOpen((open) => !open)}
+              className="flex w-full items-center justify-between px-2 py-2 text-[10px] font-semibold uppercase tracking-wide text-gray-500"
+            >
               {t("suggestedPrompts")}
-            </div>
-            <div className="space-y-1.5">
-              {suggestions.map((suggestion) => (
-                <button
-                  key={suggestion}
-                  type="button"
-                  onClick={() => setInputValue(suggestion)}
-                  className="w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-left text-[11px] text-gray-300 transition-colors hover:border-blue-500/50 hover:text-white"
-                >
-                  {suggestion}
-                </button>
-              ))}
-            </div>
+              {suggestionsOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+            </button>
+            {suggestionsOpen && (
+              <div className="space-y-1.5 px-2 pb-2">
+                {suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion}
+                    type="button"
+                    onClick={() => setInputValue(suggestion)}
+                    className="w-full rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-left text-[11px] text-gray-300 hover:border-blue-500/50 hover:text-white"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
         <div className="border-t border-gray-800 bg-gray-850 p-2.5">
-          <div className="rounded-lg border border-gray-700 bg-gray-900 transition-colors focus-within:border-blue-500">
+          <div className="rounded border border-gray-700 bg-gray-900 focus-within:border-blue-500">
             <textarea
               value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
+              onChange={(event) => setInputValue(event.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={t("aiHelperPlaceholder").replace("{symbol}", selectedSymbol)}
-              className="min-h-20 w-full resize-none rounded-t-lg bg-transparent px-3 py-2 text-xs text-white placeholder-gray-500 outline-none"
+              className="min-h-20 w-full resize-none rounded-t bg-transparent px-3 py-2 text-xs text-white outline-none placeholder-gray-500"
               disabled={loading}
             />
             <div className="flex items-center justify-between gap-2 border-t border-gray-800 px-2 py-1.5">
+              <label className="flex items-center gap-2 text-[11px] font-semibold text-gray-400">
+                <span>{t("askMode")}</span>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={mode === "interact"}
+                  onClick={() => setMode(mode === "ask" ? "interact" : "ask")}
+                  className={`h-4 w-8 rounded-full p-0.5 transition-colors ${mode === "interact" ? "bg-blue-600" : "bg-gray-700"}`}
+                >
+                  <span className={`block h-3 w-3 rounded-full bg-white transition-transform ${mode === "interact" ? "translate-x-4" : "translate-x-0"}`} />
+                </button>
+                <span>{t("interactMode")}</span>
+              </label>
               <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-gray-500">
                 <CornerDownLeft size={11} />
-                <span className="truncate">{t("sendHint")}</span>
+                <span className="hidden truncate sm:inline">{t("sendHint")}</span>
               </div>
               <button
                 type="button"
                 onClick={handleSend}
-                disabled={!inputValue.trim() || loading || mode === "interact"}
-                className={`flex h-7 items-center gap-1.5 rounded px-2 text-xs font-semibold transition-colors ${
-                  inputValue.trim() && !loading && mode !== "interact"
-                    ? "bg-blue-600 text-white hover:bg-blue-500"
-                    : "cursor-not-allowed bg-gray-800 text-gray-600"
-                }`}
+                disabled={!inputValue.trim() || loading}
+                className={`flex h-7 items-center gap-1.5 rounded px-2 text-xs font-semibold ${inputValue.trim() && !loading ? "bg-blue-600 text-white hover:bg-blue-500" : "cursor-not-allowed bg-gray-800 text-gray-600"}`}
                 title={t("sendMessage")}
               >
-                {loading ? (
-                  <Loader2 size={12} className="animate-spin" />
-                ) : (
-                  <Send size={12} />
-                )}
+                {loading ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
                 {t("send")}
               </button>
             </div>
           </div>
         </div>
       </div>
+      <style>{`
+        .ai-md { overflow-wrap: anywhere; }
+        .ai-md p { margin: 0 0 .5rem; }
+        .ai-md p:last-child { margin-bottom: 0; }
+        .ai-md em { font-style: italic; }
+        .ai-md strong { font-weight: 700; color: inherit; }
+        .ai-md ul { list-style: disc; padding-left: 1rem; margin: .35rem 0; }
+        .ai-md ol { list-style: decimal; padding-left: 1rem; margin: .35rem 0; }
+        .ai-md hr { border: 0; border-top: 1px solid rgb(55 65 81); margin: .75rem 0; }
+        .ai-md code { background: rgb(3 7 18); color: rgb(191 219 254); border-radius: 4px; padding: 0 .25rem; font-size: 11px; }
+        .ai-md pre { overflow-x: auto; background: rgb(3 7 18); border: 1px solid rgb(55 65 81); border-radius: 6px; padding: .5rem; margin: .5rem 0; }
+        .ai-md pre code { background: transparent; padding: 0; color: rgb(229 231 235); }
+        .ai-md table { display: block; width: 100%; overflow-x: auto; border-collapse: collapse; margin: .5rem 0; }
+        .ai-md th, .ai-md td { border: 1px solid rgb(55 65 81); padding: .25rem .4rem; text-align: left; }
+        .ai-md th { background: rgb(31 41 55); color: white; }
+        .ai-md a { color: rgb(147 197 253); text-decoration: underline; }
+        .ai-md-compact code { background: rgba(15, 23, 42, .45); color: white; }
+      `}</style>
     </div>
   );
 };

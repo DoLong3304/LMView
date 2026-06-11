@@ -1,90 +1,106 @@
-# AI Architecture — LMView Phase 1
+# AI Architecture - LMView 0.24
 
 ## Overview
 
-LMView implements a grounded bilingual AI technical-analysis companion that combines authenticated sessions, live chart context, curated RAG knowledge, provider-agnostic LLM inference, and risk-aware outputs for educational cryptocurrency market analysis.
+LMView AI is now owned by the importable `ai_service/` package. Backend route modules under `backend/api/ai/*` remain authenticated FastAPI adapters and should not carry production AI logic.
 
-## Architecture Diagram
+Ask and Interact share one orchestration path:
 
-```
-Frontend AI Helper
-  → POST /api/ai/chat (Core FastAPI)
-  → Auth + Session ownership
-  → Deterministic scope gate
-  → Chart context assembly + data caveats
-  → RAG knowledge retrieval (pgvector)
-  → Prompt builder (system + context + RAG + history + user message)
-  → Provider router (local vLLM → online API → mock fallback)
-  → LLM completion
-  → Output guard (financial safety + disclaimer)
-  → Store assistant message + metadata
-  → Return AIChatResponse to frontend
-```
-
-## Key Contracts
-
-### Provider Interface
-All providers implement `BaseProvider`:
-- `generate_chat_completion(LLMCompletionRequest) → LLMCompletionResponse`
-- `health_check() → ProviderHealthStatus`
-- `get_info() → ProviderInfo`
-
-The system does not care whether the underlying model is local vLLM, online API, or deterministic mock.
-
-### Provider Priority Chain
-```
-Local-first mode:  local_vllm → qwen_api → llama_api → openai → gemini → deepseek → litellm_proxy → mock
-API-test mode:     qwen_api → llama_api → local_vllm → openai → gemini → deepseek → litellm_proxy → mock
-Mock mode:         mock only
+```text
+Frontend AI Panel
+-> POST /api/ai/chat
+-> auth + user/session ownership
+-> ai_service.core.orchestrator
+-> scope gate
+-> chart/runtime context + temporal sanity notes
+-> approved-only RAG retrieval
+-> prompt builder
+-> provider router: local -> api -> none
+-> output guard
+-> tool/action proposal
+-> persistence + audit metadata
+-> AIChatResponse
 ```
 
-### RAG Pipeline
-```
-Knowledge Markdown → Heading-aware chunking → Sentence-transformers embedding → pgvector storage
-User query → Query embedding → Cosine similarity search → Top-K chunks → Prompt enrichment
+## Package Ownership
+
+| Area | Location | Purpose |
+|---|---|---|
+| Orchestration | `ai_service/core/orchestrator.py` | Shared Ask/Interact flow |
+| Providers | `ai_service/providers/` | `local`, `api`, `none`, and `auto` routing |
+| RAG | `ai_service/rag/` | Registry validation, ingestion gates, retrieval, embeddings |
+| Actions | `ai_service/actions/` | Function schemas, validation, and chart-action compatibility |
+| Prompt/context | `ai_service/prompts/`, `ai_service/context/` | Prompt assembly, live data caveats, temporal grounding |
+| Safety | `ai_service/safety/` | Scope gate and output guard |
+| Persistence | `ai_service/persistence/` | Chat/session/message helpers |
+| API adapters | `backend/api/ai/*` | Authenticated REST endpoints only |
+
+Compatibility wrappers remain under `backend/services/*` for older imports, but new AI logic should be added to `ai_service/`.
+
+## Providers
+
+Public provider choices are:
+
+```text
+auto  = local -> api -> none
+local = local -> none
+api   = api -> none
+none  = none
 ```
 
-## Components
+`none` is a real production fallback that returns generic LMView/system guidance when no model is usable. Backend production mock fallback has been removed; frontend mock mode remains the mock-data path.
 
-| Component | Location | Purpose |
-|-----------|----------|---------|
-| Provider Router | `backend/services/ai/provider_router.py` | Selects best available LLM provider |
-| Base Provider | `backend/services/ai/base_provider.py` | Abstract provider interface |
-| Mock Provider | `backend/services/ai/mock_provider.py` | Deterministic Phase 0 fallback |
-| LiteLLM Provider | `backend/services/ai/litellm_provider.py` | Unified API provider client |
-| Prompt Builder | `backend/services/ai/prompt_builder.py` | Constructs structured prompts |
-| Output Guard | `backend/services/ai/output_guard.py` | Financial safety validation |
-| Context Service | `backend/services/ai/context_service.py` | Data caveat generation |
-| Knowledge Service | `backend/services/ai/knowledge_service.py` | Document ingestion + chunking |
-| Retrieval Service | `backend/services/ai/retrieval_service.py` | pgvector similarity search |
-| Chat Endpoint | `backend/api/ai/chat.py` | Ask Mode API route |
-| Knowledge Endpoints | `backend/api/ai/knowledge.py` | Ingest, search, health |
+Default API config uses DashScope International OpenAI-compatible `openai/qwen3.5-plus` at `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`. `DASHSCOPE_API_KEY` is primary and `QWEN_API_KEY` is a legacy alias.
+
+## Temporal Grounding
+
+Every shared prompt includes:
+
+- current server UTC time;
+- current epoch milliseconds;
+- chart timestamp conversion notes;
+- data freshness notes;
+- instruction that runtime market data can be newer than the model training cutoff.
+
+The output guard and prompt rules prevent the model from rejecting live chart context as impossible only because timestamps are after its training cutoff.
+
+## RAG
+
+Production retrieval requires:
+
+```sql
+s.review_status = 'approved'
+AND s.allowed_for_rag = TRUE
+```
+
+Current bundled AI-generated notes are `pending` and excluded. See `docs/ai/RAG_KNOWLEDGE_BASE.md` for the approval workflow and source-quality policy.
+
+## Actions And Interact Mode
+
+The backend exposes `/api/ai/actions/catalog` and `/api/ai/chart-actions/validate`. The frontend action runtime generates indicator and drawing function definitions from existing chart/drawing registries, then uses the same action template for:
+
+- indicator toggles;
+- drawing tool selection;
+- page highlights;
+- site tours;
+- annotation clearing;
+- admin debug action testing.
+
+Action execution still stays client-side and validated; AI suggestions do not bypass approval or audit paths.
 
 ## Safety Layers
 
-1. **Scope gate** — Blocks out-of-scope requests before RAG/model calls
-2. **Prompt builder** — Financial safety rules baked into system prompt
-3. **Output guard** — Post-generation validation (flags unsafe claims, removes code, ensures disclaimer)
-4. **Chart action validator** — Validates proposed actions against whitelist
+1. Scope gate blocks out-of-scope and prompt-injection attempts before provider calls.
+2. Prompt builder adds financial safety, live data freshness, and temporal sanity instructions.
+3. RAG retrieval only uses approved sources.
+4. Output guard removes unsafe code and adds disclaimers.
+5. Action validator enforces a whitelist and parameter schema.
 
-## Data Caveats
+## Not Implemented
 
-The AI explicitly states when:
-- Market overview is placeholder data
-- Trades are ticker-derived, not true trade tape
-- Order book is stale/fallback/synthetic
-- News context is unavailable or in-memory only
-- Indicator data is missing or stale
-- OKX exchange data is experimental
-
-## What Is NOT Implemented (Future Phases)
-
-| Feature | Phase | Status |
-|---------|-------|--------|
-| Interact Mode action execution | Phase 2 | Scaffolded |
-| LangGraph agent orchestration | Phase 2 | Scaffolded |
-| FinBERT sentiment service | Phase 3 | Scaffolded |
-| True hot trade cache | Phase 4 | Scaffolded |
-| Time-series forecasting | Phase 5 | Scaffolded |
-| Autonomous chart action execution | Phase 2 | Not started |
-| Auto-trading | Never | Blocked by design |
+| Feature | Status |
+|---|---|
+| Autonomous trading | Blocked by design |
+| Unreviewed KB use in production RAG | Blocked |
+| Backend production mock provider | Removed |
+| Model-specific business rules outside provider layer | Avoided |
