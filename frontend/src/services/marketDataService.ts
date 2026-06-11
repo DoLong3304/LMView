@@ -132,26 +132,61 @@ export async function fetchCandles(
   return mockDataAdapter.fetchCandles(symbol, interval, limit);
 }
 
-export function subscribeCandle(
-  symbol: string,
-  timeframe: string,
-  onCandle: (candle: Candle) => void,
-  exchange: string = "binance",
-): () => void {
-  const interval = normalizeTimeframe(timeframe);
+const MAX_RECONNECT_RETRIES = 5;
+const BASE_RECONNECT_DELAY_MS = 1000;
 
-  if (DATA_SOURCE === "api") {
-    const wsUrl = `${getWsBaseUrl()}/stream/${interval}?${buildQuery({ symbol, exchange })}`;
-    const ws = new WebSocket(wsUrl);
-    ws.onmessage = (e: MessageEvent) => {
-      const k: RawKline = JSON.parse(e.data as string);
-      onCandle(mapRawToCandle(k));
+function createReconnectingWebSocket(
+  url: string,
+  handlers: {
+    onOpen?: () => void;
+    onMessage: (event: MessageEvent) => void;
+    onError?: (event: Event) => void;
+    onClose?: () => void;
+  },
+): { ws: WebSocket | null; cleanup: () => void } {
+  let ws: WebSocket | null = null;
+  let retries = 0;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let manualClose = false;
+
+  function connect() {
+    ws = new WebSocket(url);
+
+    ws.onopen = () => {
+      retries = 0;
+      handlers.onOpen?.();
     };
-    ws.onerror = (err) => console.error("[WS error]", err);
-    return () => ws.close();
+
+    ws.onmessage = handlers.onMessage;
+
+    ws.onerror = (event) => {
+      handlers.onError?.(event);
+    };
+
+    ws.onclose = () => {
+      handlers.onClose?.();
+      if (!manualClose && retries < MAX_RECONNECT_RETRIES) {
+        const delay = BASE_RECONNECT_DELAY_MS * Math.pow(2, retries);
+        retries++;
+        console.log(`[WS] Reconnecting in ${delay}ms (attempt ${retries}/${MAX_RECONNECT_RETRIES})`);
+        reconnectTimer = setTimeout(connect, delay);
+      } else if (!manualClose) {
+        console.error("[WS] Max reconnect retries reached");
+        handlers.onError?.(new Event("max-retries"));
+      }
+    };
   }
 
-  return mockDataAdapter.subscribeCandle(symbol, interval, onCandle);
+  connect();
+
+  return {
+    get ws() { return ws; },
+    cleanup: () => {
+      manualClose = true;
+      if (reconnectTimer) clearTimeout(reconnectTimer);
+      ws?.close();
+    },
+  };
 }
 
 export type TimeframeCallback = (timeframe: string, candle: Candle) => void;
@@ -171,53 +206,74 @@ interface IndicatorStreamOptions {
   onError?: (error: Event) => void;
 }
 
+export function subscribeCandle(
+  symbol: string,
+  timeframe: string,
+  onCandle: (candle: Candle) => void,
+  exchange: string = "binance",
+): () => void {
+  const interval = normalizeTimeframe(timeframe);
+
+  if (DATA_SOURCE === "api") {
+    const wsUrl = `${getWsBaseUrl()}/stream/${interval}?${buildQuery({ symbol, exchange })}`;
+
+    const { cleanup } = createReconnectingWebSocket(wsUrl, {
+      onMessage: (e: MessageEvent) => {
+        const k: RawKline = JSON.parse(e.data as string);
+        onCandle(mapRawToCandle(k));
+      },
+      onError: (err) => console.error("[WS candle error]", err),
+    });
+
+    return cleanup;
+  }
+
+  return mockDataAdapter.subscribeCandle(symbol, interval, onCandle);
+}
+
 export function subscribeAllTimeframes(options: MultiTimeframeOptions): () => void {
   const { symbol, exchange = "binance", onCandle, onError } = options;
 
   if (DATA_SOURCE === "api") {
     const wsUrl = `${getWsBaseUrl()}/stream/all?${buildQuery({ symbol, exchange })}`;
-    const ws = new WebSocket(wsUrl);
 
-    ws.onmessage = (e: MessageEvent) => {
-      const data: Record<string, RawKline> = JSON.parse(e.data as string);
-      for (const [tf, kline] of Object.entries(data)) {
-        if (kline) {
-          onCandle(normalizeTimeframe(tf), mapRawToCandle(kline));
-          // Also update shared live price map so App.tsx/toolbar read from here
-          // instead of polling /ticker every 5s. This is the single source of truth.
-          updateLivePrice(symbol, Number(kline.close), 0, Number(kline.volume) || 0, 0);
+    const { cleanup } = createReconnectingWebSocket(wsUrl, {
+      onMessage: (e: MessageEvent) => {
+        const data: Record<string, RawKline> = JSON.parse(e.data as string);
+        for (const [tf, kline] of Object.entries(data)) {
+          if (kline) {
+            onCandle(normalizeTimeframe(tf), mapRawToCandle(kline));
+            // Also update shared live price map so App.tsx/toolbar read from here
+            // instead of polling /ticker every 5s. This is the single source of truth.
+            updateLivePrice(symbol, Number(kline.close), 0, Number(kline.volume) || 0, 0);
+          }
         }
-      }
-    };
+      },
+      onError: onError || ((err) => console.error("[WS stream/all error]", err)),
+    });
 
-    ws.onerror = onError || ((err) => console.error("[WS stream/all error]", err));
-    return () => ws.close();
+    return cleanup;
   }
 
   return mockDataAdapter.subscribeAllTimeframes(symbol, onCandle);
 }
 
 export function subscribeIndicatorStream(options: IndicatorStreamOptions): () => void {
-  const {
-    symbol,
-    timeframe,
-    exchange = "binance",
-    onIndicator,
-    onError,
-  } = options;
+  const { symbol, timeframe, exchange = "binance", onIndicator, onError } = options;
   const interval = normalizeTimeframe(timeframe);
 
   if (DATA_SOURCE === "api") {
     const wsUrl = `${getWsBaseUrl()}/stream/indicators/${interval}?${buildQuery({ symbol, exchange })}`;
-    const ws = new WebSocket(wsUrl);
 
-    ws.onmessage = (e: MessageEvent) => {
-      const payload: IndicatorStreamSnapshot = JSON.parse(e.data as string);
-      onIndicator(payload);
-    };
+    const { cleanup } = createReconnectingWebSocket(wsUrl, {
+      onMessage: (e: MessageEvent) => {
+        const payload: IndicatorStreamSnapshot = JSON.parse(e.data as string);
+        onIndicator(payload);
+      },
+      onError: onError || ((err) => console.error("[WS indicators error]", err)),
+    });
 
-    ws.onerror = onError || ((err) => console.error("[WS indicators error]", err));
-    return () => ws.close();
+    return cleanup;
   }
 
   return () => {};

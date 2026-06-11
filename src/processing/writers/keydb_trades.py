@@ -23,7 +23,7 @@ class KeyDBTradeWriter(FlatMapFunction):
 
     BATCH_SIZE = 100
     FLUSH_INTERVAL = 0.5
-    TRADE_TTL_SEC = 600
+    TRADE_TTL_SEC = 3600  # 1 hour — sufficient for historical trade queries
     MAX_ENTRIES = 200  # max trades per symbol
 
     def open(self, runtime_context):

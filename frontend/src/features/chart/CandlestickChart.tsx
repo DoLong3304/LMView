@@ -505,7 +505,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       timeScale: {
         borderColor: chartTheme.borderColor,
         timeVisible: true,
-        secondsVisible: false,
+        secondsVisible: timeframe === "1s",
         barSpacing: 6,
         minBarSpacing: 2,
         rightOffset: 8,
@@ -837,8 +837,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         textColor: chartTheme.textColor,
       },
       grid: {
-        vertLines: { color: chartTheme.gridColor, style: LineStyle.Solid },
-        horzLines: { color: chartTheme.gridColor, style: LineStyle.Solid },
+        vertLines: { color: chartTheme.gridColor, style: LineStyle.Dashed },
+        horzLines: { color: chartTheme.gridColor, style: LineStyle.Dashed },
       },
       crosshair: {
         vertLine: {
@@ -855,6 +855,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       },
       timeScale: {
         borderColor: chartTheme.borderColor,
+        secondsVisible: timeframe === "1s",
       },
     });
 
@@ -874,7 +875,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     });
 
     lineRef.current?.applyOptions({
-      color: chartTheme.textColor,
+      color: chartTheme.upColor,
     });
 
     areaRef.current?.applyOptions({
@@ -1214,11 +1215,11 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       // Apply to chart series
       setAllPriceSeriesData(merged);
 
-      // Restore visible range offset (older data shifts indices)
+      // Keep from at left edge, shift only to to preserve scroll position
       if (ts && visibleRange) {
         const shift = newCandles.length;
         ts.setVisibleLogicalRange({
-          from: visibleRange.from + shift,
+          from: visibleRange.from,
           to: visibleRange.to + shift,
         });
       }

@@ -95,11 +95,13 @@ async def stream_all(websocket: WebSocket):
             # Parse latest trade
             trade_price: float | None = None
             trade_ts: int = 0
+            trade_qty: float = 0.0
             if raw_trade:
                 try:
                     t = json.loads(raw_trade[0])
                     trade_price = float(t["p"])
                     trade_ts = int(t["t"])
+                    trade_qty = float(t.get("q", 0))
                 except Exception as e:
                     log.debug("trade parse error: %s", e)
 
@@ -140,7 +142,7 @@ async def stream_all(websocket: WebSocket):
             )
             if trade_changed and trade_price is not None:
                 rt_candles = _merge_trade_to_candles(
-                    rt_candles, trade_ts, trade_price,
+                    rt_candles, trade_ts, trade_price, trade_qty,
                     candle_1s, candle_1m_window, candle_1m_data,
                     target_ms_map,
                 )
@@ -153,6 +155,9 @@ async def stream_all(websocket: WebSocket):
                     iv, rt_candles, candle_1s, candle_1m_window,
                     candle_1m_data, live_price, live_ts, target_ms_map,
                 )
+                # Accumulate trade qty into real-time candle
+                if trade_qty > 0 and result[iv]:
+                    result[iv]["volume"] = round(result[iv].get("volume", 0) + trade_qty, 8)
 
             await websocket.send_json(result)
             last_trade_ts = trade_ts
@@ -169,6 +174,7 @@ def _merge_trade_to_candles(
     rt_candles: dict[str, dict],
     trade_ts: int,
     trade_price: float,
+    trade_qty: float,
     candle_1s: dict | None,
     candle_1m_window: int,
     candle_1m_data: list[dict],
@@ -202,6 +208,7 @@ def _merge_trade_to_candles(
             existing["close"] = trade_price
             existing["high"] = max(existing["high"], trade_price)
             existing["low"] = min(existing["low"], trade_price)
+            existing["volume"] = round(existing.get("volume", 0) + trade_qty, 8)
         else:
             # New candle for this interval
             if iv == "1s" and candle_1s:
@@ -217,7 +224,7 @@ def _merge_trade_to_candles(
                 "high": trade_price,
                 "low": trade_price,
                 "close": trade_price,
-                "volume": 0,
+                "volume": round(trade_qty, 8),
             }
 
     return rt_candles
@@ -389,15 +396,79 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
             result: dict[str, dict | None] = {}
             any_changed = False
 
-            # Fetch ticker ONCE for all intervals (avoid N+1 queries)
-            ticker = await r.hgetall(f"ticker:latest:{exchange}:{symbol}")
+            # Fetch all data in one pipeline to avoid N+1 Redis calls
+            candle_1s_key = f"candle:1s:{exchange}:{symbol}"
+            candle_1m_key = f"candle:1m:{exchange}:{symbol}"
+            trade_key = f"trade:latest:{exchange}:{symbol}"
+            candle_latest_key = f"candle:latest:{exchange}:{symbol}"
+
+            pipe = r.pipeline()
+            pipe.hgetall(f"ticker:latest:{exchange}:{symbol}")
+            pipe.zrevrange(candle_1s_key, 0, 0)
+            pipe.zrevrange(candle_1m_key, 0, 0)
+            pipe.zrevrange(candle_1m_key, 0, 0, withscores=True)
+            pipe.zrevrange(trade_key, 0, 0)
+            pipe.hgetall(candle_latest_key)
+            pipeline_results = await pipe.execute()
+
+            ticker = pipeline_results[0]
+            raw_1s = pipeline_results[1]
+            raw_1m = pipeline_results[2]
+            raw_1m_scores = pipeline_results[3]
+            raw_trade = pipeline_results[4]
+            candle_latest = pipeline_results[5]
+
             live_price = float(ticker["price"]) if ticker.get("price") else None
             live_ts = int(ticker["event_time"]) if ticker.get("event_time") else None
 
-            # Only build timeframes that have actually changed (delta updates)
+            # Parse trade qty for volume accumulation
+            trade_qty: float = 0.0
+            if raw_trade:
+                try:
+                    t = json.loads(raw_trade[0])
+                    trade_qty = float(t.get("q", 0))
+                except Exception:
+                    pass
+
+            # Parse 1s candle
+            candle_1s: dict | None = None
+            if raw_1s:
+                try:
+                    c = json.loads(raw_1s[0])
+                    candle_1s = {
+                        "openTime": int(c["t"]),
+                        "open": c["o"], "high": c["h"],
+                        "low": c["l"], "close": c["c"],
+                        "volume": c["v"],
+                    }
+                except Exception:
+                    pass
+
+            # Parse 1m candles
+            candle_1m_window = 0
+            candle_1m_data: list[dict] = []
+            if raw_1m_scores:
+                try:
+                    latest_score = int(raw_1m_scores[0][1])
+                    candle_1m_window = (latest_score // 60000) * 60000
+                except Exception:
+                    pass
+            if raw_1m:
+                try:
+                    candle_1m_data = [json.loads(c) for c in raw_1m]
+                except Exception:
+                    pass
+
+            # Build candles for all intervals using pre-fetched data
             for iv in ALL_INTERVALS:
-                # Fetch candle without redundant hgetall calls
-                candle = await _build_candle(r, symbol, iv, target_ms_map[iv], exchange, live_price, live_ts)
+                candle = _build_candle_from_data(
+                    iv, candle_1s, candle_1m_window, candle_1m_data,
+                    live_price, live_ts, target_ms_map[iv],
+                    candle_latest,
+                )
+                # Accumulate trade qty into real-time candle
+                if trade_qty > 0 and candle:
+                    candle["volume"] = round(candle.get("volume", 0) + trade_qty, 8)
                 if candle and candle != last_sent[iv]:
                     result[iv] = candle
                     last_sent[iv] = candle
@@ -416,6 +487,111 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
         pass
     except Exception as e:
         log.warning("Stream all error for %s: %s", symbol, e)
+
+
+def _build_candle_from_data(
+    interval: str,
+    candle_1s: dict | None,
+    candle_1m_window: int,
+    candle_1m_data: list[dict],
+    live_price: float | None,
+    live_ts: int | None,
+    target_ms: int,
+    candle_latest: dict,
+) -> dict | None:
+    """Build candle from pre-fetched Redis data. Synchronous version for pipeline optimization."""
+
+    if interval == "1s":
+        if candle_1s:
+            return {
+                "openTime": candle_1s["openTime"],
+                "open": candle_1s["open"],
+                "high": candle_1s["high"],
+                "low": candle_1s["low"],
+                "close": candle_1s["close"],
+                "volume": candle_1s["volume"],
+            }
+        if live_price and live_ts:
+            live_window = (live_ts // target_ms) * target_ms
+            return {
+                "openTime": live_window,
+                "open": live_price,
+                "high": live_price,
+                "low": live_price,
+                "close": live_price,
+                "volume": 0,
+            }
+        return None
+
+    flink_candle = None
+    flink_window = 0
+    latest_source_ts = 0
+
+    if candle_1m_data:
+        latest_score = candle_1m_window if candle_1m_window else 0
+        flink_window = (latest_score // target_ms) * target_ms
+        latest_source_ts = max(int(c["t"]) for c in candle_1m_data) if candle_1m_data else 0
+        flink_candle = {
+            "openTime": flink_window,
+            "open": candle_1m_data[0]["o"],
+            "high": max(c["h"] for c in candle_1m_data),
+            "low": min(c["l"] for c in candle_1m_data),
+            "close": candle_1m_data[-1]["c"],
+            "volume": round(sum(c["v"] for c in candle_1m_data), 8),
+        }
+
+    # Keep 1m responsive even when kline streams lag by folding in fresh ticker.
+    if interval == "1m":
+        if live_price and live_ts:
+            live_window = (live_ts // target_ms) * target_ms
+            if flink_candle and live_window == flink_window:
+                if live_ts > latest_source_ts:
+                    flink_candle["close"] = live_price
+                    flink_candle["high"] = max(flink_candle["high"], live_price)
+                    flink_candle["low"] = min(flink_candle["low"], live_price)
+                return flink_candle
+            if live_window > flink_window:
+                return {
+                    "openTime": live_window,
+                    "open": live_price,
+                    "high": live_price,
+                    "low": live_price,
+                    "close": live_price,
+                    "volume": 0,
+                }
+        return flink_candle
+
+    if live_price and live_ts:
+        live_window = (live_ts // target_ms) * target_ms
+        if flink_candle and live_window == flink_window:
+            window_close_ms = flink_window + target_ms
+            if live_ts > latest_source_ts and int(time.time() * 1000) < window_close_ms:
+                flink_candle["close"] = live_price
+                flink_candle["high"] = max(flink_candle["high"], live_price)
+                flink_candle["low"] = min(flink_candle["low"], live_price)
+            return flink_candle
+        if live_window > flink_window:
+            return {
+                "openTime": live_window,
+                "open": live_price, "high": live_price,
+                "low": live_price, "close": live_price,
+                "volume": 0,
+            }
+
+    if flink_candle:
+        return flink_candle
+
+    if candle_latest:
+        kline_start = int(candle_latest.get("kline_start", 0))
+        return {
+            "openTime": (kline_start // target_ms) * target_ms,
+            "open": float(candle_latest.get("open", 0)),
+            "high": float(candle_latest.get("high", 0)),
+            "low": float(candle_latest.get("low", 0)),
+            "close": float(candle_latest.get("close", 0)),
+            "volume": float(candle_latest.get("volume", 0)),
+        }
+    return None
 
 
 async def _build_candle(

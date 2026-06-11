@@ -250,7 +250,7 @@ def run():
             "exchange",
         )
         .withWatermark("event_timestamp", "1 minute")
-        .dropDuplicates(["symbol", "event_timestamp"])
+        .dropDuplicates(["exchange", "symbol", "event_timestamp"])
     )
 
     ticker_query = _start_query_with_retry(

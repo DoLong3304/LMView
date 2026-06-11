@@ -8,6 +8,22 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.23.1] - 2026-06-11
+
+### Fixed
+- **Ticker dedup missing exchange key** — `src/lakehouse/pipeline.py` ticker stream dedup used only `["symbol", "event_timestamp"]`. Fixed to `["exchange", "symbol", "event_timestamp"]` to prevent multi-exchange collapse.
+- **Grid dashed style lost on theme change** — `CandlestickChart.tsx` theme update useEffect was setting `LineStyle.Solid` instead of `LineStyle.Dashed`, breaking TradingView-style grid consistency.
+- **Line chart color using textColor instead of upColor** — `CandlestickChart.tsx` line series `color` option was `chartTheme.textColor`. Fixed to `chartTheme.upColor` for TradingView-style coloring.
+- **Seconds hidden on 1s timeframe** — `CandlestickChart.tsx` had `secondsVisible: false` hardcoded in timeScale. Now dynamic: `secondsVisible: timeframe === "1s"`.
+- **Visible range jumps when preloading historical data** — `CandlestickChart.tsx` was shifting both `from` and `to` when loading older candles. Now keeps `from` at left edge for smoother scroll-left experience.
+- **Real-time candle volume not accumulated** — `backend/api/websocket.py` `_merge_trade_to_candles()` and `_stream_all_impl` were ignoring trade quantity (`qty`) when updating candles. Now accumulates trade qty into candle volume.
+- **Redis N+1 in WebSocket stream/all** — `backend/api/websocket.py` was making 6+ Redis calls per interval × 10 intervals = 60+ calls per 50ms loop. Refactored `_stream_all_impl` to use Redis pipeline for batch queries (6 total calls per loop).
+- **Trade cache TTL too short** — `src/processing/writers/keydb_trades.py` trade cache TTL was 600s (10 min). Increased to 3600s (1 hour) to prevent premature expiry.
+- **WebSocket no reconnect on disconnect** — `marketDataService.ts` now implements exponential-backoff reconnect (up to 5 retries) for `subscribeAllTimeframes`, `subscribeCandle`, and `subscribeIndicatorStream`.
+- **Watchlist ticker polling reduced from 5s to 30s** — `App.tsx` now uses live price from WS `_livePriceMap` for selected symbol (50ms updates). Other watchlist symbols fall back to REST poll every 30s instead of 5s.
+
+---
+
 ## [0.23.0] - 2026-06-09
 
 ### Added

@@ -18,7 +18,7 @@ import { ReplayControls } from "@/features/replay/components/ReplayControls";
 import RightPanel from "@/features/watchlist/components/RightPanel";
 import NewsPage from "@/pages/NewsPage";
 import { FALLBACK_SYMBOLS } from "@/constants/market";
-import { fetchTickers, fetchSymbols } from "@/services/marketDataService";
+import { fetchTickers, fetchSymbols, getLivePrices } from "@/services/marketDataService";
 import { fetchLatestNews } from "@/services/newsService";
 import { fetchUserSettings } from "@/services/settingsService";
 import { loadFromStorage, saveToStorage } from "@/utils/storageHelpers";
@@ -219,7 +219,9 @@ const TradingDashboard: React.FC = () => {
         };
     }, []);
 
-    // Fetch live ticker prices for the watchlist
+    // Fetch live ticker prices for the watchlist.
+    // Live price from chart WS is available for selectedSymbol via _livePriceMap.
+    // Use poll fallback (30s) for non-selected watchlist symbols + initial load.
     useEffect(() => {
         let cancelled = false;
         const refresh = () => {
@@ -230,9 +232,24 @@ const TradingDashboard: React.FC = () => {
                     tickers.forEach((tk) => {
                         map[tk.symbol] = tk;
                     });
+                    const livePrices = getLivePrices();
                     setWatchlistItems((prev) =>
                         prev.map((item) => {
                             const tick = map[item.symbol];
+                            const live = livePrices[item.symbol];
+
+                            // Prefer live WS price for selected symbol, ticker for others
+                            if (item.symbol === selectedSymbol && live) {
+                                return {
+                                    ...item,
+                                    price: live.price,
+                                    change: live.change24h,
+                                    activityScore: live.activity_score,
+                                    volume: live.volume,
+                                    color: live.change24h >= 0 ? "green" : "red",
+                                };
+                            }
+
                             if (!tick) return item;
                             return {
                                 ...item,
@@ -267,12 +284,13 @@ const TradingDashboard: React.FC = () => {
                 });
         };
         refresh();
-        const id = setInterval(refresh, 5000);
+        // Poll every 30s — selected symbol price comes from WS via _livePriceMap
+        const id = setInterval(refresh, 30_000);
         return () => {
             cancelled = true;
             clearInterval(id);
         };
-    }, []);
+    }, [selectedSymbol]);
 
     // Persist settings to localStorage
     useEffect(() => {
