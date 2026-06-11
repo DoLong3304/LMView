@@ -443,6 +443,7 @@ export const CHART_TYPES: ChartTypeConfig[] = [
   { id: "renko", labelKey: "renko", description: "Brick-based", requiresTransformation: true, hasSettings: true },
   { id: "lineBreak", labelKey: "lineBreak", description: "Price blocks", requiresTransformation: true, hasSettings: true },
   { id: "kagi", labelKey: "kagi", description: "Trend-based lines", requiresTransformation: true, hasSettings: true },
+  { id: "pointFigure", labelKey: "pointFigure", description: "Box reversal", requiresTransformation: true, hasSettings: false },
 ];
 
 /** Chart type settings for advanced chart types */

@@ -8,9 +8,11 @@ const MULTI_CLICK_NEEDED: Record<string, boolean> = {
   elliottWave: true,
   harmonicABCD: true,
   xabcdPattern: true,
-  horizontalRay: true,
   parallelChannel: true,
   pitchfork: true,
+  schiffPitchfork: true,
+  modifiedPitchfork: true,
+  insidePitchfork: true,
 };
 
 const DRAWING_HIT_TOLERANCE = 8; // pixels
@@ -35,6 +37,33 @@ interface ChartOverlayProps {
 interface PixelPoint { x: number; y: number; }
 
 const PATTERN_TOOLS = new Set(["harmonicABCD", "xabcdPattern", "elliottWave"]);
+const PITCHFORK_TOOLS = new Set(["pitchfork", "schiffPitchfork", "modifiedPitchfork", "insidePitchfork"]);
+const GANN_BOX_TOOLS = new Set(["gannBox", "gannSquare"]);
+const DEFAULT_GANN_ANGLES = [45, 26.565, 18.435, 14.036, 7.125, 63.75, 71.565, 75.964, 82.875];
+
+function getGannAngles(settings: Record<string, any>): number[] {
+  const configured = settings.angles;
+  if (!Array.isArray(configured)) return DEFAULT_GANN_ANGLES;
+  const angles = configured.filter((value) => typeof value === "number" && Number.isFinite(value));
+  return angles.length > 0 ? angles : DEFAULT_GANN_ANGLES;
+}
+
+function buildGannFanSegments(origin: PixelPoint, target: PixelPoint, settings: Record<string, any>) {
+  const length = Math.max(Math.hypot(target.x - origin.x, target.y - origin.y), 120);
+  const signX = target.x >= origin.x ? 1 : -1;
+  const signY = target.y >= origin.y ? 1 : -1;
+  return getGannAngles(settings).map((angle) => {
+    const radians = (angle * Math.PI) / 180;
+    return {
+      start: origin,
+      end: {
+        x: origin.x + signX * Math.cos(radians) * length,
+        y: origin.y + signY * Math.sin(radians) * length,
+      },
+      angle,
+    };
+  });
+}
 
 const getPatternLabels = (tool: string, settings: Record<string, any>): string[] => {
   if (tool === "xabcdPattern") return ["X", "A", "B", "C", "D"];
@@ -95,6 +124,8 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     }
     if (activeTool === 'harmonicABCD') return 4;
     if (activeTool === 'xabcdPattern') return 5;
+    if (activeTool === 'parallelChannel') return 3;
+    if (PITCHFORK_TOOLS.has(activeTool)) return 3;
     return 0;
   }, [activeTool, activeSettings]);
 
@@ -210,7 +241,9 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         return Math.abs(mousePixel.x - pixels[0].x) <= DRAWING_HIT_TOLERANCE;
       }
 
-      case 'rectangle': {
+      case 'rectangle':
+      case 'gannBox':
+      case 'gannSquare': {
         // Rectangle: check if near border or inside
         if (pixels.length < 2 || !pixels[0] || !pixels[1]) return false;
         const [p1, p2] = pixels;
@@ -329,7 +362,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
           return hit1 || hit2;
         }
 
-        if (drawing.tool === 'pitchfork') {
+        if (PITCHFORK_TOOLS.has(drawing.tool)) {
           if (validPixels.length < 3) return false;
           const [pA, pB, pC] = validPixels;
           const mid = { x: (pB.x + pC.x) / 2, y: (pB.y + pC.y) / 2 };
@@ -339,6 +372,17 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
             Math.sqrt((mousePixel.x - p.x) ** 2 + (mousePixel.y - p.y) ** 2) <= DRAWING_HIT_TOLERANCE
           );
           return hitMedian || hitFork1 || hitAnchors;
+        }
+
+        if (drawing.tool === 'gannFan') {
+          const segments = buildGannFanSegments(validPixels[0], validPixels[1], drawing.settings || {});
+          const hitFan = segments.some((segment) =>
+            distanceToRay(mousePixel, segment.start, segment.end) <= DRAWING_HIT_TOLERANCE,
+          );
+          const hitAnchors = validPixels.some(p =>
+            Math.sqrt((mousePixel.x - p.x) ** 2 + (mousePixel.y - p.y) ** 2) <= DRAWING_HIT_TOLERANCE
+          );
+          return hitFan || hitAnchors;
         }
 
         for (let i = 0; i < validPixels.length - 1; i++) {
@@ -851,7 +895,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         }
 
         // Andrews Pitchfork (3-point)
-        if (d.tool === 'pitchfork') {
+        if (PITCHFORK_TOOLS.has(d.tool)) {
           if (pixels.length < 3 || !pixels[0] || !pixels[1] || !pixels[2]) return null;
           const [pA, pB, pC] = pixels;
           const mid = { x: (pB.x + pC.x) / 2, y: (pB.y + pC.y) / 2 };
@@ -984,6 +1028,74 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         if (validPixels.length < 2) return null;
 
         const [p1, p2] = validPixels;
+
+        if (GANN_BOX_TOOLS.has(d.tool)) {
+          let endX = p2.x;
+          let endY = p2.y;
+          if (d.tool === 'gannSquare') {
+            const size = Math.max(Math.abs(p2.x - p1.x), Math.abs(p2.y - p1.y));
+            endX = p1.x + (p2.x >= p1.x ? size : -size);
+            endY = p1.y + (p2.y >= p1.y ? size : -size);
+          }
+
+          const left = Math.min(p1.x, endX);
+          const right = Math.max(p1.x, endX);
+          const top = Math.min(p1.y, endY);
+          const bottom = Math.max(p1.y, endY);
+          const width = right - left;
+          const height = bottom - top;
+          const gridFractions = [0.25, 0.5, 0.75];
+
+          return (
+            <g key={key} opacity={opacity}>
+              <rect
+                x={left}
+                y={top}
+                width={width}
+                height={height}
+                fill={`${color}10`}
+                stroke={strokeColor}
+                strokeWidth={strokeWidth}
+              />
+              <line x1={left} y1={top} x2={right} y2={bottom} stroke={strokeColor} strokeWidth={Math.max(1, strokeWidth - 0.5)} opacity={0.55} />
+              <line x1={left} y1={bottom} x2={right} y2={top} stroke={strokeColor} strokeWidth={Math.max(1, strokeWidth - 0.5)} opacity={0.55} />
+              {s.showGrid !== false && gridFractions.map((fraction) => (
+                <React.Fragment key={`${d.id}-gann-grid-${fraction}`}>
+                  <line x1={left + width * fraction} y1={top} x2={left + width * fraction} y2={bottom} stroke={strokeColor} strokeWidth="1" opacity={0.28} />
+                  <line x1={left} y1={top + height * fraction} x2={right} y2={top + height * fraction} stroke={strokeColor} strokeWidth="1" opacity={0.28} />
+                </React.Fragment>
+              ))}
+              {anchors}
+            </g>
+          );
+        }
+
+        if (d.tool === 'gannFan') {
+          const segments = buildGannFanSegments(p1, p2, s);
+
+          return (
+            <g key={key} opacity={opacity}>
+              {segments.map((segment) => (
+                <line
+                  key={`${d.id}-gann-fan-${segment.angle}`}
+                  x1={segment.start.x}
+                  y1={segment.start.y}
+                  x2={segment.end.x}
+                  y2={segment.end.y}
+                  stroke={strokeColor}
+                  strokeWidth={segment.angle === 45 ? strokeWidth : Math.max(1, strokeWidth - 0.5)}
+                  opacity={segment.angle === 45 ? 1 : 0.55}
+                />
+              ))}
+              {s.showLabel !== false && (
+                <text x={p1.x + 8} y={p1.y - 8} fontSize="11" fill={strokeColor}>
+                  Gann Fan
+                </text>
+              )}
+              {anchors}
+            </g>
+          );
+        }
 
         if (d.tool === 'rectangle') {
           const left = Math.min(p1.x, p2.x);

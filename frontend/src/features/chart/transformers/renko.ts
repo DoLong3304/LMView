@@ -50,6 +50,12 @@ export function toRenko(candles: Candle[], config: RenkoConfig): RenkoBrick[] {
   let direction: "up" | "down" = candles[0].close >= candles[0].open ? "up" : "down";
   let open = Math.floor(candles[0].close / brickSize) * brickSize;
   let close = open;
+  let lastEmittedTime = Number.NEGATIVE_INFINITY;
+
+  const nextTime = (baseTime: number): number => {
+    lastEmittedTime = Math.max(baseTime, lastEmittedTime + 1);
+    return lastEmittedTime;
+  };
 
   for (const candle of candles) {
     const price = candle.close;
@@ -62,7 +68,7 @@ export function toRenko(candles: Candle[], config: RenkoConfig): RenkoBrick[] {
           close = open + brickSize;
           direction = "up";
           bricks.push({
-            time: candle.time,
+            time: nextTime(candle.time),
             open,
             close,
             high: close,
@@ -79,7 +85,7 @@ export function toRenko(candles: Candle[], config: RenkoConfig): RenkoBrick[] {
           close = open - brickSize;
           direction = "down";
           bricks.push({
-            time: candle.time,
+            time: nextTime(candle.time),
             open,
             close,
             high: open,
@@ -98,7 +104,7 @@ export function toRenko(candles: Candle[], config: RenkoConfig): RenkoBrick[] {
           close = open - brickSize;
           direction = "down";
           bricks.push({
-            time: candle.time,
+            time: nextTime(candle.time),
             open,
             close,
             high: open,
@@ -115,7 +121,7 @@ export function toRenko(candles: Candle[], config: RenkoConfig): RenkoBrick[] {
           close = open + brickSize;
           direction = "up";
           bricks.push({
-            time: candle.time,
+            time: nextTime(candle.time),
             open,
             close,
             high: close,

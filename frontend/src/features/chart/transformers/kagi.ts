@@ -32,12 +32,19 @@ export function toKagi(
   let currentType: "yang" | "yin" = candles[0].close >= candles[0].open ? "yang" : "yin";
   let currentHigh = basePrice;
   let currentLow = basePrice;
+  let lastEmittedTime = Number.NEGATIVE_INFINITY;
+
+  const nextTime = (baseTime: number): number => {
+    lastEmittedTime = Math.max(baseTime, lastEmittedTime + 1);
+    return lastEmittedTime;
+  };
 
   lines.push({
-    time: candles[0].time,
+    time: nextTime(candles[0].time),
     price: basePrice,
     type: currentType,
     reversal: false,
+    linewidth: currentType === "yang" ? 3 : 1,
   });
 
   for (let i = 1; i < candles.length; i++) {
@@ -50,7 +57,7 @@ export function toKagi(
         // Continue up
         currentHigh = price;
         lines.push({
-          time: candles[i].time,
+          time: nextTime(candles[i].time),
           price,
           type: "yang",
           reversal: false,
@@ -61,7 +68,7 @@ export function toKagi(
         currentType = "yin";
         currentLow = price;
         lines.push({
-          time: candles[i].time,
+          time: nextTime(candles[i].time),
           price,
           type: "yin",
           reversal: true,
@@ -74,7 +81,7 @@ export function toKagi(
         // Continue down
         currentLow = price;
         lines.push({
-          time: candles[i].time,
+          time: nextTime(candles[i].time),
           price,
           type: "yin",
           reversal: false,
@@ -85,7 +92,7 @@ export function toKagi(
         currentType = "yang";
         currentHigh = price;
         lines.push({
-          time: candles[i].time,
+          time: nextTime(candles[i].time),
           price,
           type: "yang",
           reversal: true,

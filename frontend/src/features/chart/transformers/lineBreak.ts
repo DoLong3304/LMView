@@ -25,14 +25,19 @@ export function toLineBreak(
 
   const blocks: LineBreakBlock[] = [];
   const lookback = config.lookback;
+  let lastEmittedTime = Number.NEGATIVE_INFINITY;
+
+  const nextTime = (baseTime: number): number => {
+    lastEmittedTime = Math.max(baseTime, lastEmittedTime + 1);
+    return lastEmittedTime;
+  };
 
   for (let i = 0; i < candles.length; i++) {
     const candle = candles[i];
-    const bullish = candle.close >= candle.open;
-
     if (blocks.length === 0) {
+      const bullish = candle.close >= candle.open;
       blocks.push({
-        time: candle.time,
+        time: nextTime(candle.time),
         open: candle.open,
         close: candle.close,
         high: candle.high,
@@ -44,41 +49,22 @@ export function toLineBreak(
 
     const lastBlock = blocks[blocks.length - 1];
     const prevClose = lastBlock.close;
+    const lookbackClose = getNthLastClose(blocks, lookback);
 
-    if (bullish && candle.close > prevClose) {
+    if (candle.close > Math.max(prevClose, lookbackClose)) {
       // New bullish block
       blocks.push({
-        time: candle.time,
+        time: nextTime(candle.time),
         open: prevClose,
         close: candle.close,
         high: candle.high,
         low: candle.low,
         bullish: true,
       });
-    } else if (!bullish && candle.close < prevClose) {
+    } else if (candle.close < Math.min(prevClose, lookbackClose)) {
       // New bearish block
       blocks.push({
-        time: candle.time,
-        open: prevClose,
-        close: candle.close,
-        high: candle.high,
-        low: candle.low,
-        bullish: false,
-      });
-    } else if (bullish && candle.close > getNthLastClose(blocks, lookback)) {
-      // Breakout above lookback period
-      blocks.push({
-        time: candle.time,
-        open: prevClose,
-        close: candle.close,
-        high: candle.high,
-        low: candle.low,
-        bullish: true,
-      });
-    } else if (!bullish && candle.close < getNthLastClose(blocks, lookback)) {
-      // Breakdown below lookback period
-      blocks.push({
-        time: candle.time,
+        time: nextTime(candle.time),
         open: prevClose,
         close: candle.close,
         high: candle.high,

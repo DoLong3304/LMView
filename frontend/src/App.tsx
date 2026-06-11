@@ -17,6 +17,7 @@ import DrawingContextToolbar from "@/features/drawing/components/DrawingContextT
 import { ReplayControls } from "@/features/replay/components/ReplayControls";
 import RightPanel from "@/features/watchlist/components/RightPanel";
 import NewsPage from "@/pages/NewsPage";
+import ScreenerPage from "@/pages/ScreenerPage";
 import { FALLBACK_SYMBOLS } from "@/constants/market";
 import { fetchTickers, fetchSymbols, getLivePrices } from "@/services/marketDataService";
 import { fetchLatestNews } from "@/services/newsService";
@@ -32,6 +33,7 @@ import { useDrawingToolbarPosition } from "@/hooks/useDrawingToolbarPosition";
 import { useReplayMode } from "@/hooks/useReplayMode";
 import { useI18n } from "@/i18n";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { CHART_TYPES as CHART_TYPE_CONFIGS } from "@/types";
 import type {
     Candle,
     ChartType,
@@ -68,7 +70,9 @@ const VALID_TIMEFRAMES: TimeframeKey[] = [
     "1d",
     "1w",
 ];
-const VALID_CHART_TYPES: ChartType[] = ["candles", "line", "area", "bars"];
+const VALID_CHART_TYPES: ChartType[] = CHART_TYPE_CONFIGS.map(
+    (chartType) => chartType.id,
+);
 
 function getInitialTheme(): ThemeMode {
     if (typeof window === "undefined") return "dark";
@@ -844,9 +848,19 @@ const TradingDashboard: React.FC = () => {
 
                 {/* Main content area */}
                 <main className="relative flex-1 flex overflow-hidden min-h-0">
-                    {!isChartsView ? (
+                    {appView === "marketsNews" ? (
                         <div className="flex-1 min-w-0 overflow-hidden">
                             <NewsPage />
+                        </div>
+                    ) : appView === "screener" ? (
+                        <div className="flex-1 min-w-0 overflow-hidden">
+                            <ScreenerPage
+                                onBack={() => setAppView("charts")}
+                                onSymbolSelect={(symbol) => {
+                                    handleSymbolSelect(symbol);
+                                    setAppView("charts");
+                                }}
+                            />
                         </div>
                     ) : (
                         <>

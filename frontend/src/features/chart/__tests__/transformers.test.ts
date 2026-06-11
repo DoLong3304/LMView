@@ -3,10 +3,17 @@ import { toHeikinAshi } from "../transformers/heikinAshi";
 import { toRenko } from "../transformers/renko";
 import { toLineBreak } from "../transformers/lineBreak";
 import { toKagi } from "../transformers/kagi";
+import { toPointFigure } from "../transformers/pointFigure";
 import type { Candle } from "@/types";
 
 function makeCandle(time: number, o: number, h: number, l: number, c: number, v = 1000): Candle {
   return { time, open: o, high: h, low: l, close: c, volume: v };
+}
+
+function expectStrictAscendingTimes(items: Array<{ time: number }>): void {
+  for (let i = 1; i < items.length; i += 1) {
+    expect(items[i].time).toBeGreaterThan(items[i - 1].time);
+  }
 }
 
 // ── Heikin Ashi ──────────────────────────────────────────────────────────────
@@ -104,6 +111,18 @@ describe("toRenko", () => {
     expect(bricks.length).toBeGreaterThan(0);
   });
 
+  it("emits strict ascending times when one candle creates multiple bricks", () => {
+    const bricks = toRenko(
+      [
+        makeCandle(1000, 100, 100, 100, 100),
+        makeCandle(1060, 100, 124, 100, 124),
+      ],
+      { brickSize: 2 },
+    );
+    expect(bricks.length).toBeGreaterThan(1);
+    expectStrictAscendingTimes(bricks);
+  });
+
   it("reversal requires 2-brick move", () => {
     // Create candles that go up then reverse
     const candles: Candle[] = [
@@ -168,6 +187,16 @@ describe("toLineBreak", () => {
     expect(blocks3.length).toBeGreaterThan(0);
     expect(blocks5.length).toBeGreaterThan(0);
   });
+
+  it("emits strict ascending times when source candles share time", () => {
+    const blocks = toLineBreak([
+      makeCandle(1000, 100, 110, 90, 105),
+      makeCandle(1000, 105, 120, 100, 118),
+      makeCandle(1000, 118, 120, 90, 95),
+    ]);
+    expect(blocks.length).toBeGreaterThan(1);
+    expectStrictAscendingTimes(blocks);
+  });
 });
 
 // ── Kagi ─────────────────────────────────────────────────────────────────────
@@ -208,5 +237,49 @@ describe("toKagi", () => {
       expect(line.linewidth).toBeDefined();
       expect(typeof line.linewidth).toBe("number");
     }
+  });
+
+  it("emits strict ascending times when source candles share time", () => {
+    const lines = toKagi(
+      [
+        makeCandle(1000, 100, 110, 90, 105),
+        makeCandle(1000, 105, 125, 100, 122),
+        makeCandle(1000, 122, 124, 90, 94),
+      ],
+      { reversalPercent: 4, useClose: true },
+    );
+    expect(lines.length).toBeGreaterThan(1);
+    expectStrictAscendingTimes(lines);
+  });
+});
+
+describe("toPointFigure", () => {
+  it("returns empty for < 2 candles", () => {
+    expect(toPointFigure([makeCandle(1000, 100, 110, 90, 105)])).toHaveLength(0);
+  });
+
+  it("produces box columns when price moves by box size", () => {
+    const candles: Candle[] = Array.from({ length: 20 }, (_, i) =>
+      makeCandle(1000 + i * 60, 100 + i, 101 + i, 99 + i, 100 + i, 1000),
+    );
+    const boxes = toPointFigure(candles, { boxSize: 2, reversalBoxes: 3 });
+    expect(boxes.length).toBeGreaterThan(0);
+    for (const box of boxes) {
+      expect(box.high).toBeGreaterThanOrEqual(Math.max(box.open, box.close));
+      expect(box.low).toBeLessThanOrEqual(Math.min(box.open, box.close));
+    }
+  });
+
+  it("emits strict ascending times when source candles share time", () => {
+    const boxes = toPointFigure(
+      [
+        makeCandle(1000, 100, 100, 100, 100),
+        makeCandle(1000, 100, 110, 100, 110),
+        makeCandle(1000, 110, 110, 95, 95),
+      ],
+      { boxSize: 2, reversalBoxes: 3 },
+    );
+    expect(boxes.length).toBeGreaterThan(1);
+    expectStrictAscendingTimes(boxes);
   });
 });
