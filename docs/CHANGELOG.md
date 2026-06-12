@@ -22,6 +22,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **WebSocket no reconnect on disconnect** — `marketDataService.ts` now implements exponential-backoff reconnect (up to 5 retries) for `subscribeAllTimeframes`, `subscribeCandle`, and `subscribeIndicatorStream`.
 - **Watchlist ticker polling reduced from 5s to 30s** — `App.tsx` now uses live price from WS `_livePriceMap` for selected symbol (50ms updates). Other watchlist symbols fall back to REST poll every 30s instead of 5s.
 
+### Added
+
+- **`docs/DATA_FLOW.md`** — Comprehensive data flow documentation covering Lambda Architecture (Speed Layer → Batch/Lakehouse → Serving), exchange ingestion (Binance + OKX), Kafka topics, Flink writers (KeyDB, InfluxDB, IndicatorWriter), Spark Bronze/Silver/Gold tables, indicator computation (Flink real-time vs Spark batch), Trino query engine, and FastAPI/WebSocket serving layer.
+- **`docs/DATA_FLOW_01_ARCH_OVERVIEW.md`** — Part 1: Architecture overview (Lambda 3 layers) + Exchange ingestion (Binance + OKX WebSocket, threading model, JSON formats, canonical mapping layer, producer integration).
+- **`docs/DATA_FLOW_02_KAFKA.md`** — Part 2: Kafka Broker layer (4 topics × 12 partitions, Avro schemas, Confluent wire format, Schema Registry, partitioning strategy, performance tuning, checkpoint locations).
+- **`docs/DATA_FLOW_03_FLINK.md`** — Part 3: Flink Speed Layer (KeyDB writers, InfluxDB writers, KlineWindowAggregator with gap-fill, IndicatorWriter với true EMA/RSI/BB/MACD/ATR, depth/trade writers, batch-buffered performance, Redis Sentinel failover, full Redis key patterns + InfluxDB measurements).
+- **`docs/DATA_FLOW_04_SPARK_LAKEHOUSE.md`** — Part 4: Spark Lakehouse (Bronze 3 tables với streaming write + dedup, Silver ticker_unified + kline_multi_timeframe với quality scoring, Gold 9 tables: market_overview, coin_ticker, momentum_indicators, indicator_history, market_dominance, volatility_ranking, movers_ranking, sector_performance, news_sentiment — đầy đủ schema, transformations, pipeline orchestration).
+- **`docs/DATA_FLOW_05_SERVING.md`** — Part 5: Serving Layer (FastAPI + WebSocket với 3 routes /api/stream/all, /api/stream/{interval}, /api/stream/indicators/{interval}; Redis pipeline optimization v0.23.1 giảm 6× Redis calls; 20+ REST endpoints cho klines/ticker/trades/orderbook/indicators/market/screener/news/auth/settings/admin/ai; multi-source fallback chains: Redis→InfluxDB→Trino→REST; service layer, Pydantic models, database clients, auth/JWT, error handling, caching, observability).
+- **`docs/DATA_FLOW_06_INDICATORS.md`** — Part 6: Technical Indicators deep dive (Flink real-time vs Spark batch side-by-side: True EMA vs SMA approximation, Wilder's RSI, Bollinger Bands population vs sample stddev, MACD true vs SMA, ATR, state management, warmup, query patterns, coverage matrix; công thức chi tiết với code cho 13 indicators).
+- **`docs/DATA_FLOW_07_DIAGRAMS.md`** — Part 7: Data Flow Diagrams & End-to-End Latency (Lambda architecture diagram, sequence diagrams cho kline/orderbook/indicator real-time, cold path Bronze→Silver→Gold chi tiết, latency budget table theo component, throughput analysis, failure modes & RPO/RTO, scaling patterns, capacity planning, monitoring stack, production Docker topology, network ports reference, glossary, coverage matrix 7 phần).
+- **`docs/final_data_flow.md`** — Tài liệu hợp nhất đầy đủ 7 phần DATA_FLOW (1 file ~264KB, bao gồm tất cả 4 Kafka topics, 8 Flink writers, 3 Bronze + 2 Silver + 9 Gold tables, 9 Redis key patterns, 3 InfluxDB measurements, 13 indicators, 20+ REST endpoints, 3 WebSocket routes, sequence diagrams, latency budget, failure modes, scaling patterns).
+
 ---
 ## [0.23.1] - 2026-06-10
 
