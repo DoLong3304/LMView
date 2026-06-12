@@ -72,6 +72,8 @@ class AIChatResponse(BaseModel):
     token_input: Optional[int] = None
     token_output: Optional[int] = None
     estimated_cost_usd: Optional[float] = None
+    # News context summary for frontend display
+    news_context: Optional[Dict[str, Any]] = None
 
 
 class AISessionResponse(BaseModel):
