@@ -2,7 +2,7 @@
 # LMView System Documentation
 
 > Current project map for humans and coding agents.
-> Last reviewed from code: **2026-06-10**.
+> Last reviewed from code: **2026-06-12**.
 
 ---
 
@@ -14,14 +14,14 @@ Lambda Architecture:
 - Speed layer: live exchange data through Kafka, Flink, Redis Sentinel, and InfluxDB.
 - Batch/lakehouse layer: Spark, Iceberg on MinIO, PostgreSQL catalog, and Trino.
 - Serving layer: FastAPI REST/WebSocket APIs with Redis/Influx/Trino/PostgreSQL clients.
-- Frontend layer: React 19 trading dashboard with charts, drawings, replay, auth, settings, market/news, and Phase 1 AI Ask Mode surfaces.
+- Frontend layer: React 19 trading dashboard with charts, drawings, replay, auth, settings, market/news, and AI Ask/Interact surfaces.
 
-Latest project release from `docs/CHANGELOG.md`: **0.23.1**.
+Latest project release from `docs/CHANGELOG.md`: **0.24.2**.
 
 Repository facts from this audit:
 
 - Branch: `main`.
-- FastAPI app metadata version: `0.23.1`.
+- FastAPI app metadata version: `0.24.0`.
 - Frontend package version: `0.3.0`.
 - Compose source of truth: one `docker-compose.yml` with profiles.
 - Core compose services from static YAML audit: 40 concrete services plus 2 template services.
@@ -59,8 +59,9 @@ Primary runtime paths:
 | Speed processing | Hot tickers, candles, order books, and indicators | `src/processing/pipeline.py`, `src/processing/writers/*` |
 | Warm storage | Recent time-series analytics | InfluxDB writers and backfill jobs |
 | Cold storage | Historical/lakehouse analytics | `src/lakehouse/pipeline.py`, `src/batch/*`, MinIO, Iceberg, Trino |
-| Serving | REST, WebSocket, auth, settings, Phase 1 AI Ask Mode APIs | `backend/app.py`, `backend/api/*`, `backend/services/*` |
+| Serving | REST, WebSocket, auth, settings, and thin AI API adapters | `backend/app.py`, `backend/api/*`, `backend/services/*` |
 | UI | Trading dashboard, drawings, replay, auth, settings, AI Helper, market/news | `frontend/src/*` |
+| AI core | Ask/Interact orchestration, providers, RAG, actions, prompts, and safety | `ai_service/*` |
 | Operations | Compose, Nginx, monitoring, logging, job scripts | `docker-compose.yml`, `docker/*`, `config/*`, `scripts/*` |
 
 ---
@@ -74,8 +75,19 @@ backend/
   core/                     Config, constants, DB clients, Redis Sentinel, auth deps
   migrations/               Ordered PostgreSQL SQL migrations
   models/                   Pydantic response/request models
-  services/                 Business logic for auth, AI, market data, settings, caches
+  services/                 Business logic for auth, market data, settings, caches, and AI compatibility wrappers
   tasks/                    Background market/news fetchers
+
+ai_service/
+  actions/                  Reusable AI function schemas and validators
+  context/                  Chart/runtime context and data freshness notes
+  core/                     Ask/Interact orchestration
+  persistence/              Chat/session/message helpers
+  providers/                local/api/none provider router and clients
+  rag/                      Registry validation, ingestion gates, retrieval, embeddings
+  prompts/                  Shared prompt builder
+  safety/                   Scope gate and output guard
+  configs/                  Provider/model YAML catalogs
 
 src/
   common/                   Shared config, Kafka client, Avro serializer, logging
@@ -545,17 +557,19 @@ Default admin bootstrap:
 | PATCH | `/api/auth/profile` | PostgreSQL | Profile fields |
 | POST | `/api/auth/change-password` | PostgreSQL | Password update |
 | DELETE | `/api/auth/account` | PostgreSQL | Account deactivation after confirmation |
-| GET | `/api/ai/health` | PostgreSQL + provider/RAG checks | Reports AI mode, RAG, pgvector, providers, knowledge source count |
-| POST | `/api/ai/chat` | PostgreSQL + scope gate + RAG + provider router | Auth required; real LLM path when enabled/configured, mock fallback always available |
+| GET | `/api/ai/health` | PostgreSQL + provider/RAG/action checks | Reports provider mode, effective provider, API models, local health, RAG, pgvector, and action catalog version |
+| POST | `/api/ai/chat` | `ai_service` orchestrator | Auth required; `ask` and `interact` share scope, context, RAG, prompt, provider, guard, action, and audit flow |
+| GET | `/api/ai/actions/catalog` | `ai_service.actions` | Reusable JSON schemas for AI/debug function calls |
 | GET/POST | `/api/ai/sessions` | PostgreSQL | Session list/create |
 | GET | `/api/ai/sessions/{session_id}/messages` | PostgreSQL | User-owned session messages |
 | POST | `/api/ai/chart-context` | PostgreSQL | Store chart context snapshot |
 | POST | `/api/ai/chart-actions/validate` | Validator | Validate proposed chart actions only |
 | POST | `/api/ai/chart-actions/record` | Acknowledgement | Records approval/execution state shape |
-| POST | `/api/ai/knowledge/ingest` | PostgreSQL + pgvector | Admin-only markdown ingestion; defaults to approved knowledge base dir |
-| POST | `/api/ai/knowledge/search` | PostgreSQL + pgvector | Authenticated vector search |
+| POST | `/api/ai/knowledge/ingest` | PostgreSQL + pgvector | Admin-only markdown ingestion; registry gate requires approved and allowed-for-RAG docs |
+| POST | `/api/ai/knowledge/search` | PostgreSQL + pgvector | Authenticated vector search over approved and allowed-for-RAG sources only |
 | GET | `/api/ai/knowledge/sources` | PostgreSQL | Authenticated knowledge source listing |
 | GET | `/api/ai/knowledge/health` | PostgreSQL + pgvector | Authenticated knowledge base health |
+| GET | `/api/ai/knowledge/registry/validate` | Registry validator | Admin-only registry metadata validation |
 | GET | `/api/settings` | PostgreSQL | Bundled user settings |
 | PATCH | `/api/settings/notifications` | PostgreSQL | Notification preferences |
 | PATCH | `/api/settings/customization` | PostgreSQL | UI/chart defaults |
@@ -710,7 +724,7 @@ Scripts:
 | Replay | `features/replay/components/ReplayControls.tsx`, `hooks/useReplayMode.ts` |
 | Auth | `features/auth/AuthContext.tsx`, `features/auth/AuthModal.tsx`, `services/authService.ts` |
 | Settings/admin | `features/settings/SettingsModal.tsx`, `services/settingsService.ts` |
-| AI Helper | `features/ai/components/AiAssistantPanel.tsx`, `features/ai/hooks/useAiChat.ts`, `services/aiService.ts` |
+| AI Helper | `features/ai/components/AiAssistantPanel.tsx`, `features/ai/actions/AiActionProvider.tsx`, `features/ai/hooks/useAiChat.ts`, `services/aiService.ts` |
 
 ### Data Mode
 
@@ -759,13 +773,13 @@ Rules:
 Current state:
 
 - Frontend AI Helper requires login in API mode.
-- Backend `/api/ai/*` endpoints persist sessions/messages/snapshots and support Phase 1 Ask Mode.
-- Ask Mode path is: scope gate -> session persistence -> optional RAG retrieval -> prompt builder -> provider router -> output guard -> message persistence.
-- `AI_MODE=mock` or `AI_ENABLE_REAL_LLM=false` keeps deterministic mock behavior.
-- `AI_ENABLE_REAL_LLM=true` with `AI_MODE=api|local|auto`, provider keys, and runtime dependencies can route to LiteLLM/vLLM-compatible providers; mock remains final fallback.
-- Local LMView Help mode exists for mock/API-fallback behavior.
-- Knowledge ingestion/search uses PostgreSQL + pgvector after migration `003_phase1_ai_rag.sql` and embedding dependencies are present.
-- `docker-compose.ai.yml` adds optional `litellm` and `vllm` services. Its `ai-service` container uses an `echo` command and exits; Phase 1 logic runs inside core FastAPI.
+- Backend `/api/ai/*` endpoints persist sessions/messages/snapshots and call centralized `ai_service` logic.
+- Ask and Interact share one path: scope gate -> session persistence -> chart/runtime context -> approved-only RAG retrieval -> prompt builder -> provider router -> output guard -> action proposal -> message persistence.
+- `AI_MODE=auto|local|api|none`; `auto` prefers local, then API, then none. Backend production mock fallback has been removed.
+- Default API config uses DashScope International OpenAI-compatible `openai/qwen3.5-plus`; `DASHSCOPE_API_KEY` is primary and `QWEN_API_KEY` remains a legacy alias.
+- Knowledge ingestion/search uses PostgreSQL + pgvector after migration `003_phase1_ai_rag.sql`; retrieval requires approved sources with `allowed_for_rag=true`.
+- Frontend mock mode still uses API-shaped adapters under `frontend/src/data/mock/`.
+- `docker-compose.ai.yml` adds optional `litellm` and `vllm` services. Its `ai-service` container uses an `echo` command and exits; central AI logic runs inside core FastAPI.
 
 ---
 
@@ -951,58 +965,59 @@ Local verification state:
 
 ---
 
-## 15. AI Ask Mode Current State
+## 15. AI Current State
 
-Current AI state is **Phase 1 Ask Mode**.
+Current AI state is **0.24 centralized Ask/Interact orchestration**.
 
 ### Backend AI Package
 
 | Area | Files | Current behavior |
 |---|---|---|
-| Router package | `backend/api/ai/__init__.py` | Registers `/api/ai` child routers for health, chat, sessions, chart context, chart actions, and knowledge |
-| Chat route | `backend/api/ai/chat.py` | Runs scope gate, session management, message storage, mock or real LLM path, output guard, confidence estimate, and assistant message storage |
+| Router package | `backend/api/ai/__init__.py` | Registers `/api/ai` child routers for health, chat, sessions, chart context, chart actions, action catalog, and knowledge |
+| Chat route | `backend/api/ai/chat.py` | Thin authenticated adapter around `ai_service.core.orchestrator.run_chat()` |
 | Sessions | `backend/api/ai/sessions.py` | Lists/creates user-owned sessions and reads session messages |
 | Chart context | `backend/api/ai/chart_context.py` | Stores chart context snapshots for authenticated users |
 | Chart actions | `backend/api/ai/chart_actions.py` | Validates and records chart-action payloads |
-| Knowledge | `backend/api/ai/knowledge.py` | Admin ingest plus authenticated search/sources/health endpoints |
-| Legacy compatibility | `backend/api/ai_legacy.py` | Preserved legacy route module; `backend/app.py` imports the modular package |
+| Action catalog | `backend/api/ai/actions.py` | Returns reusable function-call schemas |
+| Knowledge | `backend/api/ai/knowledge.py` | Admin ingest, registry validation, and authenticated search/sources/health endpoints |
+| Legacy compatibility | `backend/api/ai_legacy.py` | Re-exports the modular package router |
 
-### AI Services
+### AI Service Package
 
 | Service | File | Current behavior |
 |---|---|---|
-| Scope gate | `backend/services/scope_gate_service.py` | Rule-based topic and prompt-injection classification before model/RAG calls |
-| Chat persistence | `backend/services/ai_chat_service.py` | PostgreSQL sessions/messages access |
-| Mock response | `backend/services/ai_mock_service.py`, `backend/services/ai/mock_provider.py` | Deterministic response path and provider fallback |
-| Provider interface | `backend/services/ai/base_provider.py` | Shared provider protocol |
-| Provider router | `backend/services/ai/provider_router.py` | Provider order from env, lazy provider registration, mock fallback |
-| LiteLLM provider | `backend/services/ai/litellm_provider.py` | Lazy `litellm` import and async completion calls |
-| Prompt builder | `backend/services/ai/prompt_builder.py` | System prompt, chart context, RAG chunks, conversation history, data caveats, user message |
-| Context service | `backend/services/ai/context_service.py` | Data caveat list from chart/market/trade/orderbook/news/OKX context |
-| Output guard | `backend/services/ai/output_guard.py` | Financial-safety validation, code-block removal, disclaimer handling |
-| Knowledge service | `backend/services/ai/knowledge_service.py` | Markdown chunking, content hash, embedding generation, PostgreSQL storage |
-| Retrieval service | `backend/services/ai/retrieval_service.py` | pgvector cosine search, filters, retrieval audit logging |
+| Orchestrator | `ai_service/core/orchestrator.py` | Shared Ask/Interact pipeline |
+| Scope gate | `ai_service/safety/scope_gate.py` | Rule-based topic and prompt-injection classification before model/RAG calls |
+| Chat persistence | `ai_service/persistence/chat_store.py` | PostgreSQL sessions/messages access |
+| Provider interface | `ai_service/providers/base.py` | Shared provider protocol |
+| Provider router | `ai_service/providers/router.py` | `auto/local/api/none` routing with `none` final fallback |
+| API/local provider | `ai_service/providers/litellm_provider.py` | Lazy `litellm` import and OpenAI-compatible completion calls |
+| None provider | `ai_service/providers/none_provider.py` | Generic system guidance when no model is available |
+| Prompt builder | `ai_service/prompts/prompt_builder.py` | System prompt, temporal context, chart context, RAG chunks, conversation history, data caveats, user message |
+| Context service | `ai_service/context/context_service.py` | Data caveat list from chart/market/trade/orderbook/news/OKX context |
+| Output guard | `ai_service/safety/output_guard.py` | Financial-safety validation, code-block removal, disclaimer handling |
+| Knowledge service | `ai_service/rag/knowledge_service.py` | Registry-gated markdown chunking, content hash, embedding generation, PostgreSQL storage |
+| Retrieval service | `ai_service/rag/retrieval_service.py` | pgvector cosine search requiring approved and allowed-for-RAG sources |
+| Actions | `ai_service/actions/*` | Function schemas, validation, and chart-action compatibility |
 
 ### Provider and RAG Configuration
 
 | Setting | Default in code/env | Current effect |
 |---|---|---|
-| `AI_MODE` | `mock` | `mock`, `api`, `local`, or `auto` provider ordering |
-| `AI_ENABLE_REAL_LLM` | `false` | Enables real provider path when true and `AI_MODE != "mock"` |
-| `AI_ENABLE_RAG` | `true` | Enables retrieval attempt in real LLM path |
-| `AI_PROVIDER_ORDER` | `local_vllm,qwen_api,llama_api,mock` | Local/auto provider priority |
-| `AI_TEST_PROVIDER_ORDER` | `qwen_api,llama_api,local_vllm,mock` | API-mode provider priority |
-| `AI_ENABLE_PROVIDER_FALLBACK` | `true` | Tries next provider when one fails |
+| `AI_MODE` | `auto` | `auto`, `local`, `api`, or `none` provider routing |
+| `AI_CONFIG_PATH` | mode-based YAML (`ai.local.yaml` for `auto`) | Provider/model catalog path |
+| `AI_ENABLE_RAG` | `true` | Enables retrieval attempt in AI orchestration |
+| `DASHSCOPE_API_KEY` | unset | Primary API key for DashScope International |
+| `QWEN_API_KEY` | unset | Legacy alias if `DASHSCOPE_API_KEY` is unset |
 | `AI_RAG_TOP_K` | `6` | Retrieval result limit |
 | `AI_RAG_MIN_SCORE` | `0.25` | Minimum similarity score |
 | `AI_KB_APPROVED_ONLY` | `true` | Limits retrieval to approved sources |
 
 Runtime dependency state from repository files:
 
-- `docker/fastapi/requirements.txt` includes `asyncpg`, auth dependencies, FastAPI, Redis, InfluxDB, Trino, and news scraping packages.
-- `docker/fastapi/requirements.txt` does not include `litellm` or `sentence-transformers`.
-- `backend/services/ai/litellm_provider.py` imports `litellm` lazily.
-- `backend/services/ai/knowledge_service.py` imports `sentence_transformers` lazily.
+- `docker/fastapi/requirements.txt` includes `asyncpg`, auth dependencies, FastAPI, Redis, InfluxDB, Trino, news scraping packages, `litellm`, `PyYAML`, and `sentence-transformers`.
+- `ai_service/providers/litellm_provider.py` imports `litellm` lazily.
+- `ai_service/rag/knowledge_service.py` imports `sentence_transformers` lazily.
 - `backend/migrations/003_phase1_ai_rag.sql` creates pgvector-backed knowledge sources, chunks, embeddings, HNSW index, and retrieval logs.
 
 ---
@@ -1124,8 +1139,8 @@ High-impact current behaviors:
 3. **Trades are mixed-source.** `/api/trades/{symbol}` reads true Redis trade tape first, then ticker-derived fallback. `/api/trades/{symbol}/summary` checks true trade keys first but parses members as ticker-history strings and returns ticker-derived metadata fields.
 4. **Market overview has fallback semantics.** `/api/market/overview` tries Trino gold tables, then derives from Redis ticker cache and marks placeholder metadata. Heatmap helper still contains one `iceberg_catalog.gold` join while other gold queries use `iceberg.gold`.
 5. **Dagster uses a separate catalog shape.** `defs = Definitions(...)` and lazy news imports exist; Dagster Spark assets use a different Iceberg catalog/warehouse config than the main streaming lakehouse job.
-6. **AI Phase 1 real path depends on runtime extras.** Core FastAPI requirements do not include `litellm` or `sentence-transformers`, and pgvector must be installed in PostgreSQL for RAG embeddings/search.
-7. **AI overlay support services are separate from embedded FastAPI AI.** `docker-compose.ai.yml` starts LiteLLM/vLLM support services, while `ai-service` exits after an echo command. Phase 1 runs embedded in core FastAPI.
+6. **AI retrieval is approval-gated.** Bundled AI-generated KB notes are pending and excluded; production RAG returns no KB chunks until approved sources have reviewer metadata and `allowed_for_rag=true`.
+7. **AI overlay support services are separate from embedded FastAPI AI.** `docker-compose.ai.yml` starts LiteLLM/vLLM support services, while `ai-service` exits after an echo command. Central AI orchestration runs inside core FastAPI through `ai_service`.
 8. **Direct Redis auto-failover covers one hot path.** Health monitor can toggle the global direct writer state; Binance ticker checks `health_monitor.is_direct_redis_active()` when static `ENABLE_DIRECT_REDIS=false`; kline/trade/depth paths gate on the static env flag.
 9. **WebSocket routes have three shapes.** Backend exposes `/api/stream/{interval}`, `/api/stream/indicators/{interval}`, and `/api/stream/all`. Main chart uses `/api/stream/all`. Trade direct path (`trade:latest`) is the primary real-time price source.
 10. **PostgreSQL health is separate.** `/api/health` checks Redis, InfluxDB, and Trino; `/api/ai/health` reports PostgreSQL/AI/RAG/provider readiness.
@@ -1194,7 +1209,7 @@ Infrastructure:
 | `docs/CHANGELOG.md` | Project history |
 | `AGENTS.md` | AI agent workflow and coding rules |
 | `README.md` | User-facing overview and setup |
-| `docs/ai/*.md` | Phase 1 AI architecture, contracts, provider routing, RAG, evaluation, and security documentation |
+| `docs/ai/*.md` | AI architecture, contracts, provider routing, RAG, evaluation, and security documentation |
 | `docker-compose.yml` | Runtime service graph |
 | `.env.example` | Environment variable template |
 | `Makefile` | Common operational commands |
@@ -1203,5 +1218,5 @@ Infrastructure:
 
 ---
 
-Document version: **6.0**
+Document version: **7.0**
 Maintained by: human contributors and AI coding agents.

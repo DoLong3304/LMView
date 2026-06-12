@@ -13,7 +13,7 @@ from backend.models.ai import (
 )
 from backend.services.scope_gate_service import check_scope
 from backend.services.ai_action_service import validate_actions
-from backend.services.ai_mock_service import generate_mock_response
+from ai_service.providers.none_provider import NoneProvider
 
 
 # ── AI Model Tests ────────────────────────────────────────────────────────────
@@ -223,25 +223,21 @@ class TestChartActionValidator:
 
 # ── Mock Service Tests ────────────────────────────────────────────────────────
 
-class TestMockService:
-    def test_basic_response(self):
-        result = generate_mock_response("Hello")
-        assert result["is_mock"] is True
-        assert result["provider"] == "phase0_mock"
-        assert "Phase 0" in result["content"]
+class TestNoneProvider:
+    def test_none_provider_info(self):
+        provider = NoneProvider()
+        info = provider.get_info()
+        assert info.provider_name == "none"
+        assert info.is_available is True
 
-    def test_response_includes_context(self):
-        ctx = {"symbol": "BTCUSDT", "timeframe": "1h", "selected_indicators": ["rsi", "macd"]}
-        result = generate_mock_response("Analyze BTC", chart_context=ctx)
-        assert "BTCUSDT" in result["content"]
-        assert "1h" in result["content"]
-        assert result["grounded_context_used"] is True
+    @pytest.mark.asyncio
+    async def test_none_provider_response(self):
+        from backend.models.ai.providers import LLMCompletionRequest, LLMMessage
 
-    def test_interact_mode(self):
-        result = generate_mock_response("Add RSI", mode="interact")
-        assert "Interact Mode" in result["content"]
-
-    def test_response_has_suggestions(self):
-        result = generate_mock_response("Hello")
-        assert result["suggested_actions"] is not None
-        assert len(result["suggested_actions"]) > 0
+        provider = NoneProvider()
+        result = await provider.generate_chat_completion(
+            LLMCompletionRequest(messages=[LLMMessage(role="user", content="Hello")])
+        )
+        assert result.is_mock is False
+        assert result.provider == "none"
+        assert "no local or API model" in result.content

@@ -32,12 +32,17 @@ class AIHealthResponse(BaseModel):
     """Response from GET /api/ai/health."""
     auth_required: bool = True
     database_ready: bool = False
-    mock_mode_available: bool = True
+    mock_mode_available: bool = False
     chart_action_schema_version: str = "1.0.0"
     supported_modes: List[str] = Field(default_factory=lambda: ["ask", "interact"])
     supported_action_types: List[str] = Field(default_factory=list)
     # Phase 1 additions
     ai_mode: Optional[str] = None
+    provider_mode: Optional[str] = None
+    effective_provider: Optional[str] = None
+    available_api_models: List[str] = Field(default_factory=list)
+    local_available: bool = False
+    action_catalog_version: Optional[str] = None
     rag_enabled: bool = False
     real_llm_enabled: bool = False
     available_providers: Optional[List[str]] = None

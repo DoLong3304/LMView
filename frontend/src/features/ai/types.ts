@@ -12,6 +12,18 @@ export interface AiMessage {
   created_at?: string | null;
   warnings?: string[];
   suggested_actions?: string[] | null;
+  tool_calls?: Array<{
+    name: string;
+    arguments?: Record<string, unknown>;
+    reason?: string | null;
+    requires_approval?: boolean;
+  }> | null;
+  chart_actions?: Array<{
+    action_type: string;
+    params: Record<string, unknown>;
+    reason?: string | null;
+    requires_approval: boolean;
+  }> | null;
   /** Phase 1: response confidence level 0-1 */
   confidence?: number | null;
   /** Phase 1: RAG source citations */

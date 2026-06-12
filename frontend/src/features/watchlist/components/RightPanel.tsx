@@ -60,7 +60,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
   starredSymbols,
   onSymbolSelect,
   onToggleStar,
-  width = 286,
+  width = 360,
   candles = [],
   timeframe = "1m",
   onOpenSettings,
@@ -78,6 +78,27 @@ const RightPanel: React.FC<RightPanelProps> = ({
       setActiveTopTab("overview");
     }
   }, [activeTopTab, isAuthenticated]);
+
+  useEffect(() => {
+    const onTopTab = (event: Event) => {
+      const tab = (event as CustomEvent<{ tab?: RightPanelTopTab }>).detail?.tab;
+      if (tab === "aiHelper" && !isAuthenticated) return;
+      if (tab === "overview" || tab === "aiHelper") setActiveTopTab(tab);
+    };
+    const onPanelTab = (event: Event) => {
+      const tab = (event as CustomEvent<{ tab?: RightPanelTab }>).detail?.tab;
+      if (tab === "watchlist" || tab === "orderBook" || tab === "recentTrades") {
+        setActiveTopTab("overview");
+        setActiveTab(tab);
+      }
+    };
+    window.addEventListener("lmview:right-panel-top-tab", onTopTab);
+    window.addEventListener("lmview:right-panel-tab", onPanelTab);
+    return () => {
+      window.removeEventListener("lmview:right-panel-top-tab", onTopTab);
+      window.removeEventListener("lmview:right-panel-tab", onPanelTab);
+    };
+  }, [isAuthenticated]);
 
 
   // Sort: starred first, then by % change (gainers → losers)
@@ -210,7 +231,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
         )}
       </div>
 
-      <div className={activeTopTab === "overview" ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "hidden"}>
+      <div data-ai-section="right-panel-overview" className={activeTopTab === "overview" ? "flex min-h-0 flex-1 flex-col overflow-hidden" : "hidden"}>
       {/* Coin Summary - Fixed at top */}
       <div className="px-2.5 py-2 border-b border-gray-800 bg-gray-850">
         {/* Symbol header */}
@@ -388,7 +409,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
       </div>
 
       {/* Watchlist - Scrollable, no pagination */}
-      <div className="flex-1 overflow-y-auto min-h-0">
+      <div data-ai-section="watchlist-list" className="flex-1 overflow-y-auto min-h-0">
         {sortedItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-32 text-gray-500 text-sm">
             <Star size={24} className="mb-2 opacity-50" />
@@ -448,13 +469,13 @@ const RightPanel: React.FC<RightPanelProps> = ({
       )}
 
       {activeTab === "orderBook" && (
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div data-ai-section="order-book-panel" className="flex-1 min-h-0 overflow-hidden">
           <OrderBook symbol={selectedSymbol} />
         </div>
       )}
 
       {activeTab === "recentTrades" && (
-        <div className="flex-1 min-h-0 overflow-hidden">
+        <div data-ai-section="recent-trades-panel" className="flex-1 min-h-0 overflow-hidden">
           <RecentTrades symbol={selectedSymbol} />
         </div>
       )}

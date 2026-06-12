@@ -1,92 +1,81 @@
-# AI Provider Routing — LMView
+# AI Provider Routing - LMView
 
 ## Overview
 
-LMView uses a provider-agnostic routing system. The AI behavior, prompts, schemas, RAG, risk review, and output contract are identical across all providers.
+LMView keeps AI behavior provider-agnostic. Ask and Interact use the same orchestration path in `ai_service/core/orchestrator.py`; only the final completion provider changes.
 
-## Provider Types
+## Public Provider Choices
 
-| Provider | Type | GPU Required | Notes |
-|----------|------|-------------|-------|
-| local_vllm | Local vLLM | Yes | Qwen/Llama via vLLM OpenAI-compatible API |
-| qwen_api | Online API | No | Qwen-Plus via DashScope |
-| llama_api | Online API | No | Llama-4-Maverick via Meta API |
-| openai | Online API | No | GPT-4o-mini via OpenAI |
-| gemini | Online API | No | Gemini 2.0 Flash via Google |
-| deepseek | Online API | No | DeepSeek Chat via DeepSeek API |
-| litellm_proxy | Proxy | No | Custom LiteLLM proxy |
-| mock | Mock | No | Deterministic Phase 0 fallback |
+| Provider | Meaning | Notes |
+|---|---|---|
+| `local` | Local OpenAI-compatible endpoint, usually vLLM | Preferred by `auto` when healthy |
+| `api` | External OpenAI-compatible API model catalog | Defaults to DashScope International Qwen |
+| `none` | No model available | Returns generic LMView/system guidance only |
+
+Frontend mock mode remains a frontend data-mode feature. Backend production routing does not include `mock`.
 
 ## Routing Modes
 
-### `AI_MODE=mock` (default)
-Only mock provider. No real LLM calls. Safe for development and testing.
+| `AI_MODE` | Runtime order |
+|---|---|
+| `auto` | `local -> api -> none` |
+| `local` | `local -> none` |
+| `api` | `api -> none` |
+| `none` | `none` |
 
-### `AI_MODE=api`
-Online API providers first: `qwen_api → llama_api → local_vllm → mock`
-
-### `AI_MODE=local`
-Local vLLM first: `local_vllm → qwen_api → llama_api → mock`
-
-### `AI_MODE=auto`
-Full priority chain: `local_vllm → qwen_api → llama_api → openai → gemini → deepseek → mock`
-
-## Fallback Behavior
-
-1. Router tries providers in configured order
-2. On failure, logs warning and tries next provider
-3. If `AI_ENABLE_PROVIDER_FALLBACK=false`, stops after first failure
-4. Mock is always the final fallback
-5. Response metadata indicates which provider was used and if fallback occurred
+Provider order and model catalogs live in YAML under `ai_service/configs/`. The env surface stays lean.
 
 ## Configuration
 
 ```bash
-# Mode selection
-AI_MODE=auto                    # mock|api|local|auto
-AI_ENABLE_REAL_LLM=true        # Enable real LLM providers
-AI_ENABLE_PROVIDER_FALLBACK=true # Enable automatic fallback
+AI_MODE=auto
+AI_CONFIG_PATH=ai_service/configs/ai.api.yaml
+DASHSCOPE_API_KEY=...
 
-# Provider API keys (set only those you use)
+# Legacy alias, still accepted if DASHSCOPE_API_KEY is unset.
 QWEN_API_KEY=...
-LLAMA_API_KEY=...
-OPENAI_API_KEY=...
-GEMINI_API_KEY=...
-DEEPSEEK_API_KEY=...
-
-# Local vLLM
-VLLM_BASE_URL=http://vllm:8000/v1
-VLLM_MODEL=Qwen/Qwen2.5-7B-Instruct
-
-# LiteLLM proxy
-LITELLM_BASE_URL=http://litellm:4000
-LITELLM_MASTER_KEY=...
 ```
+
+Default API provider:
+
+| Field | Value |
+|---|---|
+| Provider | DashScope International OpenAI-compatible API |
+| Model | `openai/qwen3.5-plus` |
+| Endpoint | `https://dashscope-intl.aliyuncs.com/compatible-mode/v1` |
+| Primary key env | `DASHSCOPE_API_KEY` |
+
+OpenAI-compatible responses read usage from `usage.prompt_tokens`, `usage.completion_tokens`, and `usage.total_tokens`. Native DashScope references use `input_tokens`, `output_tokens`, and `total_tokens`.
+
+References:
+
+- https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope
+- https://www.alibabacloud.com/help/en/model-studio/models
+- https://www.alibabacloud.com/help/en/model-studio/model-pricing
 
 ## Response Metadata
 
-Every AI response includes provider metadata:
 ```json
 {
-  "provider": "qwen_api",
-  "model_name": "openai/qwen-plus",
+  "provider": "api",
+  "model_name": "openai/qwen3.5-plus",
   "is_mock": false,
-  "confidence": 0.75,
+  "tool_calls": [],
+  "chart_actions": [],
+  "warnings": [],
   "provider_metadata": {
-    "provider": "qwen_api",
-    "model": "openai/qwen-plus",
-    "is_local": false,
+    "provider": "api",
+    "model": "openai/qwen3.5-plus",
     "fallback_used": false,
-    "latency_ms": 1234
+    "usage": {
+      "prompt_tokens": 1200,
+      "completion_tokens": 240,
+      "total_tokens": 1440
+    }
   }
 }
 ```
 
 ## Health Check
 
-`GET /api/ai/health` returns:
-- Available providers list
-- AI mode
-- RAG enabled status
-- pgvector readiness
-- Knowledge source count
+`GET /api/ai/health` returns provider mode, effective provider, available API models, local health, RAG status, pgvector readiness, and action catalog version.

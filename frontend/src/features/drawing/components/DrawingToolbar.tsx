@@ -17,18 +17,18 @@ const SETTINGS_TOOLS = new Set([
   "priceRange", "dateRange", "riskReward",
 ]);
 
-interface ToolDef {
+export interface ToolDef {
   id: string;
   labelKey: TranslationKey;
   icon: React.ReactNode;
 }
 
-interface ToolGroup {
+export interface ToolGroup {
   labelKey: TranslationKey;
   tools: ToolDef[];
 }
 
-const TOOL_GROUPS: ToolGroup[] = [
+export const TOOL_GROUPS: ToolGroup[] = [
   {
     labelKey: "basic",
     tools: [

@@ -424,6 +424,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const openAiActionTester = () => {
+    onClose();
+    window.dispatchEvent(new CustomEvent("lmview:open-ai-action-debug"));
+  };
+
   const updateAdminUsers = async (nextQuery = adminQuery) => {
     setAdminUsers(await fetchAdminUsers(nextQuery));
   };
@@ -441,7 +446,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-[600] flex items-center justify-center bg-black/60 px-3 backdrop-blur-sm">
+    <div data-ai-section="settings-modal" className="fixed inset-0 z-[600] flex items-center justify-center bg-black/60 px-3 backdrop-blur-sm">
       <div
         role="dialog"
         aria-modal="true"
@@ -722,6 +727,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                     <pre className="max-h-48 overflow-auto rounded border border-gray-800 bg-gray-950 p-3 text-xs text-gray-300">{stringifyDebug(appSettings)}</pre>
                   </Panel>
                   <Panel title={t("chartActionTest")}>
+                    <DebugButton loading={false} label={t("aiActionDebug")} onClick={openAiActionTester} />
                     <textarea value={chartActionJson} onChange={(event) => setChartActionJson(event.target.value)} className="h-48 w-full rounded border border-gray-700 bg-gray-950 p-2 font-mono text-xs text-gray-200 outline-none focus:border-blue-500" />
                     <DebugButton loading={debugLoading === "chartAction"} label={t("validate")} onClick={runChartActionValidation} />
                   </Panel>

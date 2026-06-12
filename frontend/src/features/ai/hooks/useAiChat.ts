@@ -27,6 +27,9 @@ import type {
 } from "@/features/ai/types";
 import type { AiMode, LocalAiHelpSession } from "@/types";
 
+type AiToolCall = NonNullable<AiMessage["tool_calls"]>[number];
+type AiChartActionMessage = NonNullable<AiMessage["chart_actions"]>[number];
+
 const mockDataAdapter = getMockDataAdapter();
 
 interface UseAiChatReturn extends AiChatState {
@@ -95,10 +98,34 @@ function mapApiMessage(message: AIMessageResponse): AiMessage {
       metadata.provider_routing && typeof metadata.provider_routing === "object"
         ? (metadata.provider_routing as Record<string, unknown>)
         : undefined,
+    tool_calls: Array.isArray(metadata.tool_calls)
+      ? metadata.tool_calls.filter((item): item is AiToolCall =>
+          Boolean(item) && typeof item === "object" && typeof (item as { name?: unknown }).name === "string",
+        )
+      : undefined,
+    chart_actions: Array.isArray(metadata.chart_actions)
+      ? metadata.chart_actions.filter((item): item is AiChartActionMessage =>
+          Boolean(item) && typeof item === "object" && typeof (item as { action_type?: unknown }).action_type === "string",
+        )
+      : undefined,
     token_input: message.token_input ?? metadataNumber(metadata, "token_input"),
     token_output: message.token_output ?? metadataNumber(metadata, "token_output"),
     estimated_cost_usd: metadataNumber(metadata, "estimated_cost_usd"),
   };
+}
+
+function localInteractToolCalls(message: string, mode: AiMode): AiToolCall[] | undefined {
+  if (mode !== "interact") return undefined;
+  const text = message.toLowerCase();
+  if (/\b(tour|guide|tutorial|demo|learn how|how to use|show me around)\b/.test(text)) {
+    return [{
+      name: "start_tour",
+      arguments: { tour_id: "lmview-overview" },
+      reason: "User asked to learn LMView interactively.",
+      requires_approval: false,
+    }];
+  }
+  return undefined;
 }
 
 export function useAiChat(): UseAiChatReturn {
@@ -244,23 +271,14 @@ export function useAiChat(): UseAiChatReturn {
             warnings: ["Login required."],
           };
           setError("You must log in to use AI Helper.");
-        } else if (mode === "interact") {
-          assistantMsg = {
-            id: `interact-unavailable-${Date.now()}`,
-            role: "assistant",
-            content: "AI Interact mode is unavailable until a real AI action service exists.",
-            provider: "unavailable",
-            is_mock: false,
-            created_at: new Date().toISOString(),
-            warnings: ["AI Interact unavailable."],
-          };
         } else if (shouldUseMockAi()) {
           assistantMsg = mockDataAdapter.generateAiResponse(trimmed, context);
+          assistantMsg.tool_calls = localInteractToolCalls(trimmed, mode);
         } else {
           try {
             const response = await aiChat({
               session_id: sessionId,
-              mode: "ask",
+              mode,
               message: trimmed,
               chart_context: context as Record<string, unknown> | null,
             });
@@ -275,6 +293,8 @@ export function useAiChat(): UseAiChatReturn {
               created_at: response.created_at ?? new Date().toISOString(),
               warnings: response.warnings,
               suggested_actions: response.suggested_actions,
+              tool_calls: response.tool_calls,
+              chart_actions: response.chart_actions,
               confidence: response.confidence,
               sources: response.sources,
               data_caveats: response.data_caveats,
@@ -290,6 +310,7 @@ export function useAiChat(): UseAiChatReturn {
           } catch (apiErr) {
             console.warn("AI API failed, using local help:", apiErr);
             assistantMsg = generateLmviewHelpResponse(trimmed, context);
+            assistantMsg.tool_calls = localInteractToolCalls(trimmed, mode);
             assistantMsg.warnings = [
               ...(assistantMsg.warnings || []),
               `API unavailable - using local help mode: ${

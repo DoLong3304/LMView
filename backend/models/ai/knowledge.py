@@ -18,9 +18,13 @@ class KnowledgeSourceMeta(BaseModel):
     domain: str = "general"
     language: str = "en"
     source_type: str = "internal_doc"
-    credibility_level: str = "verified"
-    review_status: str = "approved"
-    allowed_for_rag: bool = True
+    credibility_level: str = "draft"
+    review_status: str = "pending"
+    reviewer: Optional[str] = None
+    reviewed_date: Optional[str] = None
+    lmview_version_scope: Optional[str] = None
+    source_urls: List[str] = Field(default_factory=list)
+    allowed_for_rag: bool = False
     version: str = "1.0.0"
     tags: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)

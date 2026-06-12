@@ -36,6 +36,12 @@ export interface AIChatResponse {
   created_at?: string | null;
   warnings: string[];
   suggested_actions?: string[] | null;
+  tool_calls?: Array<{
+    name: string;
+    arguments?: Record<string, unknown>;
+    reason?: string | null;
+    requires_approval?: boolean;
+  }> | null;
   chart_actions?: AIChartAction[] | null;
   grounded_context_used: boolean;
   /** Phase 1: response confidence level 0-1 */
@@ -94,6 +100,27 @@ export interface AIHealthResponse {
   chart_action_schema_version: string;
   supported_modes: string[];
   supported_action_types: string[];
+  ai_mode?: string | null;
+  provider_mode?: string | null;
+  effective_provider?: string | null;
+  available_api_models?: string[];
+  local_available?: boolean;
+  action_catalog_version?: string | null;
+  rag_enabled?: boolean;
+  real_llm_enabled?: boolean;
+  available_providers?: string[] | null;
+  pgvector_ready?: boolean;
+  knowledge_source_count?: number;
+}
+
+export interface AiActionCatalog {
+  version: string;
+  functions: Array<{
+    name: string;
+    description: string;
+    action_type?: string;
+    parameters: Record<string, unknown>;
+  }>;
 }
 
 export interface ChartContextDTO {
@@ -204,6 +231,10 @@ export async function aiValidateActions(
     method: "POST",
     body: JSON.stringify({ actions }),
   });
+}
+
+export async function aiActionCatalog(): Promise<AiActionCatalog> {
+  return aiFetch<AiActionCatalog>("/ai/actions/catalog");
 }
 
 // ── Mock fallback ────────────────────────────────────────────────────────────

@@ -41,7 +41,7 @@ async def ingest_knowledge(
             detail="RAG is not enabled (AI_ENABLE_RAG=false)",
         )
 
-    from backend.services.ai.knowledge_service import ingest_directory, ingest_markdown_file
+    from ai_service.rag.knowledge_service import ingest_directory, ingest_markdown_file
 
     if body.source_dir:
         result = await ingest_directory(body.source_dir, source_id=body.source_id)
@@ -80,7 +80,7 @@ async def search_knowledge(
         )
 
     from backend.models.ai.rag import RAGRetrievalRequest
-    from backend.services.ai.retrieval_service import retrieve
+    from ai_service.rag.retrieval_service import retrieve
 
     retrieval_result = await retrieve(
         RAGRetrievalRequest(
@@ -158,5 +158,21 @@ async def knowledge_health_endpoint(
     current_user: dict = Depends(get_current_user),
 ):
     """Check knowledge base health and statistics."""
-    from backend.services.ai.knowledge_service import knowledge_health
+    from ai_service.rag.knowledge_service import knowledge_health
     return await knowledge_health()
+
+
+@router.get("/knowledge/registry/validate")
+async def validate_knowledge_registry(
+    current_user: dict = Depends(get_current_user),
+):
+    """Validate knowledge-base registry metadata."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Registry validation requires admin privileges",
+        )
+    from ai_service.rag.registry import load_registry, validate_registry
+
+    errors = validate_registry(load_registry())
+    return {"valid": not errors, "errors": errors}

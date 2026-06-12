@@ -11,6 +11,11 @@ import LeftSidebar from "@/components/layout/LeftSidebar";
 import AuthModal from "@/features/auth/AuthModal";
 import { useAuth } from "@/features/auth/AuthContext";
 import SettingsModal from "@/features/settings/SettingsModal";
+import {
+    AiActionProvider,
+    useAiActions,
+    type AiChartActionController,
+} from "@/features/ai/actions/AiActionProvider";
 import { CandlestickChart } from "@/features/chart";
 import ChartOverlay from "@/features/drawing/components/ChartOverlay";
 import DrawingContextToolbar from "@/features/drawing/components/DrawingContextToolbar";
@@ -148,6 +153,8 @@ const TradingDashboard: React.FC = () => {
     const [currentTimeframe, setCurrentTimeframe] =
         useState<TimeframeKey>(getInitialTimeframe);
     const [chartType, setChartType] = useState<ChartType>(getInitialChartType);
+    const [aiChartController, setAiChartController] =
+        useState<AiChartActionController | null>(null);
     const [isDrawing, setIsDrawing] = useState(false);
     const [selectedSymbol, setSelectedSymbol] = useState<string>(() => {
         const stored = loadFromStorage("app_selectedSymbol", "BTCUSDT");
@@ -728,9 +735,9 @@ const TradingDashboard: React.FC = () => {
     }, [selectedDrawing, t]);
 
     // Resizable right sidebar
-    const SIDEBAR_MIN = 240;
-    const SIDEBAR_MAX = 380;
-    const SIDEBAR_DEFAULT = 286;
+    const SIDEBAR_MIN = 320;
+    const SIDEBAR_MAX = 520;
+    const SIDEBAR_DEFAULT = 360;
     const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
     const dragging = useRef(false);
 
@@ -756,8 +763,8 @@ const TradingDashboard: React.FC = () => {
     const showRightPanel = isChartsView && isRightPanelOpen;
     const compactRightPanelWidth =
         typeof window === "undefined"
-            ? 300
-            : Math.min(300, Math.floor(window.innerWidth * 0.86));
+            ? 420
+            : Math.min(420, Math.floor(window.innerWidth * 0.92));
 
     const clearDrawingsConfirmModal = isClearDrawingsConfirmOpen ? (
         <div className="fixed inset-0 z-[500] flex items-center justify-center bg-black/60 px-4">
@@ -805,8 +812,27 @@ const TradingDashboard: React.FC = () => {
 
     return (
         <ErrorBoundary>
-            <div className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
-                <Header
+            <AiActionProvider>
+            <AiActionRuntimeBridge
+                setDrawingTool={handleToolChange}
+                addDrawing={handleAddDrawing}
+                setTimeframe={handleTimeframeChange}
+                setSymbol={handleSymbolSelect}
+                setChartType={setChartType}
+                setView={setAppView}
+                setRightPanelOpen={setIsRightPanelOpen}
+                openSettings={() => handleOpenSettings()}
+                closeSettings={() => setIsSettingsModalOpen(false)}
+                currentView={appView}
+                rightPanelOpen={isRightPanelOpen}
+                currentTimeframe={currentTimeframe}
+                selectedSymbol={selectedSymbol}
+                chartType={chartType}
+                chartController={aiChartController}
+            />
+            <div data-ai-section="app-shell" className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
+                <div data-ai-section="header">
+                    <Header
                     themeMode={themeMode}
                     onThemeToggle={handleToggleTheme}
                     isRightPanelOpen={isRightPanelOpen}
@@ -818,6 +844,7 @@ const TradingDashboard: React.FC = () => {
                     onLoginClick={() => setIsAuthModalOpen(true)}
                     onSettingsClick={() => handleOpenSettings("account")}
                 />
+                </div>
 
                 {connError && (
                     <div className="px-4 py-2 bg-red-900/50 border-b border-red-700/50 flex items-center justify-between">
@@ -849,11 +876,11 @@ const TradingDashboard: React.FC = () => {
                 {/* Main content area */}
                 <main className="relative flex-1 flex overflow-hidden min-h-0">
                     {appView === "marketsNews" ? (
-                        <div className="flex-1 min-w-0 overflow-hidden">
+                        <div data-ai-section="markets-news-page" className="flex-1 min-w-0 overflow-hidden">
                             <NewsPage />
                         </div>
                     ) : appView === "screener" ? (
-                        <div className="flex-1 min-w-0 overflow-hidden">
+                        <div data-ai-section="screener-page" className="flex-1 min-w-0 overflow-hidden">
                             <ScreenerPage
                                 onBack={() => setAppView("charts")}
                                 onSymbolSelect={(symbol) => {
@@ -866,6 +893,7 @@ const TradingDashboard: React.FC = () => {
                         <>
                             {/* Chart area */}
                             <div
+                                data-ai-section="chart"
                                 className="flex-1 flex flex-col overflow-hidden min-w-0"
                                 ref={chartContainerRef}
                             >
@@ -887,6 +915,9 @@ const TradingDashboard: React.FC = () => {
                                         isReplayActive={isReplayActive}
                                         newsItems={newsArticles}
                                         showNewsMarkers={true}
+                                        onAiActionControllerReady={
+                                            setAiChartController
+                                        }
                                     >
                                         {(chartApiRef, candleSeriesRef) => {
                                             if (chartApiRef !== chartApi)
@@ -902,6 +933,7 @@ const TradingDashboard: React.FC = () => {
                                                 <>
                                                     {showDrawingToolbar && (
                                                         <div
+                                                            data-ai-section="drawing-toolbar"
                                                             className="pointer-events-none absolute left-3 top-3 z-[130] max-h-[calc(100%-1.5rem)] overflow-visible"
                                                             style={{
                                                                 width: 56,
@@ -1133,8 +1165,9 @@ const TradingDashboard: React.FC = () => {
                                         className={
                                             isDesktop
                                                 ? "flex-shrink-0"
-                                                : "fixed right-0 top-0 z-[190] h-screen max-w-[86vw] shadow-2xl"
+                                            : "fixed right-0 top-0 z-[190] h-screen max-w-[92vw] shadow-2xl"
                                         }
+                                        data-ai-section="right-panel"
                                     >
                                         <RightPanel
                                             items={watchlistItems}
@@ -1188,9 +1221,83 @@ const TradingDashboard: React.FC = () => {
                     onChartTypeChange={setChartType}
                 />
             </div>
+            </AiActionProvider>
         </ErrorBoundary>
     );
 };
+
+function AiActionRuntimeBridge({
+    setDrawingTool,
+    addDrawing,
+    setTimeframe,
+    setSymbol,
+    setChartType,
+    setView,
+    setRightPanelOpen,
+    openSettings,
+    closeSettings,
+    currentView,
+    rightPanelOpen,
+    currentTimeframe,
+    selectedSymbol,
+    chartType,
+    chartController,
+}: {
+    setDrawingTool: (tool: string) => void;
+    addDrawing: (drawing: Drawing) => void;
+    setTimeframe: (timeframe: TimeframeKey) => void;
+    setSymbol: (symbol: string) => void;
+    setChartType: (chartType: ChartType) => void;
+    setView: (view: AppView) => void;
+    setRightPanelOpen: (open: boolean) => void;
+    openSettings: () => void;
+    closeSettings: () => void;
+    currentView: AppView;
+    rightPanelOpen: boolean;
+    currentTimeframe: TimeframeKey;
+    selectedSymbol: string;
+    chartType: ChartType;
+    chartController: AiChartActionController | null;
+}) {
+    const { setRuntime } = useAiActions();
+    useEffect(() => {
+        setRuntime({
+            setDrawingTool,
+            addDrawing,
+            setTimeframe,
+            setSymbol,
+            setChartType,
+            setView,
+            setRightPanelOpen,
+            openSettings,
+            closeSettings,
+            currentView,
+            rightPanelOpen,
+            currentTimeframe,
+            selectedSymbol,
+            chartType,
+            chartController,
+        });
+    }, [
+        addDrawing,
+        chartController,
+        chartType,
+        closeSettings,
+        currentView,
+        currentTimeframe,
+        openSettings,
+        rightPanelOpen,
+        selectedSymbol,
+        setChartType,
+        setDrawingTool,
+        setRightPanelOpen,
+        setRuntime,
+        setSymbol,
+        setTimeframe,
+        setView,
+    ]);
+    return null;
+}
 
 function ForcedPasswordChangeModal({
     onSubmit,

@@ -8,9 +8,68 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.23.1] - 2026-06-11
+## [0.24.1] - 2026-06-12
+
+### Added
+
+- **Expanded AI function calls** - Added frontend/backend action schemas for section navigation, section highlights, chart-area and candle highlights, chart type/timeframe/market switching, chart zoom/scroll, and historical price lookup.
+- **Replayable Interact tour** - Interact mode now auto-runs safe tour actions for demo/help prompts, walks through workspace, chart, tools, selectors, indicators, right-panel modules, header, settings, and AI helper, records action timing, and exposes replay from recap/chat.
+- **Debug action helpers** - Debug function-call window now starts unselected, shows clearer required/optional fields, and provides point JSON templates for drawing calls.
+
+### Changed
+
+- **Highlight behavior** - UI highlights no longer include the chat panel by default; chat is included only for AI-helper explanations.
+- **Right-panel/action anchors** - Overview, watchlist, order book, recent trades, market/news, screener, chart toolbar, chart canvas, header, and settings now expose stable AI highlight targets.
 
 ### Fixed
+
+- **Chart Ctrl+wheel zoom** - Mouse wheel over the chart keeps horizontal scroll behavior, while `Ctrl + wheel` zooms in/out around the cursor position.
+- **Vite chunk-size warning** - Added Rollup manual chunks for React, lightweight-charts, lucide icons, and Markdown dependencies so production chunks stay under the default 500 kB warning threshold without raising the limit.
+- **Chart wheel behavior** - Restored plain wheel horizontal chart scrolling and kept `Ctrl + wheel` zoom anchored to cursor position.
+- **Historical 1s crash** - Historical mode now hides live-only `1s`, falls back to `1m` before fetching, and avoids stale live-mode checks that could discard historical loads.
+- **Interact tour pacing** - Tour steps are now fully user-paced; only page, tab, and panel switches happen automatically when entering a step.
+- **Tour cleanup** - Completing or closing the tour resets drawing tool state, closes settings, restores chart market/timeframe/type, and returns to the AI chat panel.
+- **Tour overlay placement** - Tour callouts now sit away from highlighted controls, and active dropdown/menu surfaces are excluded from the dim overlay.
+- **Drawing function safety** - Function-created drawings now require `time`/`price` points and automatically return to cursor after placement.
+- **Historical action catalog** - Historical price function schemas no longer advertise unsupported `1s` candles.
+
+---
+
+## [0.24.0] - 2026-06-11
+
+### Added
+
+- **Central AI service package** - Moved production AI orchestration, provider routing, prompt/context logic, RAG services, action schemas, safety checks, and chat persistence behind importable `ai_service/*` modules. Backend `/api/ai/*` routes now stay thin authenticated adapters.
+- **Unified Ask/Interact orchestration** - `/api/ai/chat` now runs both modes through one pipeline: scope gate, chart context, approved-only RAG, prompt building, provider routing, output guard, action proposal, and audit metadata.
+- **AI action catalog** - Added `/api/ai/actions/catalog` plus reusable action schemas for indicators, drawing tools, page highlights, tours, annotation clearing, and debug execution.
+- **Frontend AI actions runtime** - Added an `AiActionProvider`, auto-generated indicator/drawing function definitions, dim-and-highlight overlay, user-paced tour engine with recap/replay, and an admin draggable action test window from Debug settings.
+- **Markdown AI chat rendering** - Replaced custom chat Markdown parsing with `react-markdown`, `remark-gfm`, and `rehype-sanitize` for tables, emphasis, horizontal rules, code, and links in user and assistant messages.
+
+### Changed
+
+- **Provider model simplified** - Production providers are now `local`, `api`, and `none`; `auto` prioritizes local, then API, then none. Backend mock fallback was removed from production and mock remains a frontend data mode concern.
+- **Qwen API defaults updated** - API mode defaults to DashScope International OpenAI-compatible `qwen3.5-plus` on `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`; `DASHSCOPE_API_KEY` is primary and `QWEN_API_KEY` remains a legacy alias.
+- **Temporal prompt grounding** - Shared AI prompts now include current server time, epoch milliseconds, chart timestamp conversion notes, data freshness, and a rule that live runtime data can be newer than model training cutoff.
+- **Knowledge base workflow hardened** - Rebuilt `docs/ai/knowledge_base/` into `source_library/`, `canonical/`, `approved/`, `pending/`, `draft/`, `deprecated/`, and `manifests/`; current unreviewed AI-generated docs were demoted to `pending` and disabled for production RAG.
+- **Registry metadata strengthened** - `registry.yml` now tracks source ID, title, domain, language, source type, credibility, review status, reviewer, reviewed date, LMView version scope, source URLs, tags, `allowed_for_rag`, and file path.
+- **AI panel UX updated** - Desktop right panel defaults to `360px` with `320px-520px` bounds, mobile caps at `min(420px, 92vw)`, Ask/Interact moved below the input, and suggested prompts are collapsible.
+- **AI env surface reduced** - `.env.example` now keeps core AI config to `AI_MODE`, `AI_CONFIG_PATH`, `DASHSCOPE_API_KEY`, and legacy `QWEN_API_KEY`, with provider/model catalogs in YAML under `ai_service/configs/`.
+
+### Fixed
+
+- **RAG approval leak** - Retrieval SQL now requires `review_status = 'approved'` and `allowed_for_rag = true`, removing the previous null-source allowance.
+- **Unapproved ingestion** - Knowledge ingestion skips unapproved, pending, draft, or deprecated documents by default.
+
+### Tests
+
+- Added/updated AI tests for `auto/local/api/none` routing, no production mock provider, temporal prompt context, action validation, approved-only ingestion/retrieval, metadata validation, deprecated exclusion, and registry consistency.
+
+---
+
+## [0.23.2] - 2026-06-11
+
+### Fixed
+
 - **Ticker dedup missing exchange key** — `src/lakehouse/pipeline.py` ticker stream dedup used only `["symbol", "event_timestamp"]`. Fixed to `["exchange", "symbol", "event_timestamp"]` to prevent multi-exchange collapse.
 - **Grid dashed style lost on theme change** — `CandlestickChart.tsx` theme update useEffect was setting `LineStyle.Solid` instead of `LineStyle.Dashed`, breaking TradingView-style grid consistency.
 - **Line chart color using textColor instead of upColor** — `CandlestickChart.tsx` line series `color` option was `chartTheme.textColor`. Fixed to `chartTheme.upColor` for TradingView-style coloring.
@@ -35,6 +94,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`docs/final_data_flow.md`** — Tài liệu hợp nhất đầy đủ 7 phần DATA_FLOW (1 file ~264KB, bao gồm tất cả 4 Kafka topics, 8 Flink writers, 3 Bronze + 2 Silver + 9 Gold tables, 9 Redis key patterns, 3 InfluxDB measurements, 13 indicators, 20+ REST endpoints, 3 WebSocket routes, sequence diagrams, latency budget, failure modes, scaling patterns).
 
 ---
+
 ## [0.23.1] - 2026-06-10
 
 ### Fixed

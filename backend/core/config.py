@@ -30,26 +30,19 @@ SESSION_EXPIRY_HOURS = int(os.environ.get("SESSION_EXPIRY_HOURS", "168"))  # 7 d
 RUN_MIGRATIONS = os.environ.get("RUN_MIGRATIONS", "false")
 
 # ─── AI / LLM Provider ──────────────────────────────────────────────────────
-# AI_MODE: mock | api | local | auto
-#   mock  — deterministic Phase 0 responses only
-#   api   — prefer online API providers
-#   local — prefer local vLLM
-#   auto  — try local first, then api, then mock
-AI_MODE = os.environ.get("AI_MODE", "mock")
-AI_PROVIDER_ORDER = os.environ.get(
-    "AI_PROVIDER_ORDER", "local_vllm,qwen_api,llama_api,mock"
-).split(",")
-AI_TEST_PROVIDER_ORDER = os.environ.get(
-    "AI_TEST_PROVIDER_ORDER", "qwen_api,llama_api,local_vllm,mock"
-).split(",")
+# AI_MODE: auto | local | api | none
+#   auto  - try local first, then API, then none
+#   local - local endpoint only, then none
+#   api   - API provider only, then none
+#   none  - generic LMView/system answers only
+AI_MODE = os.environ.get("AI_MODE", "auto")
+AI_CONFIG_PATH = os.environ.get("AI_CONFIG_PATH", "")
 AI_SERVICE_URL = os.environ.get("AI_SERVICE_URL", "http://ai-service:8001")
 AI_REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AI_REQUEST_TIMEOUT_SECONDS", "60"))
 AI_MAX_CONTEXT_TOKENS = int(os.environ.get("AI_MAX_CONTEXT_TOKENS", "12000"))
 AI_ENABLE_RAG = os.environ.get("AI_ENABLE_RAG", "true").lower() in ("1", "true", "yes")
-AI_ENABLE_REAL_LLM = os.environ.get("AI_ENABLE_REAL_LLM", "false").lower() in ("1", "true", "yes")
-AI_ENABLE_PROVIDER_FALLBACK = os.environ.get("AI_ENABLE_PROVIDER_FALLBACK", "true").lower() in ("1", "true", "yes")
 
-# LiteLLM / Provider keys (read but never logged)
+# LiteLLM / provider compatibility knobs (read but never logged)
 LITELLM_BASE_URL = os.environ.get("LITELLM_BASE_URL", "http://litellm:4000")
 LITELLM_MASTER_KEY = os.environ.get("LITELLM_MASTER_KEY", "")
 VLLM_BASE_URL = os.environ.get("VLLM_BASE_URL", "http://vllm:8000/v1")

@@ -12,11 +12,9 @@ from pydantic import BaseModel, Field
 
 class ProviderType(str, Enum):
     """Supported provider types."""
-    LOCAL_VLLM = "local_vllm"
-    QWEN_API = "qwen_api"
-    LLAMA_API = "llama_api"
-    LITELLM = "litellm"
-    MOCK = "mock"
+    LOCAL = "local"
+    API = "api"
+    NONE = "none"
 
 
 class ProviderInfo(BaseModel):

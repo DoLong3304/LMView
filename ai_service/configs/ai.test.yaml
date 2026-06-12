@@ -1,10 +1,12 @@
-# AI Service — Test Mode Configuration
-# Uses mock provider only. For CI/CD and testing.
+# AI Service - Test/No-Provider Configuration
+# Backend tests use fake providers directly. Production mock lives only in
+# frontend VITE_DATA_SOURCE=mock mode.
 
-mode: mock
+mode: none
 providers:
-  - name: mock
-    type: mock
+  - name: none
+    type: none
+    public_provider: none
     priority: 1
 
 rag:

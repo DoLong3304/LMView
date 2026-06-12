@@ -100,37 +100,6 @@ export function useChartZoom({
     }
   }, [chartApi, initialBarSpacing, applyBarSpacing]);
 
-  // Intercept mouse wheel zoom to control barSpacing
-  useEffect(() => {
-    if (!chartApi) return;
-
-    const handleWheel = (e: WheelEvent) => {
-      // Only intercept if Ctrl/Cmd is pressed (zoom gesture)
-      if (!e.ctrlKey && !e.metaKey) return;
-
-      e.preventDefault();
-
-      const delta = e.deltaY;
-      if (delta < 0) {
-        // Scroll up = zoom in
-        zoomIn();
-      } else if (delta > 0) {
-        // Scroll down = zoom out
-        zoomOut();
-      }
-    };
-
-    // Get chart container element
-    const container = (chartApi as any)._private__chartWidget?._private__element;
-    if (!container) return;
-
-    container.addEventListener('wheel', handleWheel, { passive: false });
-
-    return () => {
-      container.removeEventListener('wheel', handleWheel);
-    };
-  }, [chartApi, zoomIn, zoomOut]);
-
   return {
     zoomIn,
     zoomOut,

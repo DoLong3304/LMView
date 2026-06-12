@@ -1,10 +1,11 @@
-# AI API Contracts — LMView
+# AI API Contracts - LMView
 
 ## Chat Endpoint
 
-### POST /api/ai/chat
+### `POST /api/ai/chat`
 
 Request:
+
 ```json
 {
   "session_id": "uuid or null",
@@ -21,63 +22,76 @@ Request:
 }
 ```
 
+`mode` supports `ask` and `interact`. Both modes use the same backend orchestration pipeline.
+
 Response:
+
 ```json
 {
   "session_id": "uuid",
   "message_id": "uuid",
   "role": "assistant",
   "content": "RSI analysis...",
-  "provider": "qwen_api",
-  "model_name": "openai/qwen-plus",
+  "provider": "api",
+  "model_name": "openai/qwen3.5-plus",
   "is_mock": false,
-  "created_at": "2026-06-05T10:00:00Z",
+  "created_at": "2026-06-11T10:00:00Z",
   "warnings": [],
-  "suggested_actions": null,
-  "chart_actions": null,
+  "tool_calls": [],
+  "chart_actions": [],
   "grounded_context_used": true,
   "confidence": 0.75,
-  "sources": [
-    {"chunk_id": "uuid", "title": "TA Fundamentals", "score": 0.92}
-  ],
-  "data_caveats": ["Trade data is ticker-derived"],
+  "sources": [],
+  "data_caveats": ["Runtime data may be newer than the model training cutoff."],
   "provider_metadata": {
-    "provider": "qwen_api",
-    "model": "openai/qwen-plus",
-    "is_local": false,
+    "provider": "api",
+    "model": "openai/qwen3.5-plus",
     "fallback_used": false,
     "latency_ms": 1234
   }
 }
 ```
 
+`provider` is normalized to `local`, `api`, or `none`. `none` means no usable model was available and the response is generic system guidance.
+
 ## Health Endpoint
 
-### GET /api/ai/health
+### `GET /api/ai/health`
 
 Response:
+
 ```json
 {
   "auth_required": true,
   "database_ready": true,
-  "mock_mode_available": true,
-  "chart_action_schema_version": "1.1.0",
+  "mock_mode_available": false,
+  "chart_action_schema_version": "2.1.0",
+  "action_catalog_version": "2.1.0",
   "supported_modes": ["ask", "interact"],
-  "supported_action_types": ["add_indicator", "..."],
-  "ai_mode": "api",
+  "supported_action_types": ["add_indicator", "highlight_region"],
+  "ai_mode": "auto",
+  "provider_mode": "auto",
+  "effective_provider": "api",
+  "available_api_models": ["openai/qwen3.5-plus"],
+  "local_available": false,
   "rag_enabled": true,
-  "real_llm_enabled": true,
-  "available_providers": ["qwen_api", "llama_api", "mock"],
   "pgvector_ready": true,
-  "knowledge_source_count": 5
+  "knowledge_source_count": 0
 }
 ```
 
+## Action Catalog
+
+### `GET /api/ai/actions/catalog`
+
+Returns reusable JSON schemas for function calls used by the AI, frontend debug tester, and future action integrations.
+
 ## Knowledge Endpoints
 
-### POST /api/ai/knowledge/search
+### `POST /api/ai/knowledge/search`
 
-Request:
+Searches approved, RAG-enabled sources only.
+
 ```json
 {
   "query": "What is RSI?",
@@ -88,28 +102,10 @@ Request:
 }
 ```
 
-Response:
-```json
-{
-  "results": [
-    {
-      "chunk_id": "uuid",
-      "text": "RSI measures momentum...",
-      "score": 0.92,
-      "document_title": "Technical Analysis Fundamentals",
-      "source_title": "Technical Analysis",
-      "heading": "RSI (Relative Strength Index)"
-    }
-  ],
-  "query": "What is RSI?",
-  "total_results": 3,
-  "search_latency_ms": 45
-}
-```
+### `POST /api/ai/knowledge/ingest`
 
-### POST /api/ai/knowledge/ingest (Admin only)
+Admin only. Ingestion skips documents unless their registry entry has `review_status: approved` and `allowed_for_rag: true`.
 
-Request:
 ```json
 {
   "source_dir": "docs/ai/knowledge_base/approved/",
@@ -117,6 +113,10 @@ Request:
 }
 ```
 
-### GET /api/ai/knowledge/sources
+### Other Knowledge Routes
 
-### GET /api/ai/knowledge/health
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/ai/knowledge/sources` | List persisted sources |
+| `GET /api/ai/knowledge/health` | RAG health |
+| `GET /api/ai/knowledge/registry/validate` | Registry metadata validation |
