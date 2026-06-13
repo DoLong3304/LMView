@@ -16,12 +16,12 @@ Lambda Architecture:
 - Serving layer: FastAPI REST/WebSocket APIs with Redis/Influx/Trino/PostgreSQL clients.
 - Frontend layer: React 19 trading dashboard with charts, drawings, replay, auth, settings, market/news, and AI Ask/Interact surfaces.
 
-Latest project release from `docs/CHANGELOG.md`: **0.24.2**.
+Latest project release from `docs/CHANGELOG.md`: **0.24.4**.
 
 Repository facts from this audit:
 
 - Branch: `main`.
-- FastAPI app metadata version: `0.24.0`.
+- FastAPI app metadata version: `0.24.4`.
 - Frontend package version: `0.3.0`.
 - Compose source of truth: one `docker-compose.yml` with profiles.
 - Core compose services from static YAML audit: 40 concrete services plus 2 template services.
