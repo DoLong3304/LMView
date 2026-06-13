@@ -16,6 +16,19 @@ from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 from pyflink.datastream.functions import FlatMapFunction
 from common.flink_redis_sentinel import get_flink_redis
+from writers.metrics import (
+    record_flush,
+    record_buffer_size,
+    record_indicator_warmup,
+    record_indicator_recompute,
+    init_metrics,
+    record_kafka_source,
+    record_kafka_source_drop,
+    record_kafka_source_deserialize,
+    record_writer_event_time,
+    record_writer_new_key,
+    INDICATOR_STATE_KEYS,
+)
 
 INFLUX_URL    = os.environ.get("INFLUX_URL",    "http://influxdb:8086")
 INFLUX_TOKEN  = os.environ.get("INFLUX_TOKEN",  "")
@@ -24,6 +37,12 @@ INFLUX_BUCKET = os.environ.get("INFLUX_BUCKET", "crypto")
 
 log = logging.getLogger(__name__)
 
+# Writer identity for metrics labels
+WRITER_NAME = "indicator"
+SINK_NAME_REDIS = "redis"
+SINK_NAME_INFLUX = "influxdb"
+SOURCE_TOPIC = "crypto_klines_indicators"
+
 
 class IndicatorWriter(FlatMapFunction):
     """Computes SMA/EMA indicators from closed 1m klines.
@@ -31,6 +50,13 @@ class IndicatorWriter(FlatMapFunction):
     Outputs:
         - ``indicator:latest:{exchange}:{symbol}`` hash in Redis Sentinel
         - ``indicators`` measurement in InfluxDB
+
+    State retention note (B7):
+        The EMA / MACD signal state lives in this in-process dict
+        (``self._ema_state``). On Flink restart this state is
+        re-warmed by replaying recent klines. The warmup duration
+        is recorded via :func:`record_indicator_warmup` so that
+        operators can see how long the post-restart hydration takes.
     """
 
     SMA_PERIODS = (20, 50)
@@ -115,20 +141,78 @@ class IndicatorWriter(FlatMapFunction):
         self._history_max_entries = int(os.environ.get("INDICATOR_HISTORY_MAX_ENTRIES", "10080"))
         self._history_write_count: dict[str, int] = {}
 
-    def _flush_influx(self):
+        # B7 fix — wire the persistent state store so a Flink restart
+        # can re-hydrate the in-process dicts from Redis without
+        # needing a Kafka replay.
+        from writers.indicator_state import IndicatorStateStore
+        self._state_store = IndicatorStateStore(self._r)
+        # Hydrate from Redis. We don't know the exchange here yet
+        # (Flink assigns subtasks per-key later) so the first emit
+        # will trigger a per-exchange hydrate.
+        self._hydrated_exchanges: set[str] = set()
+
+        # Track warmup timing (B7 visibility). _open_time is the moment
+        # this subtask becomes ready to process; we mark warmup complete
+        # once we've emitted indicators for the first new candle for
+        # every previously-known key (or after the first minute of work).
+        self._open_time = time.monotonic()
+        self._first_candles_seen: set[str] = set()
+        self._warmup_recorded = False
+        init_metrics()
+
+    def _record_state_keys(self) -> None:
+        """Snapshot the in-memory state-key gauges.
+
+        These gauges make the in-memory indicator dict (B7) visible
+        to operators. We update the gauge lazily on each emit rather
+        than maintaining a separate counter, so the value is always
+        consistent with the current process state.
+        """
+        try:
+            closes = len(self._closes)
+            volumes = len(self._volumes)
+            candles = len(self._candles)
+            ema = len(self._ema_state)
+            macd = len(self._macd_signal_state)
+            # Use the closes count as the "active symbol" gauge and
+            # expose the per-state breakdown as separate labels
+            INDICATOR_STATE_KEYS.labels(state_type="candle_deque").set(candles)
+            INDICATOR_STATE_KEYS.labels(state_type="closes_deque").set(closes)
+            INDICATOR_STATE_KEYS.labels(state_type="volumes_deque").set(volumes)
+            INDICATOR_STATE_KEYS.labels(state_type="ema_state").set(ema)
+            INDICATOR_STATE_KEYS.labels(state_type="macd_signal").set(macd)
+        except Exception as e:
+            # Never let metric emission break the main pipeline
+            log.debug("[Indicators] state-keys gauge update failed: %s", e)
+
+    def _flush_influx(self, trigger: str = "time"):
         if not self._buffer:
             return
+        n = len(self._buffer)
+        record_buffer_size(WRITER_NAME, SINK_NAME_INFLUX, 0)
+        start = time.monotonic()
+        error_type: str | None = None
         try:
             self._write_api.write(bucket=INFLUX_BUCKET, org=INFLUX_ORG, record=self._buffer)
         except Exception as e:
+            error_type = type(e).__name__
             log.error("[Indicators/InfluxDB] flush error: %s", e)
         finally:
+            duration = time.monotonic() - start
+            record_flush(
+                writer=WRITER_NAME,
+                sink=SINK_NAME_INFLUX,
+                duration_sec=duration,
+                n_records=n,
+                trigger=trigger,
+                error=error_type,
+            )
             self._buffer.clear()
             self._last_flush = time.time()
 
     def close(self):
         try:
-            self._flush_influx()
+            self._flush_influx(trigger="close")
             self._r.close()
             self._influx_client.close()
         except Exception as e:
@@ -158,13 +242,19 @@ class IndicatorWriter(FlatMapFunction):
     def flat_map(self, value):
         try:
             if isinstance(value, (str, bytes)):
+                deserialize_start = time.monotonic()
                 value = json.loads(value)
+                record_kafka_source_deserialize(
+                    topic=SOURCE_TOPIC, duration_sec=time.monotonic() - deserialize_start
+                )
 
             if not value.get("is_closed"):
+                record_kafka_source_drop(topic=SOURCE_TOPIC, reason="not_closed")
                 return []
 
             symbol = value.get("symbol")
             if not symbol:
+                record_kafka_source_drop(topic=SOURCE_TOPIC, reason="missing_symbol")
                 return []
 
             exchange = value.get("exchange", "binance")
@@ -177,10 +267,13 @@ class IndicatorWriter(FlatMapFunction):
             low_price = float(value["low"])
             volume = float(value.get("volume", 0.0))
 
+            # First-time-encountered key → record new key + start warmup
             if state_key not in self._closes:
                 self._closes[state_key] = deque(maxlen=self.MAX_HISTORY)
                 self._volumes[state_key] = deque(maxlen=self.MAX_HISTORY)
                 self._candles[state_key] = deque(maxlen=self.MAX_HISTORY)
+                record_writer_new_key(writer=WRITER_NAME, exchange=f"{exchange}:{interval}")
+
             self._closes[state_key].append(close_price)
             self._volumes[state_key].append(volume)
             self._candles[state_key].append({
@@ -205,6 +298,16 @@ class IndicatorWriter(FlatMapFunction):
             macd_signal = self._macd_signal(state_key, macd, 9)
             macd_histogram = macd - macd_signal
             atr14 = self._atr(candles, 14)
+
+            # Record indicator recomputations (B7 + observability)
+            record_indicator_recompute(indicator="sma20", trigger="new_candle")
+            record_indicator_recompute(indicator="sma50", trigger="new_candle")
+            record_indicator_recompute(indicator="ema12", trigger="new_candle")
+            record_indicator_recompute(indicator="ema26", trigger="new_candle")
+            record_indicator_recompute(indicator="rsi14", trigger="new_candle")
+            record_indicator_recompute(indicator="bollinger", trigger="new_candle")
+            record_indicator_recompute(indicator="macd", trigger="new_candle")
+            record_indicator_recompute(indicator="atr14", trigger="new_candle")
 
             # Write to KeyDB
             mapping = {
@@ -240,26 +343,44 @@ class IndicatorWriter(FlatMapFunction):
             legacy_key = f"indicator:latest:{exchange}:{symbol}"
             history_key = f"indicator:history:{exchange}:{symbol}:{interval}"
 
-            self._r.hset(latest_key, mapping=mapping)
-            self._r.expire(latest_key, self._history_ttl_sec)
-            self._r.hset(legacy_key, mapping=mapping)
-            self._r.expire(legacy_key, self._history_ttl_sec)
+            redis_start = time.monotonic()
+            redis_error: str | None = None
+            try:
+                self._r.hset(latest_key, mapping=mapping)
+                self._r.expire(latest_key, self._history_ttl_sec)
+                self._r.hset(legacy_key, mapping=mapping)
+                self._r.expire(legacy_key, self._history_ttl_sec)
 
-            history_snapshot = {
-                "exchange": exchange,
-                "symbol": symbol,
-                "interval": interval,
-                "timestamp": kline_start,
-                **mapping,
-            }
-            history_json = json.dumps(history_snapshot, separators=(",", ":"))
-            self._r.zremrangebyscore(history_key, kline_start, kline_start)
-            self._r.zadd(history_key, {history_json: kline_start})
-            self._r.expire(history_key, self._history_ttl_sec)
-            count = self._history_write_count.get(history_key, 0) + 1
-            self._history_write_count[history_key] = count
-            if count % self._history_max_entries == 0:
-                self._r.zremrangebyrank(history_key, 0, -self._history_max_entries - 1)
+                history_snapshot = {
+                    "exchange": exchange,
+                    "symbol": symbol,
+                    "interval": interval,
+                    "timestamp": kline_start,
+                    **mapping,
+                }
+                history_json = json.dumps(history_snapshot, separators=(",", ":"))
+                self._r.zremrangebyscore(history_key, kline_start, kline_start)
+                self._r.zadd(history_key, {history_json: kline_start})
+                self._r.expire(history_key, self._history_ttl_sec)
+                count = self._history_write_count.get(history_key, 0) + 1
+                self._history_write_count[history_key] = count
+                if count % self._history_max_entries == 0:
+                    self._r.zremrangebyrank(history_key, 0, -self._history_max_entries - 1)
+            except Exception as e:
+                redis_error = type(e).__name__
+                raise
+            finally:
+                redis_duration = time.monotonic() - redis_start
+                # Log every write as a single-record flush so we can
+                # see per-symbol Redis write latency in dashboards.
+                record_flush(
+                    writer=WRITER_NAME,
+                    sink=SINK_NAME_REDIS,
+                    duration_sec=redis_duration,
+                    n_records=1,
+                    trigger="inline",
+                    error=redis_error,
+                )
 
             # Write to InfluxDB
             point = Point("indicators").tag("symbol", symbol).tag("exchange", exchange)
@@ -292,10 +413,64 @@ class IndicatorWriter(FlatMapFunction):
                 .time(kline_start, WritePrecision.MS)
             )
             self._buffer.append(point)
+            record_kafka_source(topic=SOURCE_TOPIC, partition=0, n=1)
+            record_writer_event_time(
+                writer=WRITER_NAME, exchange=exchange, symbol=symbol,
+                event_ts=kline_start / 1000.0,
+            )
+            record_buffer_size(WRITER_NAME, SINK_NAME_INFLUX, len(self._buffer))
+
+            # Snapshot state-key gauges on every emit (cheap; one set call)
+            self._record_state_keys()
+
+            # B7 warmup tracking: record the warmup duration once we've
+            # seen the first new candle for a key after open(). This is a
+            # proxy for the EMA / MACD state warmup cost.
+            if not self._warmup_recorded:
+                self._first_candles_seen.add(state_key)
+                # We consider warmup "complete" once we've seen at least
+                # one new candle for any key (Flink re-hydrates the rest
+                # asynchronously from Kafka offsets).
+                if len(self._first_candles_seen) >= 1:
+                    warmup_duration = time.monotonic() - self._open_time
+                    record_indicator_warmup(state_type="ema", duration_sec=warmup_duration)
+                    record_indicator_warmup(state_type="macd_signal", duration_sec=warmup_duration)
+                    record_indicator_warmup(state_type="candle_deque", duration_sec=warmup_duration)
+                    self._warmup_recorded = True
+
             if len(self._buffer) >= 200 or (time.time() - self._last_flush) >= 5.0:
-                self._flush_influx()
+                self._flush_influx(trigger="size" if len(self._buffer) >= 200 else "time")
+                # B7 — persist the in-process state to Redis so a
+                # restart can pick up where we left off.
+                self._persist_state(exchange)
 
         except Exception as e:
             s = value.get("symbol") if isinstance(value, dict) else "unknown"
             log.error("[Indicators] flat_map error | symbol=%s error=%s", s, e)
+            try:
+                record_kafka_source_drop(topic=SOURCE_TOPIC, reason=type(e).__name__)
+            except Exception:
+                pass
         return []
+
+    def _persist_state(self, exchange: str) -> None:
+        """Snapshot the writer's in-process dicts to Redis (B7).
+
+        Called after every flush_influx. The snapshot is small
+        (≤256KB per symbol) and the write is fire-and-forget: a
+        Redis hiccup does not block the indicator pipeline.
+        """
+        if not hasattr(self, "_state_store"):
+            return
+        # Lazy first-touch hydrate (B7).
+        if exchange not in self._hydrated_exchanges:
+            self._state_store.hydrate_writer(self, exchange)
+            self._hydrated_exchanges.add(exchange)
+        snapshots = self._state_store.snapshot_writer(self)
+        if not snapshots:
+            return
+        try:
+            self._state_store.save_batch(exchange, snapshots)
+        except Exception as exc:
+            log.warning("[Indicators] state persist failed | exchange=%s error=%s",
+                       exchange, exc)

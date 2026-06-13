@@ -136,3 +136,27 @@ scrape_configs:
       - targets: ['spark-worker:8091']
     metrics_path: '/metrics/prometheus'
     scrape_interval: 30s
+
+  # ─── Producer extended custom metrics (Phase 5: dataflow plan)
+  # Exposes dedup state, failover transitions, direct-Redis bypass
+  - job_name: 'producer-extended'
+    static_configs:
+      - targets: ['producer:9091']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # ─── FastAPI custom metrics (Phase 5: dataflow plan)
+  # Exposes WebSocket lifecycle, multi-source fallback, cache ops
+  - job_name: 'fastapi-custom'
+    static_configs:
+      - targets: ['fastapi:8000']
+    metrics_path: '/metrics-custom'
+    scrape_interval: 10s
+
+  # ─── AI services custom metrics (Phase 5: dataflow plan)
+  # Exposes scope gate, provider routing, RAG retrieval, output guard
+  - job_name: 'ai-services'
+    static_configs:
+      - targets: ['fastapi:8000']
+    metrics_path: '/metrics-ai'
+    scrape_interval: 15s

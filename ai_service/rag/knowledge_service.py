@@ -24,6 +24,7 @@ from backend.models.ai.knowledge import (
     KnowledgeSourceMeta,
 )
 from ai_service.rag.registry import allowed_for_ingestion, entry_for_file
+from backend.services.ai import metrics as ai_metrics
 
 logger = logging.getLogger("ai_service.rag.knowledge_service")
 
@@ -60,11 +61,25 @@ def compute_embedding(text: str) -> Optional[List[float]]:
     """Compute embedding vector for a text string."""
     model = _get_embedding_model()
     if model is None:
+        ai_metrics.record_embedding(model="unavailable", duration_sec=0.0, success=False)
         return None
+    start = time.monotonic()
     try:
         embedding = model.encode(text, normalize_embeddings=True)
+        duration = time.monotonic() - start
+        ai_metrics.record_embedding(
+            model=AI_EMBEDDING_MODEL,
+            duration_sec=duration,
+            success=True,
+        )
         return embedding.tolist()
     except Exception as exc:
+        duration = time.monotonic() - start
+        ai_metrics.record_embedding(
+            model=AI_EMBEDDING_MODEL,
+            duration_sec=duration,
+            success=False,
+        )
         logger.error("Embedding computation failed: %s", exc)
         return None
 
@@ -464,6 +479,17 @@ async def ingest_directory(
             if result.get("status") == "ingested":
                 total_chunks += result.get("chunk_count", 0)
                 total_embeddings += result.get("embedding_count", 0)
+                ai_metrics.record_knowledge_ingest("success")
+            elif result.get("status") == "unchanged":
+                ai_metrics.record_knowledge_ingest("skipped")
+            elif result.get("status") == "skipped":
+                ai_metrics.record_knowledge_ingest("rejected")
+            else:
+                ai_metrics.record_knowledge_ingest("error")
+
+    # Update KB inventory gauges so the rag-knowledge-base dashboard
+    # sees current totals immediately after an ingest run.
+    await _refresh_kb_inventory_gauges()
 
     return {
         "status": "completed",
@@ -542,3 +568,49 @@ def _parse_frontmatter(content: str) -> tuple:
         return frontmatter, body
     except Exception:
         return {}, content
+
+
+async def _refresh_kb_inventory_gauges() -> None:
+    """Refresh KB inventory gauges for the rag-knowledge-base dashboard.
+
+    Called after an ingest run. The gauges surface totals that the
+    dashboard renders as single-stat panels: total chunks, total size,
+    oldest chunk age, last ingest timestamp. We compute these in a
+    single SQL query and call :func:`ai_metrics.record_kb_inventory`.
+    """
+    pool = await get_pg_pool()
+    if pool is None:
+        return
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT
+                    COUNT(*)::bigint AS chunk_count,
+                    COALESCE(SUM(LENGTH(c.content)), 0)::bigint AS total_size,
+                    COALESCE(EXTRACT(EPOCH FROM MIN(c.created_at)), 0)::float8 AS oldest_ts,
+                    COALESCE(EXTRACT(EPOCH FROM MAX(c.created_at)), 0)::float8 AS last_ingest_ts
+                FROM ai_knowledge_chunks c
+                JOIN ai_knowledge_documents d ON d.id = c.document_id
+                WHERE d.status = 'active'
+                """
+            )
+        if row is None:
+            return
+        embedding_model = _embedding_model_name or AI_EMBEDDING_MODEL
+        # MiniLM produces 384-dim vectors, OpenAI 1536 — read the actual
+        # vector dimension from the embeddings table when possible.
+        dim_row = await pool.fetchrow(
+            "SELECT vector_dims(embedding) AS dim FROM ai_knowledge_embeddings LIMIT 1"
+        )
+        embedding_dim = dim_row["dim"] if dim_row else 384
+        ai_metrics.record_kb_inventory(
+            total_chunks=int(row["chunk_count"] or 0),
+            total_size_bytes=int(row["total_size"] or 0),
+            last_ingest_ts=float(row["last_ingest_ts"] or 0.0),
+            oldest_chunk_ts=float(row["oldest_ts"] or 0.0),
+            embedding_model=embedding_model,
+            embedding_dim=int(embedding_dim),
+        )
+    except Exception as exc:
+        logger.warning("Failed to refresh KB inventory gauges: %s", exc)

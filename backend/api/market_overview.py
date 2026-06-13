@@ -6,9 +6,15 @@ from fastapi import APIRouter, HTTPException, Query
 from typing import List, Dict, Any
 import logging
 from datetime import datetime
+import time
 
 import asyncio
 from backend.core.database import get_trino_connection
+from backend.api.metrics import (
+    TRINO_ACTIVE_QUERIES,
+    record_trino_query,
+    record_trino_fallback,
+)
 
 router = APIRouter(prefix="/api/market", tags=["market-overview"])
 logger = logging.getLogger(__name__)
@@ -22,19 +28,41 @@ class AsyncTrinoClient:
     def __init__(self):
         self.conn = get_trino_connection()
 
-    async def fetch_one(self, query: str):
+    async def fetch_one(self, query: str, query_type: str = "unknown"):
         def _fetch():
             cursor = self.conn.cursor()
             cursor.execute(query)
             return cursor.fetchone()
-        return await asyncio.to_thread(_fetch)
+        TRINO_ACTIVE_QUERIES.inc()
+        t0 = time.perf_counter()
+        try:
+            result = await asyncio.to_thread(_fetch)
+            record_trino_query(query_type, time.perf_counter() - t0, success=True)
+            return result
+        except Exception as e:
+            record_trino_query(query_type, time.perf_counter() - t0, success=False,
+                               reason=type(e).__name__)
+            raise
+        finally:
+            TRINO_ACTIVE_QUERIES.dec()
 
-    async def fetch_all(self, query: str):
+    async def fetch_all(self, query: str, query_type: str = "unknown"):
         def _fetch():
             cursor = self.conn.cursor()
             cursor.execute(query)
             return cursor.fetchall()
-        return await asyncio.to_thread(_fetch)
+        TRINO_ACTIVE_QUERIES.inc()
+        t0 = time.perf_counter()
+        try:
+            result = await asyncio.to_thread(_fetch)
+            record_trino_query(query_type, time.perf_counter() - t0, success=True)
+            return result
+        except Exception as e:
+            record_trino_query(query_type, time.perf_counter() - t0, success=False,
+                               reason=type(e).__name__)
+            raise
+        finally:
+            TRINO_ACTIVE_QUERIES.dec()
 
 
 async def get_trino():
@@ -74,6 +102,7 @@ async def get_market_overview(
             data_sources.append("trino_gold")
         else:
             logger.info("Gold tables empty or stale, deriving market overview from Redis fallback")
+            record_trino_fallback("market_overview", "gold_empty_or_stale")
             market_summary, top_gainers, top_losers, most_volatile, highest_volume = await _derive_market_from_redis(timeframe, limit)
             trending_news = []
             sector_performance = {}
@@ -89,6 +118,7 @@ async def get_market_overview(
             data_sources.append("redis_fallback")
     except Exception as e:
         logger.warning("Trino gold query failed (%s), falling back to Redis/ticker", e)
+        record_trino_fallback("market_overview", type(e).__name__)
         market_summary, top_gainers, top_losers, most_volatile, highest_volume = await _derive_market_from_redis(timeframe, limit)
         trending_news = []
         sector_performance = {}
@@ -136,7 +166,7 @@ async def _get_market_summary(trino) -> Dict[str, Any]:
     FROM {DB}.gold_market_dominance
     WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
     """
-    result = await trino.fetch_one(query)
+    result = await trino.fetch_one(query, query_type="market_summary")
     if not result:
         return {
             "total_market_cap": 0,
@@ -168,7 +198,7 @@ async def _get_top_movers(trino, category: str, timeframe: str, limit: int) -> L
     ORDER BY {order_col} ASC
     LIMIT {limit}
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type=f"top_movers_{category}")
     return [
         {
             "symbol": row[0],
@@ -190,7 +220,7 @@ async def _get_most_volatile(trino, limit: int) -> List[Dict[str, Any]]:
     ORDER BY rank ASC
     LIMIT {limit}
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type="most_volatile")
     return [
         {
             "symbol": row[0],
@@ -212,7 +242,7 @@ async def _get_highest_volume(trino, limit: int) -> List[Dict[str, Any]]:
     ORDER BY volume_24h DESC
     LIMIT {limit}
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type="highest_volume")
     return [
         {
             "symbol": row[0],
@@ -233,7 +263,7 @@ async def _get_trending_news(trino, limit: int) -> List[Dict[str, Any]]:
     ORDER BY article_count DESC
     LIMIT {limit}
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type="trending_news")
     return [
         {
             "symbol": row[0],
@@ -254,7 +284,7 @@ async def _get_sector_performance(trino) -> Dict[str, Any]:
     ORDER BY total_volume DESC
     LIMIT 10
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type="sector_performance")
     sectors = {}
     for row in results:
         sectors[str(row[0]).lower().replace(" ", "_")] = {
@@ -281,7 +311,7 @@ async def _get_heatmap_data(trino, limit: int) -> List[Dict[str, Any]]:
     ORDER BY market_cap DESC
     LIMIT {limit}
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type="heatmap")
     return [
         {
             "symbol": row[0],
@@ -307,7 +337,7 @@ async def _get_indicators_summary(trino) -> Dict[str, Any]:
     FROM {DB}.gold_momentum_indicators
     WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
     """
-    result = await trino.fetch_one(query)
+    result = await trino.fetch_one(query, query_type="indicators_summary")
     if not result:
         return {
             "total_symbols": 0,

@@ -1,5 +1,10 @@
 """
 WebSocket streaming API for real-time candle updates.
+
+Instrumentation note: every route now records the new application-level
+metrics defined in ``backend.api.metrics`` (connection lifecycle, message
+push, multi-source fallback, slow-client buffer).  The custom counters
+complement the HTTP-level ones from ``prometheus-fastapi-instrumentator``.
 """
 
 from __future__ import annotations
@@ -11,6 +16,17 @@ import time
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from backend.api.metrics import (
+    record_ws_connection,
+    record_ws_connection_error,
+    record_ws_disconnect,
+    record_ws_message_push,
+    record_ws_noop,
+    record_source_lookup,
+    record_source_chain_outcome,
+    record_ws_loop_cycle,
+    record_source_freshness,
+)
 from backend.core.constants import INTERVAL_SECONDS
 from backend.core.database import get_redis
 
@@ -44,6 +60,8 @@ async def stream_all(websocket: WebSocket):
     r = await get_redis()
     symbol = websocket.query_params.get("symbol", "BTCUSDT").upper()
     exchange = websocket.query_params.get("exchange", "binance").strip().lower() or "binance"
+    record_ws_connection(route="/stream/all_legacy", accepted=True)
+    connect_time = time.monotonic()
 
     target_ms_map = {iv: INTERVAL_SECONDS[iv] * 1000 for iv in ALL_INTERVALS}
 
@@ -62,11 +80,13 @@ async def stream_all(websocket: WebSocket):
 
     try:
         while True:
+            cycle_start = time.monotonic()
             # Fetch each Redis key sequentially to avoid sentinel issues
             try:
                 ticker_raw = await r.hgetall(ticker_key)
             except Exception as e:
                 log.debug("ticker fetch error: %s", e)
+                record_source_unavailable("redis", "ticker", type(e).__name__)
                 ticker_raw = {}
             try:
                 raw_1s = await r.zrevrange(candle_1s_key, 0, 0)
@@ -88,6 +108,12 @@ async def stream_all(websocket: WebSocket):
             except Exception as e:
                 log.debug("trade fetch error: %s", e)
                 raw_trade = []
+            record_source_lookup(
+                source="redis",
+                data_type="candle_multi_legacy",
+                duration_sec=time.monotonic() - cycle_start,
+                success=bool(ticker_raw),
+            )
 
             live_price = float(ticker_raw["price"]) if ticker_raw.get("price") else None
             live_ts = int(ticker_raw["event_time"]) if ticker_raw.get("event_time") else None
@@ -159,14 +185,47 @@ async def stream_all(websocket: WebSocket):
                 if trade_qty > 0 and result[iv]:
                     result[iv]["volume"] = round(result[iv].get("volume", 0) + trade_qty, 8)
 
-            await websocket.send_json(result)
+            push_start = time.monotonic()
+            wire = json.dumps(result, default=str).encode("utf-8")
+            try:
+                await websocket.send_bytes(wire)
+                record_ws_message_push(
+                    route="/stream/all_legacy",
+                    data_type="multi",
+                    size_bytes=len(wire),
+                    duration_sec=time.monotonic() - push_start,
+                )
+            except Exception:
+                record_ws_message_push(
+                    route="/stream/all_legacy",
+                    data_type="multi",
+                    size_bytes=len(wire),
+                    duration_sec=time.monotonic() - push_start,
+                    dropped=True,
+                    drop_reason="send_failed",
+                )
+                raise
             last_trade_ts = trade_ts
             last_trade_price = trade_price or 0
 
             await asyncio.sleep(0.05)
+            record_ws_loop_cycle(
+                route="/stream/all_legacy",
+                duration_sec=time.monotonic() - cycle_start,
+            )
     except WebSocketDisconnect:
-        pass
+        record_ws_disconnect(
+            route="/stream/all_legacy",
+            reason="client_close",
+            lifetime_sec=time.monotonic() - connect_time,
+        )
     except Exception as e:
+        record_ws_disconnect(
+            route="/stream/all_legacy",
+            reason="error",
+            lifetime_sec=time.monotonic() - connect_time,
+        )
+        record_ws_connection_error(route="/stream/all_legacy", error_type=type(e).__name__)
         log.warning("Stream all error for %s: %s", symbol, e)
 
 
@@ -313,9 +372,13 @@ async def stream_interval(
     exchange = websocket.query_params.get("exchange", "binance").strip().lower() or "binance"
     target_ms = INTERVAL_SECONDS[interval] * 1000
     last_sent = None
+    connect_time = time.monotonic()
+    record_ws_connection(route="/stream/interval", accepted=True)
 
     try:
         while True:
+            cycle_start = time.monotonic()
+            fetch_start = time.monotonic()
             ticker = await r.hgetall(f"ticker:latest:{exchange}:{symbol}")
             live_price = float(ticker["price"]) if ticker.get("price") else None
             live_ts = int(ticker["event_time"]) if ticker.get("event_time") else None
@@ -323,14 +386,67 @@ async def stream_interval(
             candle = await _build_candle(
                 r, symbol, interval, target_ms, exchange, live_price, live_ts,
             )
+            fetch_duration = time.monotonic() - fetch_start
+            record_source_lookup(
+                source="redis",
+                data_type=f"candle_{interval}",
+                duration_sec=fetch_duration,
+                success=bool(candle),
+            )
+            if ticker.get("event_time"):
+                try:
+                    record_source_freshness(
+                        source="redis",
+                        exchange=exchange,
+                        symbol=symbol,
+                        ts=int(ticker["event_time"]) / 1000.0,
+                    )
+                except (ValueError, TypeError):
+                    pass
+
             if candle and candle != last_sent:
-                await websocket.send_json(candle)
+                push_start = time.monotonic()
+                payload = json.dumps(candle, default=str).encode("utf-8")
+                try:
+                    await websocket.send_bytes(payload)
+                    record_ws_message_push(
+                        route="/stream/interval",
+                        data_type=interval,
+                        size_bytes=len(payload),
+                        duration_sec=time.monotonic() - push_start,
+                    )
+                except Exception:
+                    record_ws_message_push(
+                        route="/stream/interval",
+                        data_type=interval,
+                        size_bytes=len(payload),
+                        duration_sec=time.monotonic() - push_start,
+                        dropped=True,
+                        drop_reason="send_failed",
+                    )
+                    raise
                 last_sent = candle
+            else:
+                record_ws_noop(route="/stream/interval", data_type=interval)
 
             await asyncio.sleep(0.05)
+            record_ws_loop_cycle(
+                route="/stream/interval",
+                duration_sec=time.monotonic() - cycle_start,
+            )
     except WebSocketDisconnect:
-        pass
+        record_ws_disconnect(
+            route="/stream/interval",
+            reason="client_close",
+            lifetime_sec=time.monotonic() - connect_time,
+        )
     except Exception as e:
+        record_ws_disconnect(
+            route="/stream/interval",
+            reason="error",
+            lifetime_sec=time.monotonic() - connect_time,
+        )
+        record_ws_connection_error(route="/stream/interval", error_type=type(e).__name__)
         log.warning("Stream %s error for %s: %s", interval, symbol, e)
 
 
@@ -352,18 +468,65 @@ async def stream_indicators(
     symbol = websocket.query_params.get("symbol", "BTCUSDT").upper()
     exchange = websocket.query_params.get("exchange", "binance").strip().lower() or "binance"
     last_sent = None
+    connect_time = time.monotonic()
+    record_ws_connection(route="/stream/indicators", accepted=True)
 
     try:
         while True:
+            cycle_start = time.monotonic()
+            fetch_start = time.monotonic()
             payload = await _build_indicator_snapshot(r, symbol, exchange, interval)
+            fetch_duration = time.monotonic() - fetch_start
+            record_source_lookup(
+                source="redis",
+                data_type=f"indicator_{interval}",
+                duration_sec=fetch_duration,
+                success=bool(payload),
+            )
+
             if payload and payload != last_sent:
-                await websocket.send_json(payload)
+                push_start = time.monotonic()
+                wire = json.dumps(payload, default=str).encode("utf-8")
+                try:
+                    await websocket.send_bytes(wire)
+                    record_ws_message_push(
+                        route="/stream/indicators",
+                        data_type=interval,
+                        size_bytes=len(wire),
+                        duration_sec=time.monotonic() - push_start,
+                    )
+                except Exception:
+                    record_ws_message_push(
+                        route="/stream/indicators",
+                        data_type=interval,
+                        size_bytes=len(wire),
+                        duration_sec=time.monotonic() - push_start,
+                        dropped=True,
+                        drop_reason="send_failed",
+                    )
+                    raise
                 last_sent = payload
+            else:
+                record_ws_noop(route="/stream/indicators", data_type=interval)
 
             await asyncio.sleep(0.05)
+            record_ws_loop_cycle(
+                route="/stream/indicators",
+                duration_sec=time.monotonic() - cycle_start,
+            )
     except WebSocketDisconnect:
-        pass
+        record_ws_disconnect(
+            route="/stream/indicators",
+            reason="client_close",
+            lifetime_sec=time.monotonic() - connect_time,
+        )
     except Exception as e:
+        record_ws_disconnect(
+            route="/stream/indicators",
+            reason="error",
+            lifetime_sec=time.monotonic() - connect_time,
+        )
+        record_ws_connection_error(route="/stream/indicators", error_type=type(e).__name__)
         log.warning("Indicator stream %s error for %s: %s", interval, symbol, e)
 
 
@@ -386,14 +549,17 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
     r = await get_redis()
     symbol = symbol.upper()
     exchange = exchange.strip().lower() or "binance"
+    record_ws_connection(route="/stream/all", accepted=True)
 
     # Build target_ms lookup
     target_ms_map = {iv: INTERVAL_SECONDS[iv] * 1000 for iv in ALL_INTERVALS}
     last_sent: dict[str, dict | None] = {iv: None for iv in ALL_INTERVALS}
+    connect_time = time.monotonic()
 
     try:
         while True:
             result: dict[str, dict | None] = {}
+            cycle_start = time.monotonic()
             any_changed = False
 
             # Fetch all data in one pipeline to avoid N+1 Redis calls
@@ -410,6 +576,19 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
             pipe.zrevrange(trade_key, 0, 0)
             pipe.hgetall(candle_latest_key)
             pipeline_results = await pipe.execute()
+            pipe_duration = time.monotonic() - cycle_start
+
+            # Record the multi-source lookup (Redis pipeline success / failure)
+            record_source_lookup(
+                source="redis",
+                data_type="candle_multi",
+                duration_sec=pipe_duration,
+                success=bool(pipeline_results and pipeline_results[0]),
+            )
+            record_source_chain_outcome(
+                data_type="candle_multi",
+                terminating_source="redis",
+            )
 
             ticker = pipeline_results[0]
             raw_1s = pipeline_results[1]
@@ -417,6 +596,18 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
             raw_1m_scores = pipeline_results[3]
             raw_trade = pipeline_results[4]
             candle_latest = pipeline_results[5]
+
+            # Record per-symbol source freshness
+            if ticker.get("event_time"):
+                try:
+                    record_source_freshness(
+                        source="redis",
+                        exchange=exchange,
+                        symbol=symbol,
+                        ts=int(ticker["event_time"]) / 1000.0,
+                    )
+                except (ValueError, TypeError):
+                    pass
 
             live_price = float(ticker["price"]) if ticker.get("price") else None
             live_ts = int(ticker["event_time"]) if ticker.get("event_time") else None
@@ -475,18 +666,47 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
                     any_changed = True
                 else:
                     result[iv] = last_sent[iv]
+                    if candle is None:
+                        record_ws_noop(route="/stream/all", data_type=iv)
 
             # Only send if something changed
             if any_changed:
-                await websocket.send_json(result)
+                push_start = time.monotonic()
+                payload = json.dumps(result, default=str).encode("utf-8")
+                try:
+                    await websocket.send_bytes(payload)
+                    record_ws_message_push(
+                        route="/stream/all",
+                        data_type="multi",
+                        size_bytes=len(payload),
+                        duration_sec=time.monotonic() - push_start,
+                    )
+                except Exception as push_exc:
+                    record_ws_message_push(
+                        route="/stream/all",
+                        data_type="multi",
+                        size_bytes=len(payload),
+                        duration_sec=time.monotonic() - push_start,
+                        dropped=True,
+                        drop_reason=type(push_exc).__name__,
+                    )
+                    raise
 
             # CRITICAL: Reduced from 0.3s to 0.05s for real-time responsiveness
             # This is the primary latency source — tighter loop = faster updates
             await asyncio.sleep(0.05)
+            record_ws_loop_cycle(
+                route="/stream/all",
+                duration_sec=time.monotonic() - cycle_start,
+            )
     except WebSocketDisconnect:
-        pass
+        lifetime = time.monotonic() - connect_time
+        record_ws_disconnect(route="/stream/all", reason="client_close", lifetime_sec=lifetime)
     except Exception as e:
+        lifetime = time.monotonic() - connect_time
         log.warning("Stream all error for %s: %s", symbol, e)
+        record_ws_disconnect(route="/stream/all", reason="error", lifetime_sec=lifetime)
+        record_ws_connection_error(route="/stream/all", error_type=type(e).__name__)
 
 
 def _build_candle_from_data(

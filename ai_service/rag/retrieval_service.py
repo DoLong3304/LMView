@@ -21,6 +21,7 @@ from backend.models.ai.rag import (
     RAGRetrievalResponse,
     RAGRetrievalWarning,
 )
+from backend.services.ai import metrics as ai_metrics
 from ai_service.rag.knowledge_service import compute_embedding
 
 logger = logging.getLogger("ai_service.rag.retrieval_service")
@@ -65,8 +66,11 @@ async def retrieve(
         )
 
     # Compute query embedding
+    emb_start = time.monotonic()
     query_embedding = compute_embedding(request.query)
+    emb_duration = time.monotonic() - emb_start
     if query_embedding is None:
+        ai_metrics.record_embedding(model="unknown", duration_sec=emb_duration, success=False)
         return RAGRetrievalResponse(
             query=request.query,
             warnings=[RAGRetrievalWarning(
@@ -75,6 +79,7 @@ async def retrieve(
                 severity="error",
             )],
         )
+    ai_metrics.record_embedding(model="default", duration_sec=emb_duration, success=True)
 
     top_k = request.top_k or AI_RAG_TOP_K
     min_score = request.min_score if request.min_score is not None else AI_RAG_MIN_SCORE
@@ -93,86 +98,17 @@ async def retrieve(
         review_status=request.review_status,
     )
 
+    # Mark the start of the vector-search phase so we can split the
+    # retrieval latency into ``embedding`` and ``vector_search`` (B13
+    # observability — see docs/dataflow_analysis_and_observability_plan.md
+    # §3.7 and Phần B.7).
+    vs_start = time.monotonic()
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(query_sql, *params)
-
-        chunks: List[RAGChunkResult] = []
-        for row in rows:
-            score = 1.0 - (row.get("distance", 1.0))  # cosine distance → similarity
-            if score < min_score:
-                continue
-
-            chunks.append(RAGChunkResult(
-                chunk_id=str(row["chunk_id"]),
-                text=row["chunk_text"],
-                score=round(score, 4),
-                document_id=str(row["document_id"]),
-                document_title=row.get("doc_title", ""),
-                source_id=str(row["source_uuid"]) if row.get("source_uuid") else None,
-                source_title=row.get("source_title"),
-                heading=row.get("heading"),
-                language=row.get("chunk_language"),
-                domain=row.get("doc_domain"),
-                tags=json.loads(row["doc_tags"]) if row.get("doc_tags") else [],
-                credibility_level=row.get("credibility_level"),
-                citation={
-                    "document_title": row.get("doc_title", ""),
-                    "source_title": row.get("source_title"),
-                    "heading": row.get("heading"),
-                    "chunk_index": row.get("chunk_index"),
-                },
-            ))
-
-        elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
-
-        # Add warnings for weak results
-        if not chunks:
-            warnings.append(RAGRetrievalWarning(
-                code="no_results",
-                message="No relevant knowledge base entries found for your query",
-                severity="warning",
-            ))
-        elif len(chunks) < 3:
-            warnings.append(RAGRetrievalWarning(
-                code="few_results",
-                message=f"Only {len(chunks)} relevant entries found — response may be less comprehensive",
-                severity="info",
-            ))
-
-        # Log the retrieval
-        await _log_retrieval(
-            pool=pool,
-            user_id=user_id,
-            session_id=session_id,
-            message_id=message_id,
-            query_text=request.query,
-            query_embedding=embedding_str,
-            top_k=top_k,
-            min_score=min_score,
-            filters={
-                "language": request.language,
-                "domain": request.domain,
-                "tags": request.tags,
-                "source_type": request.source_type,
-            },
-            result_count=len(chunks),
-            result_chunk_ids=[c.chunk_id for c in chunks],
-            result_scores=[c.score for c in chunks],
-            latency_ms=elapsed_ms,
-        )
-
-        return RAGRetrievalResponse(
-            chunks=chunks,
-            query=request.query,
-            total_results=len(chunks),
-            top_k_used=top_k,
-            min_score_used=min_score,
-            latency_ms=elapsed_ms,
-            warnings=warnings,
-        )
-
     except Exception as exc:
+        vs_duration = time.monotonic() - vs_start
+        ai_metrics.record_rag_vector_search(duration_sec=vs_duration, success=False)
         elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
         logger.error("Retrieval failed: %s", exc)
         return RAGRetrievalResponse(
@@ -184,6 +120,94 @@ async def retrieve(
                 severity="error",
             )],
         )
+
+    vs_duration = time.monotonic() - vs_start
+    ai_metrics.record_rag_vector_search(duration_sec=vs_duration, success=True)
+
+    chunks: List[RAGChunkResult] = []
+    for row in rows:
+        score = 1.0 - (row.get("distance", 1.0))  # cosine distance → similarity
+        if score < min_score:
+            continue
+
+        chunks.append(RAGChunkResult(
+            chunk_id=str(row["chunk_id"]),
+            text=row["chunk_text"],
+            score=round(score, 4),
+            document_id=str(row["document_id"]),
+            document_title=row.get("doc_title", ""),
+            source_id=str(row["source_uuid"]) if row.get("source_uuid") else None,
+            source_title=row.get("source_title"),
+            heading=row.get("heading"),
+            language=row.get("chunk_language"),
+            domain=row.get("doc_domain"),
+            tags=json.loads(row["doc_tags"]) if row.get("doc_tags") else [],
+            credibility_level=row.get("credibility_level"),
+            citation={
+                "document_title": row.get("doc_title", ""),
+                "source_title": row.get("source_title"),
+                "heading": row.get("heading"),
+                "chunk_index": row.get("chunk_index"),
+            },
+        ))
+
+    elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
+
+    # RAG retrieval outcome (B13 metrics) — observe latency, top-k,
+    # relevance score, and zero-result rate.
+    ai_metrics.record_rag_retrieval(
+        duration_sec=elapsed_ms / 1000.0,
+        top_k_used=len(chunks),
+        relevance_score=sum(c.score for c in chunks) / len(chunks) if chunks else 0.0,
+        cache_hit=False,
+        zero_results=len(chunks) == 0,
+    )
+
+    # Add warnings for weak results
+    if not chunks:
+        warnings.append(RAGRetrievalWarning(
+            code="no_results",
+            message="No relevant knowledge base entries found for your query",
+            severity="warning",
+        ))
+    elif len(chunks) < 3:
+        warnings.append(RAGRetrievalWarning(
+            code="few_results",
+            message=f"Only {len(chunks)} relevant entries found — response may be less comprehensive",
+            severity="info",
+        ))
+
+    # Log the retrieval
+    await _log_retrieval(
+        pool=pool,
+        user_id=user_id,
+        session_id=session_id,
+        message_id=message_id,
+        query_text=request.query,
+        query_embedding=embedding_str,
+        top_k=top_k,
+        min_score=min_score,
+        filters={
+            "language": request.language,
+            "domain": request.domain,
+            "tags": request.tags,
+            "source_type": request.source_type,
+        },
+        result_count=len(chunks),
+        result_chunk_ids=[c.chunk_id for c in chunks],
+        result_scores=[c.score for c in chunks],
+        latency_ms=elapsed_ms,
+    )
+
+    return RAGRetrievalResponse(
+        chunks=chunks,
+        query=request.query,
+        total_results=len(chunks),
+        top_k_used=top_k,
+        min_score_used=min_score,
+        latency_ms=elapsed_ms,
+        warnings=warnings,
+    )
 
 
 def _build_retrieval_query(

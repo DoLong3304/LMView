@@ -456,3 +456,785 @@ groups:
           description: "Kafka broker logs contain disconnect or connection reset messages"
         labels:
           severity: warning
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # PRODUCER EXTENDED ALERTS (Phase 5: dataflow plan)
+  # ═══════════════════════════════════════════════════════════════════════════
+  - name: producer_extended_alerts
+    folder: "Alerts"
+    interval: 1m
+    rules:
+      - uid: producer_direct_redis_active
+        title: Producer Direct Redis Bypass Active
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 60
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: producer_direct_redis_active == 1
+              refId: A
+        noDataState: OK
+        execErrState: Error
+        for: 1m
+        annotations:
+          summary: "Producer is bypassing Kafka (degraded mode)"
+          description: "Kafka+Flink health check failed; producer writing direct to Redis. Check Kafka brokers and Flink JobManager."
+        labels:
+          severity: warning
+
+      - uid: producer_direct_redis_failure_rate
+        title: Producer Direct Redis Write Failures
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: rate(producer_direct_redis_failures_total[5m]) > 0.5
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Producer direct-Redis write failures > 0.5/s"
+          description: "Data is being lost; direct-Redis path is failing"
+        labels:
+          severity: critical
+
+      - uid: producer_kafka_unhealthy
+        title: Producer Kafka Probe Failing
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: producer_kafka_healthy == 0
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Producer Kafka health probe failing"
+          description: "Producer cannot reach Kafka cluster"
+        labels:
+          severity: critical
+
+      - uid: producer_flink_unhealthy
+        title: Producer Flink Probe Failing
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: producer_flink_healthy == 0
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Producer Flink health probe failing"
+          description: "Producer cannot reach Flink JobManager"
+        labels:
+          severity: warning
+
+      - uid: producer_exchange_ws_silent
+        title: Exchange WebSocket Stream Silent
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: time() - producer_exchange_last_message_timestamp_seconds > 30
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Exchange WS stream silent for > 30s"
+          description: "Stream {{ $labels.stream }} for {{ $labels.exchange }} has not received any message in 30s"
+        labels:
+          severity: critical
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WEBSOCKET SERVING ALERTS (Phase 5: dataflow plan)
+  # ═══════════════════════════════════════════════════════════════════════════
+  - name: websocket_alerts
+    folder: "Alerts"
+    interval: 1m
+    rules:
+      - uid: websocket_connection_spike
+        title: WebSocket Connection Spike
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: sum(websocket_connections_active) > 1000
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "WebSocket connections > 1000"
+          description: "Active WS connections {{ $value }}; consider scaling FastAPI"
+        labels:
+          severity: warning
+
+      - uid: websocket_p99_latency
+        title: WebSocket p99 Push Latency High
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: histogram_quantile(0.99, rate(websocket_message_push_duration_seconds_bucket[5m])) > 0.1
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "WebSocket p99 push latency > 100ms"
+          description: "WS p99 push latency for route {{ $labels.route }} is high"
+        labels:
+          severity: warning
+
+      - uid: websocket_error_rate
+        title: WebSocket Error Rate
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: sum(rate(websocket_connection_errors_total[5m])) by (route) > 0.1
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "WebSocket error rate > 0.1/s"
+          description: "Route {{ $labels.route }} seeing frequent WS errors"
+        labels:
+          severity: critical
+
+      - uid: websocket_message_backlog
+        title: WebSocket Slow Client Buffer
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: max(websocket_client_buffer_size) by (route) > 1000
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "WebSocket slow-client buffer > 1000"
+          description: "At least one client on route {{ $labels.route }} is buffering > 1000 messages"
+        labels:
+          severity: warning
+
+      - uid: websocket_message_drop_rate
+        title: WebSocket Message Drop Rate
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: sum(rate(websocket_messages_dropped_total[5m])) by (route) > 1
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "WebSocket messages being dropped"
+          description: "Route {{ $labels.route }} is dropping > 1 msg/s — likely slow clients"
+        labels:
+          severity: warning
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # MULTI-SOURCE FALLBACK ALERTS (Phase 5: dataflow plan)
+  # ═══════════════════════════════════════════════════════════════════════════
+  - name: multi_source_alerts
+    folder: "Alerts"
+    interval: 1m
+    rules:
+      - uid: redis_hit_rate_drop
+        title: Redis Hit Rate Drop
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: |
+                sum(rate(multi_source_lookups_total{source="redis",result="success"}[5m]))
+                /
+                sum(rate(multi_source_lookups_total{source="redis"}[5m]))
+                < 0.7
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Redis hit rate < 70% (5m avg)"
+          description: "Redis is missing more than 30% of lookups; downstream sources (InfluxDB/Trino) absorbing the load"
+        labels:
+          severity: warning
+
+      - uid: influxdb_fallback_surge
+        title: InfluxDB Fallback Surge
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: sum(rate(multi_source_lookups_total{source="influxdb",result="success"}[5m])) > 50
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "InfluxDB absorbing > 50 lookups/s"
+          description: "Redis is missing data; InfluxDB picking up the slack (degraded mode)"
+        labels:
+          severity: warning
+
+      - uid: source_stale_data_critical
+        title: Stale Data from Any Source
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: sum(increase(source_stale_data_total[5m])) > 20
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Stale data incidents > 20 in 5m"
+          description: "Multiple sources reporting data older than freshness threshold"
+        labels:
+          severity: critical
+
+      - uid: source_unavailable
+        title: Source Unavailable
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: sum(rate(source_unavailable_total[5m])) by (source) > 0.1
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Source {{ $labels.source }} unavailable"
+          description: "Source {{ $labels.source }} failing > 0.1/s — pipeline degraded"
+        labels:
+          severity: critical
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # AI PIPELINE ALERTS (Phase 5: dataflow plan)
+  # ═══════════════════════════════════════════════════════════════════════════
+  - name: ai_pipeline_alerts
+    folder: "Alerts"
+    interval: 1m
+    rules:
+      - uid: ai_provider_all_failed
+        title: All AI Providers Failed
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: |
+                sum(rate(ai_provider_requests_total{status="error"}[5m]))
+                /
+                sum(rate(ai_provider_requests_total[5m]))
+                > 0.5
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "> 50% of AI provider requests errored"
+          description: "All configured AI providers are failing; users are receiving errors or mock fallback"
+        labels:
+          severity: critical
+
+      - uid: ai_provider_fallback_high
+        title: AI Provider Fallback Rate High
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: |
+                sum(rate(ai_provider_requests_total{status="fallback"}[5m])) by (provider)
+                /
+                sum(rate(ai_provider_requests_total[5m])) by (provider)
+                > 0.3
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "AI provider {{ $labels.provider }} fallback > 30%"
+          description: "Provider is falling back too often; check upstream API status"
+        labels:
+          severity: warning
+
+      - uid: ai_rag_retrieval_slow
+        title: RAG Retrieval Slow
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: histogram_quantile(0.95, rate(ai_rag_retrieval_duration_seconds_bucket[5m])) > 2
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "RAG retrieval p95 > 2s"
+          description: "Vector search or embedding step is slow; consider cache warmup or HNSW rebuild"
+        labels:
+          severity: warning
+
+      - uid: ai_rag_zero_results
+        title: RAG Returning Zero Results
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: |
+                sum(rate(ai_rag_zero_results_total[5m]))
+                /
+                sum(rate(ai_rag_retrieval_duration_seconds_count[5m]))
+                > 0.5
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "RAG zero-result rate > 50%"
+          description: "Knowledge base may be stale or min_score threshold too high"
+        labels:
+          severity: warning
+
+      - uid: ai_output_guard_spike
+        title: AI Output Guard Spike
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: sum(rate(ai_output_guard_flags_total[5m])) by (flag_type) > 0.5
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "Output guard flagging > 0.5/s for {{ $labels.flag_type }}"
+          description: "Possible prompt-injection or model regression; review recent AI responses"
+        labels:
+          severity: warning
+
+      - uid: ai_embedding_model_unloaded
+        title: AI Embedding Model Unloaded
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: ai_embedding_models_loaded == 0
+              refId: A
+        noDataState: OK
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "No embedding model loaded"
+          description: "sentence-transformers model not in memory; first request will be slow"
+        labels:
+          severity: info
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # FLINK EXTENDED ALERTS (Phase 5: dataflow plan)
+  # ═══════════════════════════════════════════════════════════════════════════
+  - name: flink_extended_alerts
+    folder: "Alerts"
+    interval: 1m
+    rules:
+      - uid: flink_checkpoint_failure
+        title: Flink Checkpoint Failure
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: increase(flink_checkpoint_failures_total[5m]) > 0
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 2m
+        annotations:
+          summary: "Flink checkpoint failures detected"
+          description: "Job {{ $labels.job }} has failing checkpoints — RPO at risk"
+        labels:
+          severity: critical
+
+      - uid: flink_writer_flush_slow
+        title: Flink Writer Flush Slow
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: histogram_quantile(0.99, rate(flink_writer_flush_duration_seconds_bucket[5m])) > 1
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Flink writer p99 flush > 1s"
+          description: "Writer {{ $labels.writer }} -> {{ $labels.sink }} flushing slowly"
+        labels:
+          severity: warning
+
+      - uid: flink_kafka_source_watermark_lag
+        title: Flink Kafka Source Watermark Lag
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: flink_kafka_source_watermark_lag_seconds > 60
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "Flink Kafka watermark lag > 60s"
+          description: "Topic {{ $labels.topic }} is lagging — backpressure or slow processing"
+        labels:
+          severity: warning
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # SLO BURN-RATE ALERTS (Phase 5: dataflow plan)
+  # ═══════════════════════════════════════════════════════════════════════════
+  - name: slo_burn_rate_alerts
+    folder: "Alerts"
+    interval: 1m
+    rules:
+      - uid: slo_api_availability_burn_fast
+        title: "SLO Burn: API Availability (Fast Window)"
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: |
+                (1 - (
+                  sum(rate(api_requests_total{status!~"5.."}[5m]))
+                  /
+                  sum(rate(api_requests_total[5m]))
+                )) > (1 - 0.999) * 14.4
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "API availability SLO burning 14.4x (1h budget)"
+          description: "Error budget consuming fast — page on-call immediately"
+        labels:
+          severity: critical
+
+      - uid: slo_api_availability_burn_slow
+        title: "SLO Burn: API Availability (Slow Window)"
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: |
+                (1 - (
+                  sum(rate(api_requests_total{status!~"5.."}[1h]))
+                  /
+                  sum(rate(api_requests_total[1h]))
+                )) > (1 - 0.999) * 1
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 30m
+        annotations:
+          summary: "API availability SLO burning 1x (6h budget)"
+          description: "Slow burn — investigate before fast burn triggers"
+        labels:
+          severity: warning
+
+      - uid: slo_ws_delivery_burn
+        title: "SLO Burn: WebSocket Delivery"
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: |
+                sum(rate(websocket_messages_pushed_total[5m]))
+                /
+                (sum(rate(websocket_messages_pushed_total[5m])) + sum(rate(websocket_messages_dropped_total[5m])))
+                < 0.99
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 5m
+        annotations:
+          summary: "WebSocket delivery SLO < 99%"
+          description: "WebSocket delivery ratio failing — SLO at risk"
+        labels:
+          severity: critical
+
+      - uid: slo_data_freshness_burn
+        title: "SLO Burn: Data Freshness"
+        condition: A
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: Prometheus
+            model:
+              expr: |
+                sum(rate(source_stale_data_total[5m]))
+                /
+                clamp_min(sum(rate(multi_source_lookups_total[5m])), 1)
+                > 0.05
+              refId: A
+        noDataState: NoData
+        execErrState: Error
+        for: 10m
+        annotations:
+          summary: "Data freshness SLO at risk"
+          description: "More than 5% of lookups returning stale data"
+        labels:
+          severity: warning
+
+  # Frontend RUM (A9.1 — JS error rate)
+  - name: frontend_rum_alerts
+    folder: 'LMView / Frontend'
+    interval: 1m
+    rules:
+      - uid: a9-1-frontend-js-error-rate
+        title: 'A9.1: Frontend JS error rate elevated'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              expr: 'sum(rate(frontend_rum_errors_total[5m])) by (type)'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [0.5]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+              expression: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: 'Frontend JS errors > 0.5/sec for 5 minutes'
+          description: 'Browser-side errors are climbing. Check Sentry, browser console logs, and recent frontend deployments.'
+        labels:
+          severity: warning
+          slo: user_experience
+
+  # Rate limit (A10.2 — API rate limit hit)
+  - name: api_security_alerts
+    folder: 'LMView / Security'
+    interval: 1m
+    rules:
+      - uid: a10-1-auth-failure-spike
+        title: 'A10.1: Auth failure spike'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              expr: 'sum(rate(api_auth_failures_total[5m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [2]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+              expression: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: 'Auth failures > 2/sec for 5 minutes'
+          description: 'Possible credential-stuffing or brute-force attack.'
+        labels:
+          severity: warning
+          security: auth
+
+      - uid: a10-2-rate-limit-hit
+        title: 'A10.2: API rate limit hit'
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: PBFA97CFB590B2093
+            model:
+              expr: 'sum(rate(api_rate_limited_total[5m]))'
+              instant: true
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: C
+            relativeTimeRange:
+              from: 0
+              to: 0
+            datasourceUid: '__expr__'
+            model:
+              type: threshold
+              conditions:
+                - evaluator:
+                    type: gt
+                    params: [1]
+                  operator:
+                    type: and
+                  query:
+                    params: [A]
+                  reducer:
+                    type: last
+                    params: []
+              expression: A
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: 'API rate limit hit > 1/sec for 5 minutes'
+          description: 'Clients are getting throttled. Inspect top offenders in the executive-overview dashboard.'
+        labels:
+          severity: info
+          security: dos

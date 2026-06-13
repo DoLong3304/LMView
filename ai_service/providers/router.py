@@ -6,6 +6,7 @@ Production-visible providers are `local`, `api`, and `none`.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Dict, List, Optional
 
 from backend.models.ai.providers import (
@@ -23,6 +24,7 @@ from ai_service.config import (
 )
 from ai_service.providers.base import BaseProvider
 from ai_service.providers.none_provider import NoneProvider
+from backend.services.ai import metrics as ai_metrics
 
 logger = logging.getLogger("ai_service.providers.router")
 
@@ -119,13 +121,32 @@ class ProviderRouter:
         providers_tried: List[str] = []
         providers_failed: List[str] = []
 
+        # Record the configured mode for dashboards that want to know which
+        # providers the router is *configured* to use (B13 observability).
+        ai_metrics.record_provider_mode_active(self.settings.mode)
+
+        chain_depth = 0
+        last_error: Optional[str] = None
+        chain_start = time.monotonic()
+
         for provider_name in self.get_provider_order():
             provider = self._providers.get(provider_name)
             if provider is None:
                 continue
             providers_tried.append(provider_name)
+            chain_depth += 1
+            provider_start = time.monotonic()
             try:
                 response = await provider.generate_chat_completion(request)
+                provider_duration = time.monotonic() - provider_start
+
+                # Provider request success (B13 metrics).
+                ai_metrics.record_provider_request(
+                    provider=provider_name,
+                    status="success",
+                    duration_sec=provider_duration,
+                )
+
                 routing = ProviderRoutingResult(
                     selected_provider=provider_name,
                     selected_model=response.model_name,
@@ -138,8 +159,20 @@ class ProviderRouter:
                 )
                 return response, routing
             except Exception as exc:
+                provider_duration = time.monotonic() - provider_start
+                last_error = str(exc)[:200]
                 providers_failed.append(provider_name)
-                logger.warning("AI provider %s failed: %s", provider_name, str(exc)[:200])
+
+                # Provider request failure (B13 metrics).
+                ai_metrics.record_provider_request(
+                    provider=provider_name,
+                    status="failure",
+                    duration_sec=provider_duration,
+                )
+                logger.warning("AI provider %s failed: %s", provider_name, last_error)
+
+        # Record chain depth even when all providers failed.
+        ai_metrics.record_provider_chain_depth(chain_depth, status="exhausted")
 
         none_provider = self._providers["none"]
         response = await none_provider.generate_chat_completion(request)

@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from typing import Any, Dict, List, Optional
+
+from backend.services.ai import metrics as ai_metrics
 
 logger = logging.getLogger("ai_service.safety.output_guard")
 
@@ -71,6 +74,7 @@ def guard_output(
         - blocked: True if content was fully blocked
         - disclaimer_added: True if disclaimer was appended
     """
+    start = time.monotonic()
     warnings: List[str] = []
     blocked = False
     disclaimer_added = False
@@ -81,6 +85,10 @@ def guard_output(
             warnings.append(
                 f"Response contained potentially unsafe financial claim "
                 f"(matched: {pattern.pattern[:40]})"
+            )
+            ai_metrics.record_output_guard_flag(
+                flag_type="unsafe_financial_claim",
+                severity="warning",
             )
             # Don't block, but add a strong caveat
             content = re.sub(
@@ -93,6 +101,10 @@ def guard_output(
     for pattern in _CODE_PATTERNS:
         if pattern.search(content):
             warnings.append("Response contained code execution patterns — removed")
+            ai_metrics.record_output_guard_flag(
+                flag_type="code_execution",
+                severity="warning",
+            )
             content = re.sub(pattern, "[code removed for safety]", content)
 
     # Ensure disclaimer is present
@@ -106,6 +118,9 @@ def guard_output(
         else:
             content += DISCLAIMER_TEXT
         disclaimer_added = True
+
+    # Record latency (B13 observability).
+    ai_metrics.AI_OUTPUT_GUARD_LATENCY.observe(time.monotonic() - start)
 
     return {
         "content": content,
