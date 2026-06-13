@@ -67,6 +67,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Response Formatting Rules** — Updated `SYNTHESIS_SYSTEM_PROMPT` in `ai_service/agents/synthesis.py` and `ASK_MODE_SYSTEM_PROMPT` in `ai_service/prompts/prompt_builder.py` to use full Markdown, highlight key values, forbid programming style, and translate variables (like `sma20`, `rsi14`) to human-friendly text.
 - **Health Monitor & Circuit Breaker Wiring** — Wired `ProviderHealthMonitor` into `ai_service/providers/router.py` to register providers, track latencies, and check the circuit state before each request.
 - **`docker-compose.ai.yml` cleanup** — Removed redundant environment variables (`AI_ENABLE_REAL_LLM`, `QWEN_API_KEY`, `LLAMA_API_KEY`) from `ai-service` and `litellm` service definitions.
+- **Chart Actions Schema Alignment** — Resolved schema and validation discrepancies between LangGraph orchestration and the React frontend.
+  - Aligned parameter keys (`indicator` vs `indicator_name`, `target` vs `section_id`) in `CHART_TOOLS` and `_propose_actions` inside `chart_interaction.py`.
+  - Updated `synthesis.py` to output both `chart_actions` (with `action_type`/`params` for Pydantic backend validation) and `tool_calls` (with `name`/`arguments`/`reason`/`requires_approval` for frontend parsing).
+  - Implemented automatic translation in `synthesis.py` to map legacy tools (`draw_trendline`, `create_annotation`, `highlight_region`) to frontend-supported draw/highlight tools.
 
 ---
 

@@ -174,11 +174,56 @@ async def synthesize_response(state: AgentState) -> AgentState:
     tool_calls = None
     chart_expert = expert_outputs.get("chart_interaction")
     if chart_expert and chart_expert.structured_data.get("proposed_actions"):
-        chart_actions = chart_expert.structured_data["proposed_actions"]
-        tool_calls = [
-            {"tool": a["tool"], "params": a.get("params", {})}
-            for a in chart_actions
-        ]
+        raw_actions = chart_expert.structured_data["proposed_actions"]
+        chart_actions = []
+        tool_calls = []
+        for a in raw_actions:
+            act_type = a.get("action_type") or a.get("tool")
+            params = a.get("params", {})
+            reason = a.get("reason") or f"AI proposed {act_type}"
+            req_app = a.get("requires_approval")
+            if req_app is None:
+                # Default requires_approval to True unless it is highlight_section or clear_ai_annotations
+                req_app = act_type not in {"highlight_section", "clear_ai_annotations"}
+            
+            # Normalize actions for frontend and backend validation compatibility
+            if act_type == "draw_trendline":
+                act_type = "draw_tool"
+                params = {
+                    "tool": "trendline",
+                    "points": [
+                        {"time": params.get("from_time"), "price": params.get("from_price")},
+                        {"time": params.get("to_time"), "price": params.get("to_price")},
+                    ],
+                    "text": params.get("color", "")
+                }
+            elif act_type == "create_annotation":
+                act_type = "draw_tool"
+                params = {
+                    "tool": "text",
+                    "points": [{"time": params.get("time"), "price": params.get("price")}],
+                    "text": params.get("text", "")
+                }
+            elif act_type == "highlight_region":
+                act_type = "highlight_candles"
+                params = {
+                    "start_time": params.get("from_time"),
+                    "end_time": params.get("to_time"),
+                    "label": params.get("label", "Highlighted Region"),
+                }
+
+            chart_actions.append({
+                "action_type": act_type,
+                "params": params,
+                "reason": reason,
+                "requires_approval": req_app,
+            })
+            tool_calls.append({
+                "name": act_type,
+                "arguments": params,
+                "reason": reason,
+                "requires_approval": req_app,
+            })
 
     timing = dict(state.get("timing", {}))
     timing["synthesis"] = timer.elapsed_ms()
