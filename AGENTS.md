@@ -10,7 +10,7 @@ Project rules for AI coding agents.
 - **Purpose:** Real-time cryptocurrency technical-analysis platform
 - **Architecture:** Lambda Architecture: speed, batch/lakehouse, serving, frontend
 - **Core stack:** Kafka, Flink, Spark, Redis Sentinel, InfluxDB, PostgreSQL, Iceberg/MinIO, Trino, FastAPI, React 19
-- **Current release:** `0.24.4` in `docs/CHANGELOG.md`
+- **Current release:** `0.25.0` in `docs/CHANGELOG.md`
 - **Current focus:** Data engineering plus Phase 1 AI Ask Mode; auth/settings/admin are PostgreSQL-backed; Interact Mode execution and ML forecasting remain future work
 
 ---

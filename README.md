@@ -193,7 +193,7 @@ This writes trade, ticker, candle, and orderbook data directly to Redis as a fal
 
 ## Version
 
-Current: **v0.24.4** (see [CHANGELOG.md](docs/CHANGELOG.md))
+Current: **v0.25.0** (see [CHANGELOG.md](docs/CHANGELOG.md))
 
 ---
 
@@ -207,4 +207,4 @@ Built and maintained by D22 Fintech, PTIT students:
 
 ---
 
-Status: Active development | Version: **0.24.4**
+Status: Active development | Version: **0.25.0**

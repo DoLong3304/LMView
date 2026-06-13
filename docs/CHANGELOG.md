@@ -8,6 +8,68 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.25.0] - 2026-06-13
+
+### Added
+
+- **Multi-Agent LangGraph Architecture** — Complete multi-agent DAG replacing the linear AI pipeline. Dispatched via `AI_ORCHESTRATION=langgraph` feature flag (default: `legacy` for backward compatibility).
+  - `ai_service/agents/state.py` — `AgentState` TypedDict defining the shared state schema with ~30 typed fields for the entire graph execution.
+  - `ai_service/agents/types.py` — Core data classes: `ExpertOutput`, `IntentClassification`, `IntentCategory`, `ExpertName`, `ValidationResult`, `Timer`, `INTENT_TO_EXPERTS` mapping.
+  - `ai_service/agents/intent_router.py` — Hybrid intent classifier: rule-based pattern matching first (7 intent categories), LLM fallback for ambiguous queries. Multi-intent detection and interact-mode boosting.
+  - `ai_service/agents/graph.py` — LangGraph `StateGraph` DAG: scope_gate → intent_router → parallel expert_execution → synthesis → reflection (with conditional revision loop up to 2 cycles) → END.
+  - `ai_service/agents/synthesis.py` — Single-LLM-call synthesis node that assembles all expert outputs into a structured prompt. Bilingual (EN/VI) system prompt with runtime context injection.
+  - `ai_service/agents/reflection.py` — Quality validation gate checking response length, disclaimer presence, expert data utilization, and uncertainty language. `route_after_reflection` conditional edge.
+  - `ai_service/agents/persistence.py` — Agent execution trace storage in PostgreSQL (`ai_agent_executions`, `ai_expert_runs` tables).
+
+- **6 Data-Only Expert Nodes** — Experts gather structured data without calling the LLM; synthesis makes the single call.
+  - `ai_service/agents/experts/base.py` — `BaseExpert` ABC with `safe_execute()` wrapper (timeout, error handling, latency tracking).
+  - `ai_service/agents/experts/technical_analysis.py` — RSI/MACD/SMA/Bollinger signal extraction from chart context with trend scoring.
+  - `ai_service/agents/experts/market_data.py` — Ticker/orderbook/trades data extraction and formatting with data source provenance tracking.
+  - `ai_service/agents/experts/news_sentiment.py` — News and sentiment data assembly (reads FinBERT cache when available).
+  - `ai_service/agents/experts/rag_knowledge.py` — Knowledge base retrieval via existing RAG pipeline.
+  - `ai_service/agents/experts/chart_interaction.py` — Interact mode tool-call proposal with typed `CHART_TOOLS` allowlist (10 tools), parameter validation, and enum enforcement.
+  - `ai_service/agents/experts/general.py` — Fallback expert for general queries.
+
+- **FinBERT NLP Pipeline** — Separate background worker for news sentiment analysis.
+  - `ai_service/nlp/finbert.py` — `FinBERTAnalyzer` with lazy model loading, GPU/CPU auto-detection, single and batch analysis.
+  - `ai_service/nlp/entity_extractor.py` — Crypto entity extraction (25+ assets), organization detection, event classification (7 categories), and market relevance scoring.
+  - `ai_service/nlp/news_processor.py` — Standalone background worker (`python -m ai_service.nlp.news_processor`) processing unanalyzed news articles from PostgreSQL.
+  - `ai_service/nlp/types.py` — Shared NLP data classes: `SentimentResult`, `EntityResult`, `NewsAnalysis`.
+
+- **Provider Health & Circuit Breaker** — `ai_service/providers/health.py` with `CircuitBreaker` (CLOSED/OPEN/HALF_OPEN states), `ProviderHealthMonitor` singleton tracking success rate, latency, and auto-failover via `get_best_provider()`.
+
+- **Interact Mode Safety** — Deterministic chart-action workflow.
+  - `ai_service/actions/executor.py` — Action validator with PostgreSQL audit trail (`ai_chart_actions` table), status tracking (pending → approved → executed → undone).
+  - `ai_service/actions/undo.py` — Per-session undo stack with reverse action computation (max depth 50).
+  - `ai_service/actions/tool_definitions.py` — Canonical tool registry with `format_tools_for_llm()` prompt helper.
+
+- **API Models** — `backend/models/ai/agents.py` with `AgentExecutionSummary`, `ExpertRunSummary`, `AgentExecutionDetail` Pydantic models.
+
+- **Database Migration** — `backend/migrations/004_agents_metadata.sql` adding `ai_agent_executions`, `ai_expert_runs`, `ai_chart_actions`, `news_sentiment_cache` tables with indexes.
+
+- **Docker AI Infrastructure** — Enhanced `docker-compose.ai.yml`:
+  - `vllm` service with GPU reservation, tool-calling (`--enable-auto-tool-choice`), served-model-name `qwen-local`, health check with 120s start_period.
+  - `finbert-worker` service (`ai-nlp` profile) with HuggingFace cache volume and CPU/GPU auto-detection.
+  - `litellm` service with enhanced config: vLLM → DashScope → DeepSeek fallback chain, 3 retries, 60s timeout.
+
+- **Test Suite** — 7 test files covering agent state, intent routing, expert nodes, chart safety, provider health, FinBERT NLP, and reflection validation.
+
+### Changed
+
+- **`ai_service/core/orchestrator.py`** — `run_chat()` now dispatches to LangGraph DAG or legacy pipeline based on `AI_ORCHESTRATION` env var. Legacy pipeline moved to `_run_chat_legacy()`. Shared helpers extracted.
+- **`ai_service/config.py`** — Added `orchestration_mode` setting (default: `legacy`).
+- **`ai_service/configs/litellm.yaml`** — Restructured with `qwen-local` (vLLM primary), `qwen-api` (DashScope), `deepseek` (fallback); router settings and retry config.
+- **`.env.example`** — Added `AI_ORCHESTRATION`, `LITELLM_*`, `VLLM_*`, `DEEPSEEK_API_KEY`, `FINBERT_*` environment variables.
+- **`backend/models/ai/__init__.py`** — Re-exports new agent execution models.
+- **`ai_service/` folder cleanup** — Deprecated and emptied unused standalone `app/` folder files (`main.py`, `supervisor.py`, `state.py`, `registry.py`, and placeholder system/safety/format markdown prompts) to maintain a clean embedded architecture.
+- **State and Intent Extraction** — Added helper `_extract_symbol_and_timeframe` in `ai_service/agents/state.py` to automatically extract symbols/timeframes from queries and supply a fallback `chart_context`.
+- **Expert Improvements** — Enhanced `ai_service/agents/experts/technical_analysis.py` to fetch indicators directly from Redis when missing from chart context, and added support/signals for Bollinger Bands middle band, ATR volatility, Volume MA, and VWAP.
+- **Response Formatting Rules** — Updated `SYNTHESIS_SYSTEM_PROMPT` in `ai_service/agents/synthesis.py` and `ASK_MODE_SYSTEM_PROMPT` in `ai_service/prompts/prompt_builder.py` to use full Markdown, highlight key values, forbid programming style, and translate variables (like `sma20`, `rsi14`) to human-friendly text.
+- **Health Monitor & Circuit Breaker Wiring** — Wired `ProviderHealthMonitor` into `ai_service/providers/router.py` to register providers, track latencies, and check the circuit state before each request.
+- **`docker-compose.ai.yml` cleanup** — Removed redundant environment variables (`AI_ENABLE_REAL_LLM`, `QWEN_API_KEY`, `LLAMA_API_KEY`) from `ai-service` and `litellm` service definitions.
+
+---
+
 ## [0.24.4] - 2026-06-13
 
 ### Added
