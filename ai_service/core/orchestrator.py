@@ -14,7 +14,7 @@ from backend.models.ai.rag import RAGRetrievalRequest
 from ai_service.actions.registry import propose_tool_calls, tool_calls_to_chart_actions
 from ai_service.actions.validator import validate_actions
 from ai_service.config import load_settings
-from ai_service.context.context_service import assemble_data_caveats
+from ai_service.context.context_service import assemble_data_caveats, assemble_news_context
 from ai_service.persistence import chat_store
 from ai_service.prompts.prompt_builder import build_ask_prompt
 from ai_service.providers.router import get_provider_router
@@ -68,6 +68,14 @@ async def run_chat(body: AIChatRequest, user_id: str) -> AIChatResponse:
     )
 
     data_caveats = assemble_data_caveats(body.chart_context)
+    news_context = await assemble_news_context(
+        chart_context=body.chart_context,
+        user_query=body.message,
+    )
+    # Add news caveats to data caveats
+    if news_context and news_context.caveats:
+        data_caveats.extend(news_context.caveats)
+
     rag_chunks, sources, rag_warnings = await _retrieve_context(
         body=body,
         user_id=user_id,
@@ -82,6 +90,7 @@ async def run_chat(body: AIChatRequest, user_id: str) -> AIChatResponse:
         conversation_history=history,
         language=body.language,
         data_caveats=data_caveats,
+        news_context=news_context,
     )
     if body.mode.value == "interact":
         prompt_messages.insert(
@@ -133,6 +142,7 @@ async def run_chat(body: AIChatRequest, user_id: str) -> AIChatResponse:
         rag_chunk_count=len(rag_chunks),
         data_caveat_count=len(data_caveats),
         provider=routing.selected_provider,
+        has_news_context=news_context is not None and news_context.article_count > 0,
     )
     estimated_cost_usd = _estimate_cost(
         llm_response.token_input,
@@ -163,6 +173,7 @@ async def run_chat(body: AIChatRequest, user_id: str) -> AIChatResponse:
             "estimated_cost_usd": estimated_cost_usd,
             "tool_calls": tool_calls,
             "chart_actions": [a.model_dump(mode="json") for a in chart_actions],
+            "news_context": news_context.to_dict() if news_context else None,
         },
     )
 
@@ -197,6 +208,7 @@ async def run_chat(body: AIChatRequest, user_id: str) -> AIChatResponse:
         token_input=llm_response.token_input,
         token_output=llm_response.token_output,
         estimated_cost_usd=estimated_cost_usd,
+        news_context=news_context.to_dict() if news_context else None,
     )
 
 
@@ -273,6 +285,7 @@ def _estimate_confidence(
     rag_chunk_count: int,
     data_caveat_count: int,
     provider: Optional[str],
+    has_news_context: bool = False,
 ) -> float:
     if provider == "none":
         return 0.2
@@ -283,6 +296,8 @@ def _estimate_confidence(
         confidence += 0.15
     elif rag_chunk_count >= 1:
         confidence += 0.08
+    if has_news_context:
+        confidence += 0.05
     confidence -= min(0.2, data_caveat_count * 0.04)
     return round(max(0.1, min(0.95, confidence)), 2)
 

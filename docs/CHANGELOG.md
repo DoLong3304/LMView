@@ -9,6 +9,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ---
 
 ## [0.24.2] - 2026-06-11
+## [0.24.2] - 2026-06-12
+
+### Added
+
+- **Advanced News Context for AI** — New `NewsContextBuilder` pulls persisted PostgreSQL news data, ranks articles by symbol match/recency/sentiment/source reliability, generates data caveats, and feeds compact context into AI Ask/Interact prompts (`ai_service/context/news_context.py`).
+- **Notification creation service** — End-to-end notification creation with preference gating, event-specific helpers for AI actions, news risk events, system degraded state, and alert triggers (`backend/services/notification_service.py`).
+- **Approved internal KB documents** — Two approved, RAG-enabled knowledge base entries: platform architecture/capabilities grounding and data caveats/limitations guide (`docs/ai/knowledge_base/approved/`).
+- **AI context quality chips** — AI panel now shows live context chips: news article count, sentiment direction, freshness age, confidence percentage, and degraded-state warnings.
+- **Sources used display** — Collapsible RAG source citations with match scores on each AI response.
+- **Risk event warnings** — Inline risk event alerts on AI responses when news contains hack/regulation/crash keywords.
+- **Loading skeletons** — Animated skeleton placeholder while AI is thinking.
+- **Admin context debug preview** — Admin-only collapsible panel showing confidence, provider/model, news context stats, data caveats, and RAG chunk details.
+- **`NewsContextSummary` type** — Frontend TypeScript interface for news context metadata (`frontend/src/services/aiService.ts`).
+- **47 new tests** — Unit and integration tests for news context ranking/dedup/caveats/risk and notification creation/preferences/events.
+- **Bilingual i18n** — English and Vietnamese translations for all new AI context chip and quality label strings.
+- **Comprehensive mock AI responses** — Updated mock AI generation in `frontend/src/data/mock/mockAi.ts` to return realistic, dynamic payloads including news contexts, sentiment summaries, RAG citations, data caveats, token usage, and cost estimates. This allows developers to test all newly introduced AI assistant visual functionalities offline.
+
+### Changed
+
+- **AI confidence model** — Confidence score now factors in news context availability (+5% when relevant news exists).
+- **AI prompt builder** — `build_ask_prompt()` accepts optional `news_context` parameter and formats news headlines/sentiment/risk events as a system context section.
+- **AI orchestrator** — News context assembly and news caveats integrated into the unified AI pipeline; news context included in response metadata.
+- **`AIChatResponse` model** — Added `news_context` optional field for frontend display.
+- **Context service** — Extracted `assemble_news_context()` async function for use by the orchestrator.
+
+### Fixed
+
+- **Type safety in tests** — Fixed Python/Pyright lint warnings in `tests/unit/test_news_context.py` by converting `symbols_mentioned` and `article_id` parameter default values to use `Optional[List[str]]` and `Optional[str]`.
+- **Frontend dependency resolution** — Resolved TypeScript compiler errors (TS2307) in `AiAssistantPanel.tsx` by installing missing markdown rendering dependencies (`react-markdown`, `rehype-sanitize`, `remark-gfm`) with legacy peer deps for React 19 compatibility.
+- **Sentiment service test compliance** — Fixed LLM sentiment service test failures in `tests/unit/test_sentiment_service.py` by mocking the `get_api_key` configuration check to ensure the mocked LLM completion path is correctly tested.
+
+---
+
+## [0.24.1] - 2026-06-12
+
 
 ### Added
 

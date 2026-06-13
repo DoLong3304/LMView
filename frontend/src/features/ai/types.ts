@@ -42,6 +42,8 @@ export interface AiMessage {
   token_input?: number | null;
   token_output?: number | null;
   estimated_cost_usd?: number | null;
+  /** News context summary */
+  news_context?: import("@/services/aiService").NewsContextSummary | null;
 }
 
 export interface AiChatState {
