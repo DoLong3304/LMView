@@ -30,6 +30,7 @@ import { useI18n } from "@/i18n";
 import { useChartZoom } from "@/hooks/useChartZoom";
 import {
   fetchCandles,
+  fetchIndicatorSeries,
   fetchHistoricalCandles,
   subscribeIndicatorStream,
   subscribeAllTimeframes,
@@ -57,12 +58,11 @@ import {
   calcVolumeMA,
   calcVWAP,
 } from "./indicatorUtils";
-import { toHeikinAshi } from "./transformers/heikinAshi";
-import { toRenko } from "./transformers/renko";
-import { toLineBreak } from "./transformers/lineBreak";
-import { toKagi } from "./transformers/kagi";
-import { toPointFigure } from "./transformers/pointFigure";
-import IndicatorPanel from "./IndicatorPanel";
+import {
+  buildChartTypeSeriesData,
+  sanitizeCandlesForChart,
+} from "./chartTypeData";
+import IndicatorPanel, { type IndicatorPanelStatus } from "./IndicatorPanel";
 import MarketSelector from "./MarketSelector";
 import OHLCVBar from "./OHLCVBar";
 import type { AiChartActionController } from "@/features/ai/actions/AiActionProvider";
@@ -72,6 +72,7 @@ import type {
   ChartType,
   HistoricalRange,
   IndicatorSettings,
+  IndicatorSeriesResponse,
   IndicatorStreamSnapshot,
   TimeframeKey,
   NewsArticle,
@@ -105,24 +106,6 @@ function usesDerivedSeriesData(type: ChartType): boolean {
 
 function usesLineSeries(type: ChartType): boolean {
   return LINE_SERIES_CHART_TYPES.has(type);
-}
-
-function ensureStrictAscendingTimes<T extends { time: number }>(data: T[]): T[] {
-  let previousTime = Number.NEGATIVE_INFINITY;
-  let changed = false;
-
-  const ordered = data.map((candle) => {
-    let nextTime = candle.time;
-    if (nextTime <= previousTime) {
-      nextTime = previousTime + 1;
-      changed = true;
-    }
-    previousTime = nextTime;
-
-    return nextTime === candle.time ? candle : { ...candle, time: nextTime };
-  });
-
-  return changed ? ordered : data;
 }
 
 const CHART_TYPE_ICONS: Record<ChartType, typeof CandleIcon> = {
@@ -164,9 +147,48 @@ const AI_INDICATOR_ALIASES: Record<string, string> = {
   atr14: "atr",
 };
 
+const BACKEND_SERIES_INDICATORS = [
+  "sma20",
+  "sma50",
+  "ema12",
+  "ema26",
+  "rsi",
+  "macd",
+  "bb",
+  "volume",
+  "volumeMa",
+  "atr",
+] as const;
+
+const INDICATOR_WARNING_MESSAGES: Record<string, TranslationKey> = {
+  not_enough_candle_data: "indicatorNotEnoughData",
+  indicator_data_unavailable: "indicatorDataUnavailable",
+  backend_returned_empty_result: "indicatorBackendEmpty",
+};
+
 function normalizeAiIndicatorKey(indicator: string): string {
   const key = indicator.trim().replace(/\s+/g, "_").toLowerCase();
   return AI_INDICATOR_ALIASES[key] || key;
+}
+
+function activeBackendIndicators(settings: Record<string, IndicatorSettings>): string[] {
+  return BACKEND_SERIES_INDICATORS.filter((indicator) => settings[indicator]?.visible);
+}
+
+function warningMessageKey(warnings: string[] = []): TranslationKey | null {
+  for (const warning of ["not_enough_candle_data", "backend_returned_empty_result", "indicator_data_unavailable"]) {
+    if (warnings.includes(warning)) return INDICATOR_WARNING_MESSAGES[warning];
+  }
+  return null;
+}
+
+function hasSeriesData(payload: IndicatorSeriesResponse, indicator: string): boolean {
+  const series = payload.series || {};
+  if (indicator === "rsi") return Boolean(series.rsi?.length || series.rsi14?.length);
+  if (indicator === "bb") return Boolean(series.bb_upper?.length || series.bb_middle?.length || series.bb_lower?.length);
+  if (indicator === "volumeMa") return Boolean(series.volumeMa?.length || series.volume_sma20?.length);
+  if (indicator === "atr") return Boolean(series.atr?.length || series.atr14?.length);
+  return Boolean(series[indicator]?.length);
 }
 
 interface CandlestickChartProps {
@@ -254,6 +276,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const rsiSeriesRef = useRef<any>(null);
   const mfiSeriesRef = useRef<any>(null);
   const candlesRef = useRef<Candle[]>([]);
+  const renderedPriceDataLengthRef = useRef(0);
   const themeRef = useRef(getChartTheme());
   const symbolRef = useRef(defaultSymbol);
   const timeframeRef = useRef(timeframeProp || "1m");
@@ -269,6 +292,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   );
   const [candles, setCandles] = useState<Candle[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [indicatorStatus, setIndicatorStatus] = useState<IndicatorPanelStatus>({});
 
   useEffect(() => {
     if (!onAiActionControllerReady) return;
@@ -435,11 +459,6 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     SHOW_SECONDS: true,       // All timeframes show seconds (consistent display)
   };
 
-  const toCloseSeriesData = useCallback(
-    (data: Candle[]) => data.map((c) => ({ time: c.time, value: c.close })),
-    [],
-  );
-
   const getActivePriceSeries = useCallback(() => {
     if (chartTypeRef.current === "bars") return barRef.current || candleRef.current;
     if (usesLineSeries(chartTypeRef.current)) return lineRef.current || candleRef.current;
@@ -449,69 +468,61 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   const setAllPriceSeriesData = useCallback(
     (data: Candle[]) => {
-      // Transform candles for non-standard chart types
-      let chartData = data;
-      if (chartType === "heikinAshi") {
-        chartData = toHeikinAshi(data);
-      } else if (chartType === "renko") {
-        const renkoData = toRenko(data, { brickSize: "atr", atrPeriod: 14, wicks: true });
-        chartData = renkoData.map((b) => ({
-          time: b.time as any,
-          open: b.open,
-          high: b.high,
-          low: b.low,
-          close: b.close,
-          volume: 0,
-        }));
-      } else if (chartType === "lineBreak") {
-        const lbData = toLineBreak(data, { lookback: 3 });
-        chartData = lbData.map((b) => ({
-          time: b.time as any,
-          open: b.open,
-          high: b.high,
-          low: b.low,
-          close: b.close,
-          volume: 0,
-        }));
-      } else if (chartType === "pointFigure") {
-        chartData = toPointFigure(data, { boxSize: "atr", atrPeriod: 14, reversalBoxes: 3 });
-      }
+      const chart = chartRef.current;
+      const timeScale = chart?.timeScale();
+      const previousRange = timeScale?.getVisibleLogicalRange() || null;
+      const previousLength = renderedPriceDataLengthRef.current;
+      const seriesData = buildChartTypeSeriesData(chartType, data);
+      const nextLength = Math.max(
+        seriesData.candles.length,
+        seriesData.line.length,
+      );
 
       if (chartType === "kagi") {
-        const lineData = ensureStrictAscendingTimes(
-          toKagi(data, { reversalPercent: 4, useClose: true }).map((line) => ({
-            time: line.time as any,
-            value: line.price,
-          })),
-        );
         candleRef.current?.setData([]);
         barRef.current?.setData([]);
-        lineRef.current?.setData(lineData);
+        lineRef.current?.setData(seriesData.line);
         areaRef.current?.setData([]);
-        return;
+      } else {
+        candleRef.current?.setData(seriesData.candles);
+        barRef.current?.setData(seriesData.candles);
+        lineRef.current?.setData(seriesData.line);
+        areaRef.current?.setData(seriesData.line);
       }
 
-      const orderedChartData = ensureStrictAscendingTimes(chartData);
+      renderedPriceDataLengthRef.current = nextLength;
 
-      candleRef.current?.setData(orderedChartData);
-      barRef.current?.setData(orderedChartData);
-      const closeData = toCloseSeriesData(orderedChartData);
-      lineRef.current?.setData(closeData);
-      areaRef.current?.setData(closeData);
+      if (!timeScale || !previousRange || nextLength < 2) return;
+
+      window.requestAnimationFrame(() => {
+        const width = Math.max(5, previousRange.to - previousRange.from);
+        const maxTo = nextLength - 1 + 0.5;
+        const wasNearRight =
+          previousLength <= 0 || previousRange.to >= previousLength - 3;
+        const desiredTo = wasNearRight
+          ? maxTo
+          : Math.min(previousRange.to, maxTo);
+        const from = Math.max(-0.5, desiredTo - width);
+        const to = Math.min(maxTo, from + width);
+        if (to > from) timeScale.setVisibleLogicalRange({ from, to });
+      });
     },
-    [toCloseSeriesData, chartType],
+    [chartType],
   );
 
   const updateAllPriceSeries = useCallback((candle: Candle) => {
+    const chartCandle = sanitizeCandlesForChart([candle])[0];
+    if (!chartCandle) return;
+
     if (usesDerivedSeriesData(chartTypeRef.current)) {
       const current = candlesRef.current;
       const last = current[current.length - 1];
       const next = !last
-        ? [candle]
-        : candle.time === last.time
-          ? [...current.slice(0, -1), candle]
-          : candle.time > last.time
-            ? [...current.slice(-(CHART_CONFIG.MAX_BARS_MEMORY - 1)), candle]
+        ? [chartCandle]
+        : chartCandle.time === last.time
+          ? [...current.slice(0, -1), chartCandle]
+          : chartCandle.time > last.time
+            ? [...current.slice(-(CHART_CONFIG.MAX_BARS_MEMORY - 1)), chartCandle]
             : current;
 
       if (next !== current) {
@@ -520,9 +531,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       return;
     }
 
-    candleRef.current?.update(candle);
-    barRef.current?.update(candle);
-    const closePoint = { time: candle.time, value: candle.close };
+    candleRef.current?.update(chartCandle);
+    barRef.current?.update(chartCandle);
+    const closePoint = { time: chartCandle.time, value: chartCandle.close };
     lineRef.current?.update(closePoint);
     areaRef.current?.update(closePoint);
   }, [setAllPriceSeriesData]);
@@ -590,12 +601,13 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         return data;
       }
 
+      olderData = sanitizeCandlesForChart(olderData);
       if (!Array.isArray(olderData) || olderData.length === 0) return data;
 
       const dedupedOlder = olderData.filter((c) => c.time < earliestTime);
       if (dedupedOlder.length === 0) return data;
 
-      return [...dedupedOlder, ...data].sort((a, b) => a.time - b.time);
+      return sanitizeCandlesForChart([...dedupedOlder, ...data]);
     },
     [getInitialVisibleBars, getTimeframeSeconds],
   );
@@ -978,11 +990,31 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         setTooltip(null);
         return;
       }
-      const c = param.seriesData.get(cs);
+      const activeSeries = getActivePriceSeries();
+      const c = activeSeries ? param.seriesData.get(activeSeries) : param.seriesData.get(cs);
       const v = param.seriesData.get(vs);
       if (c) {
         const lbl = localTimeFormatter(param.time as number);
-        setTooltip({ ...c, volume: v ? v.value : undefined, timeLabel: lbl });
+        if (
+          typeof c.open === "number"
+          && typeof c.high === "number"
+          && typeof c.low === "number"
+          && typeof c.close === "number"
+        ) {
+          setTooltip({ ...c, volume: v ? v.value : undefined, timeLabel: lbl });
+          return;
+        }
+
+        if (typeof c.value === "number" && Number.isFinite(c.value)) {
+          setTooltip({
+            open: c.value,
+            high: c.value,
+            low: c.value,
+            close: c.value,
+            volume: v ? v.value : undefined,
+            timeLabel: lbl,
+          });
+        }
       }
     });
     const ro = new ResizeObserver(scheduleChartResize);
@@ -1378,6 +1410,83 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     [],
   );
 
+  const applyFetchedIndicatorSeries = useCallback((payload: IndicatorSeriesResponse) => {
+    const readPoints = (primary: string, fallback?: string) => {
+      const rows = payload.series?.[primary]?.length
+        ? payload.series[primary]
+        : fallback
+          ? payload.series?.[fallback] ?? []
+          : [];
+      return rows.map((point) => ({
+        time: Math.floor(point.timestamp / 1000),
+        value: point.value,
+      }));
+    };
+
+    sma20Ref.current?.setData(readPoints("sma20"));
+    sma50Ref.current?.setData(readPoints("sma50"));
+    ema12Ref.current?.setData(readPoints("ema12"));
+    ema26Ref.current?.setData(readPoints("ema26"));
+    bbUpperRef.current?.setData(readPoints("bb_upper"));
+    bbBasisRef.current?.setData(readPoints("bb_middle"));
+    bbLowerRef.current?.setData(readPoints("bb_lower"));
+    volumeMaRef.current?.setData(readPoints("volumeMa", "volume_sma20"));
+    macdLineRef.current?.setData(readPoints("macd"));
+    macdSignalRef.current?.setData(readPoints("macd_signal"));
+    macdHistogramRef.current?.setData(
+      readPoints("macd_histogram").map((point) => ({
+        ...point,
+        color: point.value >= 0 ? themeRef.current.volumeUp : themeRef.current.volumeDown,
+      })),
+    );
+    atrRef.current?.setData(readPoints("atr", "atr14"));
+    rsiSeriesRef.current?.setData(readPoints("rsi", "rsi14"));
+  }, []);
+
+  const activeIndicatorSignature = activeBackendIndicators(indSettings).join(",");
+
+  useEffect(() => {
+    const activeIndicators = activeIndicatorSignature
+      .split(",")
+      .filter(Boolean);
+    if (activeIndicators.length === 0) {
+      setIndicatorStatus({});
+      return;
+    }
+
+    let cancelled = false;
+    setIndicatorStatus({ loading: true, messageKey: null });
+
+    const limit = Math.min(1000, Math.max(500, candlesRef.current.length || 0));
+    fetchIndicatorSeries(symbol, timeframe, activeIndicators, limit)
+      .then((payload) => {
+        if (cancelled) return;
+        if (payload.source !== "mock_mode_local_candles") {
+          applyFetchedIndicatorSeries(payload);
+        }
+
+        const messageFromWarning = warningMessageKey(payload.warnings);
+        const hasAnyActiveData = activeIndicators.some((indicator) => hasSeriesData(payload, indicator));
+        setIndicatorStatus({
+          loading: false,
+          messageKey: messageFromWarning || (!hasAnyActiveData && payload.source !== "mock_mode_local_candles" ? "indicatorBackendEmpty" : null),
+        });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setIndicatorStatus({ loading: false, messageKey: "indicatorDataUnavailable" });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeIndicatorSignature,
+    applyFetchedIndicatorSeries,
+    symbol,
+    timeframe,
+  ]);
+
   // Helper: load more historical data when scrolling left
   const loadMoreHistoricalData = useCallback(async () => {
     if (isLoadingMoreRef.current || noMoreDataRef.current || !candleRef.current || historicalRange) return;
@@ -1411,13 +1520,13 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       }
 
       // Filter out duplicates and merge
-      const newCandles = olderData.filter(c => c.time < earliestTime);
+      const newCandles = sanitizeCandlesForChart(olderData).filter(c => c.time < earliestTime);
       if (newCandles.length === 0) {
         noMoreDataRef.current = true;
         isLoadingMoreRef.current = false;
         return;
       }
-      const merged = [...newCandles, ...current];
+      const merged = sanitizeCandlesForChart([...newCandles, ...current]);
       
       // Update refs BEFORE touching chart
       candlesRef.current = merged;
@@ -1488,28 +1597,29 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const applyDataToChart = useCallback(
     (data: Candle[]) => {
       if (!candleRef.current) return;
-      candlesRef.current = data;
-      if (data.length > 0) {
-        earliestTimestampRef.current = data[0].time;
+      const chartCandles = sanitizeCandlesForChart(data);
+      candlesRef.current = chartCandles;
+      if (chartCandles.length > 0) {
+        earliestTimestampRef.current = chartCandles[0].time;
         noMoreDataRef.current = false;
         scrollCooldownRef.current = 0;
       }
-      setNoData(data.length === 0);
-      setAllPriceSeriesData(data);
+      setNoData(chartCandles.length === 0);
+      setAllPriceSeriesData(chartCandles);
       const vs = volumeRef.current;
       if (vs)
         vs.setData(
-          data.map((c) => ({
+          chartCandles.map((c) => ({
             time: c.time,
             value: c.volume,
             color: c.close >= c.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
           })),
         );
-      syncIndicatorData(data);
-      setInitialVisibleRange(data);
-      if (data.length > 0)
-        setTooltip({ ...data[data.length - 1], timeLabel: "" });
-      commitCandlesState(data);
+      syncIndicatorData(chartCandles);
+      setInitialVisibleRange(chartCandles);
+      if (chartCandles.length > 0)
+        setTooltip({ ...chartCandles[chartCandles.length - 1], timeLabel: "" });
+      commitCandlesState(chartCandles);
     },
     [commitCandlesState, setAllPriceSeriesData, setInitialVisibleRange, syncIndicatorData],
   );
@@ -1554,13 +1664,13 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         const requestInterval = effectiveTimeframe;
 
         // Fetch historical data
-        let data = await fetchHistoricalCandles(
+        let data = sanitizeCandlesForChart(await fetchHistoricalCandles(
           requestSymbol,
           range.startMs,
           range.endMs,
           500,
           requestInterval,
-        );
+        ));
 
         // Check if this request is still valid (not superseded by newer request)
         if (currentRequestId !== historicalRequestIdRef.current) {
@@ -1631,7 +1741,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       try {
         const requestSymbol = symbol;
         const requestInterval = timeframe.toLowerCase();
-        let data = await fetchCandles(requestSymbol, requestInterval, limit);
+        let data = sanitizeCandlesForChart(await fetchCandles(requestSymbol, requestInterval, limit));
         if (cancelled) return;
 
         data = await preloadInitialCandles({
@@ -1676,6 +1786,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         // Only process the current timeframe
         if (tf !== timeframe.toLowerCase()) return;
         if (cancelled || !candleRef.current) return;
+        const normalizedCandle = sanitizeCandlesForChart([candle])[0];
+        if (!normalizedCandle) return;
+        candle = normalizedCandle;
         const prev = candlesRef.current;
         if (prev.length === 0) return;
 
@@ -2286,6 +2399,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                       <IndicatorPanel
                         indSettings={indSettings}
                         onChange={setIndSettings}
+                        status={indicatorStatus}
                       />
                     </div>
                   )}

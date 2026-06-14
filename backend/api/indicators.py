@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from backend.services.indicator_service import (
     get_indicator_snapshot,
+    get_indicator_series,
     get_indicator_summary,
     get_supported_indicators,
 )
@@ -45,6 +46,28 @@ async def get_indicators(
         raise HTTPException(404, f"No indicator data for {symbol}")
 
     return snapshot.model_dump()
+
+
+@router.get("/indicators/{symbol}/series")
+async def get_indicator_series_endpoint(
+    symbol: str,
+    exchange: str = Query("binance", description="Exchange name"),
+    interval: str = Query("1m", description="Indicator timeframe"),
+    indicators: str = Query(
+        "sma20,sma50,ema12,ema26,rsi,macd,bb,volume,volumeMa,atr",
+        description="Comma-separated indicator names",
+    ),
+    limit: int = Query(500, ge=1, le=1000, description="Maximum candle bars to derive from"),
+):
+    """Return indicator series with candle-derived fallback when cache is empty."""
+    response = await get_indicator_series(
+        symbol=symbol,
+        exchange=exchange,
+        interval=interval,
+        indicators=[item.strip() for item in indicators.split(",") if item.strip()],
+        limit=limit,
+    )
+    return response.model_dump()
 
 
 @router.get("/indicators/{symbol}/summary")

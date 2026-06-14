@@ -55,6 +55,8 @@ interface ToolGroup {
 
 const DIRECT_TOOLS: ToolItem[] = [
   { id: "cursor", icon: MousePointer2, labelKey: "cursor" },
+  { id: "anchoredText", icon: TextCursorInput, labelKey: "anchoredText" },
+  { id: "note", icon: TextCursorInput, labelKey: "note" },
   { id: "text", icon: TextCursorInput, labelKey: "textNotes" },
   { id: "ruler", icon: Ruler, labelKey: "ruler" },
 ];

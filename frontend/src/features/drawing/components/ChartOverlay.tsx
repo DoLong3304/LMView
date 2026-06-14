@@ -2,7 +2,13 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useI18n } from "@/i18n";
 import type { Drawing, DataPoint } from "@/types";
 import { DEFAULT_TOOL_SETTINGS, type ToolSettings } from './ToolSettingsPopup';
-import type { IChartApi, ISeriesApi } from 'lightweight-charts';
+import type { IChartApi } from 'lightweight-charts';
+import {
+  getCommittedDrawingDataPoints,
+  isRenderableBoxDrawing,
+  isRenderableParallelChannel,
+  isRenderableTwoPointDrawing,
+} from '../drawingGeometry';
 
 const MULTI_CLICK_NEEDED: Record<string, boolean> = {
   elliottWave: true,
@@ -17,6 +23,11 @@ const MULTI_CLICK_NEEDED: Record<string, boolean> = {
 
 const DRAWING_HIT_TOLERANCE = 8; // pixels
 
+interface DrawingPriceSeriesController {
+  priceToCoordinate: (price: number) => number | null;
+  coordinateToPrice: (coordinate: number) => number | null;
+}
+
 interface ChartOverlayProps {
   activeTool: string;
   drawings: Drawing[];
@@ -25,7 +36,7 @@ interface ChartOverlayProps {
   onDeleteDrawing: (id: string | number) => void;
   toolSettings?: Record<string, ToolSettings>;
   chartApi: IChartApi | null;
-  candleSeries: ISeriesApi<'Candlestick'> | null;
+  candleSeries: DrawingPriceSeriesController | null;
   magnetEnabled?: boolean;
   selectedDrawingIds?: (string | number)[];
   onSetSelectedDrawingIds?: (ids: (string | number)[]) => void;
@@ -35,6 +46,11 @@ interface ChartOverlayProps {
 }
 
 interface PixelPoint { x: number; y: number; }
+
+interface TextInputState {
+  position: PixelPoint;
+  tool: 'anchoredText' | 'note' | 'text';
+}
 
 const PATTERN_TOOLS = new Set(["harmonicABCD", "xabcdPattern", "elliottWave"]);
 const PITCHFORK_TOOLS = new Set(["pitchfork", "schiffPitchfork", "modifiedPitchfork", "insidePitchfork"]);
@@ -73,6 +89,31 @@ const getPatternLabels = (tool: string, settings: Record<string, any>): string[]
     : ["0", "1", "2", "3", "4", "5"];
 };
 
+function getPositionPriceLevels(tool: string, entryPrice: number, controlPrice: number) {
+  const distance = Math.abs(controlPrice - entryPrice);
+  if (!Number.isFinite(distance) || distance === 0) {
+    return null;
+  }
+
+  if (tool === 'longPosition') {
+    return {
+      targetPrice: entryPrice + distance,
+      riskPrice: entryPrice - distance,
+      pct: entryPrice ? (distance / entryPrice) * 100 : 0,
+    };
+  }
+
+  if (tool === 'shortPosition') {
+    return {
+      targetPrice: entryPrice - distance,
+      riskPrice: entryPrice + distance,
+      pct: entryPrice ? (distance / entryPrice) * 100 : 0,
+    };
+  }
+
+  return null;
+}
+
 const ChartOverlay: React.FC<ChartOverlayProps> = ({
   activeTool,
   drawings,
@@ -91,13 +132,12 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
   void onUpdateDrawing;
   void onDeleteDrawing; // Used via keyboard shortcuts in parent
   const { t } = useI18n();
-  void t; // May be used in future for tooltips
   const svgRef = useRef<SVGSVGElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [startDataPoint, setStartDataPoint] = useState<DataPoint | null>(null);
   const [currentDataPoint, setCurrentDataPoint] = useState<DataPoint | null>(null);
   const [multiDataPoints, setMultiDataPoints] = useState<DataPoint[]>([]);
-  const [textInput, setTextInput] = useState<PixelPoint | null>(null);
+  const [textInput, setTextInput] = useState<TextInputState | null>(null);
   const [hoveredDrawingId, setHoveredDrawingId] = useState<string | number | null>(null);
   const [, setRedrawCounter] = useState(0);
   const [panState, setPanState] = useState<{
@@ -235,6 +275,20 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         return Math.abs(mousePixel.y - pixels[0].y) <= DRAWING_HIT_TOLERANCE;
       }
 
+      case 'horizontalRay': {
+        const y = priceToY(drawing.dataPoints[0].price);
+        const x = timeToX(drawing.dataPoints[0].time);
+        if (x === null || y === null) return false;
+
+        const width = svgRef.current?.clientWidth || 800;
+        const startX = Math.max(0, x);
+        if (startX > width + DRAWING_HIT_TOLERANCE) return false;
+
+        return mousePixel.x >= startX - DRAWING_HIT_TOLERANCE &&
+               mousePixel.x <= width + DRAWING_HIT_TOLERANCE &&
+               Math.abs(mousePixel.y - y) <= DRAWING_HIT_TOLERANCE;
+      }
+
       case 'vertical': {
         // Vertical line: check X distance
         if (!pixels[0]) return false;
@@ -303,26 +357,63 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
       case 'shortPosition': {
         if (pixels.length < 2 || !pixels[0] || !pixels[1]) return false;
         const [p1, p2] = pixels;
+        if (!isRenderableBoxDrawing(p1, p2)) return false;
+
+        const levels = getPositionPriceLevels(
+          drawing.tool,
+          drawing.dataPoints[0].price,
+          drawing.dataPoints[1].price
+        );
+        if (!levels) return false;
+
+        const entryY = priceToY(drawing.dataPoints[0].price);
+        const targetY = priceToY(levels.targetPrice);
+        const riskY = priceToY(levels.riskPrice);
+        if (entryY === null || targetY === null || riskY === null) return false;
+
         const left = Math.min(p1.x, p2.x);
         const right = Math.max(p1.x, p2.x);
-        const top = Math.min(p1.y, p2.y);
-        const bottom = Math.max(p1.y, p2.y);
+        const top = Math.min(entryY, targetY, riskY);
+        const bottom = Math.max(entryY, targetY, riskY);
         return mousePixel.x >= left - DRAWING_HIT_TOLERANCE &&
           mousePixel.x <= right + DRAWING_HIT_TOLERANCE &&
           mousePixel.y >= top - DRAWING_HIT_TOLERANCE &&
           mousePixel.y <= bottom + DRAWING_HIT_TOLERANCE;
       }
 
+      case 'fibRetracement': {
+        if (pixels.length < 2 || !pixels[0] || !pixels[1]) return false;
+        const [p1, p2] = pixels;
+        if (!isRenderableBoxDrawing(p1, p2)) return false;
+
+        const levels = (drawing.settings?.levels as number[] | undefined) ?? [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+        const left = Math.min(p1.x, p2.x);
+        const right = Math.max(p1.x, p2.x);
+        const nearDiagonal = distanceToLine(mousePixel, p1, p2) <= DRAWING_HIT_TOLERANCE;
+        const nearLevel = levels.some((level) => {
+          const y = p1.y + (p2.y - p1.y) * level;
+          return mousePixel.x >= left - DRAWING_HIT_TOLERANCE &&
+                 mousePixel.x <= right + DRAWING_HIT_TOLERANCE &&
+                 Math.abs(mousePixel.y - y) <= DRAWING_HIT_TOLERANCE;
+        });
+
+        return nearDiagonal || nearLevel;
+      }
+
+      case 'anchoredText':
+      case 'note':
       case 'text': {
         // Text: check bounding box
         if (!pixels[0]) return false;
         const text = drawing.text || '';
-        const width = text.length * 7 + 8;
-        const height = 20;
-        return mousePixel.x >= pixels[0].x - 2 &&
-               mousePixel.x <= pixels[0].x + width &&
-               mousePixel.y >= pixels[0].y - 14 &&
-               mousePixel.y <= pixels[0].y + height - 14;
+        const fontSize = typeof drawing.settings?.fontSize === 'number' ? drawing.settings.fontSize : 12;
+        const width = Math.max(44, text.length * Math.max(6, fontSize * 0.6) + 12);
+        const height = Math.max(22, fontSize + 10);
+        const rectY = pixels[0].y - height + 4;
+        return mousePixel.x >= pixels[0].x - 4 &&
+               mousePixel.x <= pixels[0].x - 4 + width &&
+               mousePixel.y >= rectY &&
+               mousePixel.y <= rectY + height;
       }
 
       default: {
@@ -348,6 +439,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         if (drawing.tool === 'parallelChannel') {
           if (validPixels.length < 3) return false;
           const [p1, p2, p3] = validPixels;
+          if (!isRenderableParallelChannel([p1, p2, p3])) return false;
           // Hit test both lines of the channel
           const hit1 = distanceToLine(mousePixel, p1, p2) <= DRAWING_HIT_TOLERANCE;
           // Calculate parallel line from p3 offset
@@ -392,7 +484,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         return false;
       }
     }
-  }, [dataToPixel, distanceToInfiniteLine, distanceToLine, distanceToRay]);
+  }, [dataToPixel, distanceToInfiniteLine, distanceToLine, distanceToRay, priceToY, timeToX]);
 
   // ══════════════════════════════════════════════════════════════
   // MAGNET SNAP
@@ -486,6 +578,18 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
     const needed = requiredPoints();
     const next = [...multiDataPoints, snapped];
 
+    if (activeTool === 'parallelChannel') {
+      const nextPixels = next.map(point => dataToPixel(point));
+
+      if (next.length === 2 && !isRenderableTwoPointDrawing(nextPixels[0], nextPixels[1])) {
+        return;
+      }
+
+      if (next.length >= needed && !isRenderableParallelChannel(nextPixels)) {
+        return;
+      }
+    }
+
     if (next.length >= needed) {
       onAddDrawing({
         id: Date.now(),
@@ -499,7 +603,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
       setMultiDataPoints(next);
       setCurrentDataPoint(snapped);
     }
-  }, [multiDataPoints, requiredPoints, activeTool, getSVGPoint, pixelToData, magneticSnap, onAddDrawing, activeSettings]);
+  }, [multiDataPoints, requiredPoints, activeTool, getSVGPoint, pixelToData, magneticSnap, onAddDrawing, activeSettings, dataToPixel]);
 
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     const pixel = getSVGPoint(e);
@@ -552,8 +656,8 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
       return;
     }
 
-    if (activeTool === 'text') {
-      setTextInput(getSVGPoint(e));
+    if (activeTool === 'text' || activeTool === 'anchoredText' || activeTool === 'note') {
+      setTextInput({ position: getSVGPoint(e), tool: activeTool });
       return;
     }
 
@@ -657,17 +761,46 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
 
     if (!isDrawing || !startDataPoint || !currentDataPoint) return;
 
+    if (activeTool === 'trendline' || activeTool === 'ruler') {
+      const startPixel = dataToPixel(startDataPoint);
+      const endPixel = dataToPixel(currentDataPoint);
+
+      if (!isRenderableTwoPointDrawing(startPixel, endPixel)) {
+        setIsDrawing(false);
+        setStartDataPoint(null);
+        setCurrentDataPoint(null);
+        return;
+      }
+    }
+
+    if (
+      activeTool === 'rectangle' ||
+      activeTool === 'fibRetracement' ||
+      activeTool === 'longPosition' ||
+      activeTool === 'shortPosition'
+    ) {
+      const startPixel = dataToPixel(startDataPoint);
+      const endPixel = dataToPixel(currentDataPoint);
+
+      if (!isRenderableBoxDrawing(startPixel, endPixel)) {
+        setIsDrawing(false);
+        setStartDataPoint(null);
+        setCurrentDataPoint(null);
+        return;
+      }
+    }
+
     onAddDrawing({
       id: Date.now(),
       tool: activeTool,
-      dataPoints: [startDataPoint, currentDataPoint],
+      dataPoints: getCommittedDrawingDataPoints(activeTool, startDataPoint, currentDataPoint),
       settings: activeSettings(),
     });
 
     setIsDrawing(false);
     setStartDataPoint(null);
     setCurrentDataPoint(null);
-  }, [isDrawing, startDataPoint, currentDataPoint, activeTool, onAddDrawing, activeSettings, draggingAnchor, handleAnchorMouseUp, panState]);
+  }, [isDrawing, startDataPoint, currentDataPoint, activeTool, dataToPixel, onAddDrawing, activeSettings, draggingAnchor, handleAnchorMouseUp, panState]);
 
   const handleTextSubmit = useCallback((text: string) => {
     if (!textInput || !text) {
@@ -675,7 +808,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
       return;
     }
 
-    const dataPoint = pixelToData(textInput);
+    const dataPoint = pixelToData(textInput.position);
     if (!dataPoint) {
       setTextInput(null);
       return;
@@ -683,13 +816,15 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
 
     onAddDrawing({
       id: Date.now(),
-      tool: 'text',
+      tool: textInput.tool,
       dataPoints: [dataPoint],
       text,
-      settings: activeSettings(),
+      settings: (toolSettings && toolSettings[textInput.tool]) ||
+        DEFAULT_TOOL_SETTINGS[textInput.tool] ||
+        activeSettings(),
     });
     setTextInput(null);
-  }, [textInput, pixelToData, onAddDrawing, activeSettings]);
+  }, [textInput, pixelToData, onAddDrawing, activeSettings, toolSettings]);
 
   // ══════════════════════════════════════════════════════════════
   // REDRAW ON CHART CHANGES (zoom, pan, resize)
@@ -791,6 +926,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         if (x === null) return null;
         const time = d.dataPoints[0].time;
         const dateStr = new Date(time * 1000).toLocaleDateString();
+        const anchorY = priceToY(d.dataPoints[0].price);
 
         return (
           <g key={key} opacity={opacity}>
@@ -808,29 +944,57 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
                 </text>
               </>
             )}
+            {isSelected && !isPreview && !d.locked && anchorY !== null && (
+              <circle
+                cx={x}
+                cy={anchorY}
+                r="6"
+                fill={strokeColor}
+                stroke="white"
+                strokeWidth="2"
+                style={{ cursor: 'move' }}
+                onMouseDown={(e) => handleAnchorMouseDown(e, d.id, 0)}
+              />
+            )}
           </g>
         );
       }
 
+      case 'anchoredText':
+      case 'note':
       case 'text': {
         if (pixels.length < 1 || !pixels[0]) return null;
         const p = pixels[0];
         const text = d.text || '';
-        const width = Math.max(44, text.length * 7 + 12);
+        const fontSize = typeof s.fontSize === 'number' ? s.fontSize : 12;
+        const textColor = typeof s.textColor === 'string' ? s.textColor : strokeColor;
+        const backgroundColor = typeof s.backgroundColor === 'string' ? s.backgroundColor : `${color}26`;
+        const width = Math.max(44, text.length * Math.max(6, fontSize * 0.6) + 12);
+        const height = Math.max(22, fontSize + 10);
+        const rectY = p.y - height + 4;
+        const textY = p.y - Math.max(3, (height - fontSize) / 2);
 
         return (
           <g key={key} opacity={opacity}>
             <rect
               x={p.x - 4}
-              y={p.y - 18}
+              y={rectY}
               width={width}
-              height={22}
+              height={height}
               rx={4}
-              fill={`${color}26`}
+              fill={backgroundColor}
               stroke={isSelected ? strokeColor : `${color}80`}
               strokeWidth={isSelected ? 1.5 : 1}
             />
-            <text x={p.x + 2} y={p.y - 3} fontSize="12" fill={strokeColor}>
+            <text
+              x={p.x + 2}
+              y={textY}
+              fontSize={fontSize}
+              fill={textColor}
+              fontFamily={typeof s.fontFamily === 'string' ? s.fontFamily : undefined}
+              fontWeight={s.bold ? 600 : 400}
+              fontStyle={s.italic ? 'italic' : 'normal'}
+            >
               {text}
             </text>
             {isSelected && !isPreview && !d.locked && (
@@ -850,20 +1014,42 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
       }
 
       default: {
-        // Horizontal ray with arrows both sides
+        // Horizontal ray starts at its time anchor and extends to the right.
         if (d.tool === 'horizontalRay') {
           const y = priceToY(d.dataPoints[0].price);
-          if (y === null) return null;
+          const anchorX = timeToX(d.dataPoints[0].time);
+          if (y === null || anchorX === null) return null;
+
+          const width = svgRef.current?.clientWidth || 800;
+          const startX = Math.max(0, anchorX);
+          if (startX > width) return null;
+
+          const labelX = Math.min(Math.max(startX + 40, 40), Math.max(40, width - 40));
+          const showAnchor = anchorX >= 0 && anchorX <= width;
+
           return (
             <g key={key} opacity={opacity}>
-              <line x1={0} y1={y} x2="100%" y2={y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray="8 4" />
-              <polygon points={`8,${y - 6} 0,${y} 8,${y + 6}`} fill={strokeColor} />
-              <polygon points={`16,${y - 6} 24,${y} 16,${y + 6}`} fill={strokeColor} transform="translate(-24,0)" />
+              <line x1={startX} y1={y} x2={width} y2={y} stroke={strokeColor} strokeWidth={strokeWidth} strokeDasharray="8 4" />
+              {width - startX > 12 && (
+                <polygon points={`${width},${y} ${width - 8},${y - 5} ${width - 8},${y + 5}`} fill={strokeColor} />
+              )}
               {s.showLabel !== false && (
                 <>
-                  <rect x={10} y={y - 18} width="60" height="16" rx="3" fill={`${color}30`} />
-                  <text x={40} y={y - 6} textAnchor="middle" fontSize="10" fill={color}>{d.dataPoints[0].price.toFixed(2)}</text>
+                  <rect x={labelX - 30} y={y - 18} width="60" height="16" rx="3" fill={`${color}30`} />
+                  <text x={labelX} y={y - 6} textAnchor="middle" fontSize="10" fill={color}>{d.dataPoints[0].price.toFixed(2)}</text>
                 </>
+              )}
+              {isSelected && !isPreview && !d.locked && showAnchor && (
+                <circle
+                  cx={anchorX}
+                  cy={y}
+                  r="6"
+                  fill={strokeColor}
+                  stroke="white"
+                  strokeWidth="2"
+                  style={{ cursor: 'move' }}
+                  onMouseDown={(e) => handleAnchorMouseDown(e, d.id, 0)}
+                />
               )}
             </g>
           );
@@ -873,6 +1059,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         if (d.tool === 'parallelChannel') {
           if (pixels.length < 3 || !pixels[0] || !pixels[1] || !pixels[2]) return null;
           const [p1, p2, p3] = pixels;
+          if (!isRenderableParallelChannel([p1, p2, p3])) return null;
           const dx = p2.x - p1.x, dy = p2.y - p1.y;
           const len = Math.sqrt(dx * dx + dy * dy);
           if (len === 0) return null;
@@ -1102,6 +1289,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
           const top = Math.min(p1.y, p2.y);
           const width = Math.abs(p2.x - p1.x);
           const height = Math.abs(p2.y - p1.y);
+          if (width < 1 || height < 1) return null;
 
           return (
             <g key={key} opacity={opacity}>
@@ -1201,6 +1389,8 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         }
 
         if (d.tool === 'fibRetracement') {
+          if (!isRenderableBoxDrawing(p1, p2)) return null;
+
           const start = d.dataPoints[0];
           const end = d.dataPoints[1];
           const levels = (s.levels as number[] | undefined) ?? [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
@@ -1211,6 +1401,14 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
 
           return (
             <g key={key} opacity={opacity}>
+              <rect
+                x={left}
+                y={top}
+                width={right - left}
+                height={bottom - top}
+                fill={`${color}08`}
+                stroke="none"
+              />
               <line
                 x1={p1.x} y1={p1.y} x2={p2.x} y2={p2.y}
                 stroke={strokeColor}
@@ -1249,38 +1447,36 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
                   </g>
                 );
               })}
-              <rect
-                x={left}
-                y={top}
-                width={right - left}
-                height={bottom - top}
-                fill={`${color}08`}
-                stroke="none"
-              />
               {anchors}
             </g>
           );
         }
 
         if (d.tool === 'longPosition' || d.tool === 'shortPosition') {
+          if (!isRenderableBoxDrawing(p1, p2)) return null;
+
+          const levels = getPositionPriceLevels(d.tool, d.dataPoints[0].price, d.dataPoints[1].price);
+          if (!levels) return null;
+
+          const entryY = priceToY(d.dataPoints[0].price);
+          const targetY = priceToY(levels.targetPrice);
+          const riskY = priceToY(levels.riskPrice);
+          if (entryY === null || targetY === null || riskY === null) return null;
+
           const left = Math.min(p1.x, p2.x);
-          const top = Math.min(p1.y, p2.y);
+          const top = Math.min(entryY, targetY, riskY);
           const width = Math.abs(p2.x - p1.x);
-          const entryY = p1.y;
-          const targetY = d.tool === 'longPosition' ? top : Math.max(p1.y, p2.y);
-          const riskY = d.tool === 'longPosition' ? Math.max(p1.y, p2.y) : top;
+          const targetTop = Math.min(entryY, targetY);
+          const riskTop = Math.min(entryY, riskY);
           const targetHeight = Math.abs(entryY - targetY);
           const riskHeight = Math.abs(riskY - entryY);
-          const priceMove = d.tool === 'longPosition'
-            ? d.dataPoints[1].price - d.dataPoints[0].price
-            : d.dataPoints[0].price - d.dataPoints[1].price;
-          const pct = d.dataPoints[0].price ? (priceMove / d.dataPoints[0].price) * 100 : 0;
+          const label = t(d.tool === 'longPosition' ? 'longPosition' : 'shortPosition');
 
           return (
             <g key={key} opacity={opacity}>
               <rect
                 x={left}
-                y={targetY}
+                y={targetTop}
                 width={width}
                 height={targetHeight}
                 fill="#16a34a22"
@@ -1289,7 +1485,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
               />
               <rect
                 x={left}
-                y={Math.min(entryY, riskY)}
+                y={riskTop}
                 width={width}
                 height={riskHeight}
                 fill="#dc262622"
@@ -1299,7 +1495,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
               <line x1={left} y1={entryY} x2={left + width} y2={entryY} stroke={strokeColor} strokeWidth={strokeWidth} />
               {s.showLabel !== false && (
                 <text x={left + width / 2} y={top - 6} textAnchor="middle" fontSize="11" fill={strokeColor}>
-                  {d.tool === 'longPosition' ? 'Long' : 'Short'} {pct >= 0 ? '+' : ''}{pct.toFixed(2)}%
+                  {label} +{levels.pct.toFixed(2)}%
                 </text>
               )}
               {anchors}
@@ -1439,7 +1635,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
         );
       }
     }
-  }, [dataToPixel, handleAnchorMouseDown, hoveredDrawingId, priceToY, selectedDrawingIds, timeToX]);
+  }, [dataToPixel, handleAnchorMouseDown, hoveredDrawingId, priceToY, selectedDrawingIds, t, timeToX]);
 
   const renderPreview = useCallback(() => {
     if (!isDrawing || !startDataPoint || !currentDataPoint) return null;
@@ -1518,7 +1714,7 @@ const ChartOverlay: React.FC<ChartOverlayProps> = ({
 
       {textInput && (
         <TextInputPopup
-          position={textInput}
+          position={textInput.position}
           onSubmit={handleTextSubmit}
           onCancel={() => setTextInput(null)}
         />

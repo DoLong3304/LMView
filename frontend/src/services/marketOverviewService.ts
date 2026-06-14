@@ -27,7 +27,7 @@ function normalizeMover(item: Partial<TopMover>): TopMover {
 export async function fetchMarketOverview(): Promise<MarketOverview | null> {
   if (DATA_SOURCE === "mock") {
     const payload = await mockDataAdapter.fetchMarketOverview();
-    return payload.data as unknown as MarketOverview;
+    return payload.data;
   }
   const payload = await withClientCache(
     "market-overview",
@@ -121,6 +121,11 @@ export async function fetchSectorPerformance(): Promise<SectorPerformance[]> {
 }
 
 export async function fetchHeatmapData(limit: number = 50): Promise<import("@/types").HeatmapItem[]> {
+  if (DATA_SOURCE === "mock") {
+    const payload = await mockDataAdapter.fetchHeatmapData(limit);
+    return payload.data;
+  }
+
   const payload = await withClientCache(
     makeClientCacheKey(["market-heatmap", limit]),
     MARKET_OVERVIEW_CACHE_MS,

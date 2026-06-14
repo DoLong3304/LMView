@@ -12,6 +12,7 @@ export interface IndicatorDef {
   group: IndicatorGroup;
   pane: "chart" | "pane" | "volume";
   descriptionKey: TranslationKey;
+  available?: boolean;
 }
 
 const GROUP_LABEL_KEYS: Record<IndicatorGroup, TranslationKey> = {
@@ -36,7 +37,7 @@ export const INDICATORS: IndicatorDef[] = [
   { key: "ichimoku", labelKey: "indicatorIchimoku", group: "trend", pane: "chart", descriptionKey: "indicatorDescIchimoku" },
   { key: "supertrend", labelKey: "indicatorSupertrend", group: "trend", pane: "chart", descriptionKey: "indicatorDescSupertrend" },
   { key: "psar", labelKey: "indicatorPsar", group: "trend", pane: "chart", descriptionKey: "indicatorDescPsar" },
-  { key: "support_resistance", labelKey: "indicatorSupportResistance", group: "trend", pane: "chart", descriptionKey: "indicatorDescSupportResistance" },
+  { key: "support_resistance", labelKey: "indicatorSupportResistance", group: "trend", pane: "chart", descriptionKey: "indicatorDescSupportResistance", available: false },
   { key: "rsi", labelKey: "indicatorRsi", group: "momentum", pane: "pane", descriptionKey: "indicatorDescRsi" },
   { key: "macd", labelKey: "indicatorMacd", group: "momentum", pane: "pane", descriptionKey: "indicatorDescMacd" },
   { key: "stochastic", labelKey: "indicatorStochastic", group: "momentum", pane: "pane", descriptionKey: "indicatorDescStochastic" },
@@ -45,12 +46,18 @@ export const INDICATORS: IndicatorDef[] = [
   { key: "atr", labelKey: "indicatorAtr", group: "volatility", pane: "pane", descriptionKey: "indicatorDescAtr" },
   { key: "volume", labelKey: "indicatorVolume", group: "volume", pane: "volume", descriptionKey: "indicatorDescVolume" },
   { key: "volumeMa", labelKey: "indicatorVolumeMa", group: "volume", pane: "volume", descriptionKey: "indicatorDescVolumeMa" },
-  { key: "whale_alert", labelKey: "indicatorWhaleAlert", group: "volume", pane: "chart", descriptionKey: "indicatorDescWhaleAlert" },
+  { key: "whale_alert", labelKey: "indicatorWhaleAlert", group: "volume", pane: "chart", descriptionKey: "indicatorDescWhaleAlert", available: false },
 ];
+
+export interface IndicatorPanelStatus {
+  loading?: boolean;
+  messageKey?: TranslationKey | null;
+}
 
 interface IndicatorPanelProps {
   indSettings: Record<string, IndicatorSettings>;
   onChange: (settings: Record<string, IndicatorSettings>) => void;
+  status?: IndicatorPanelStatus;
 }
 
 const NUMBER_FIELDS: Array<{ key: string; labelKey: TranslationKey; min: number; max: number; step?: number }> = [
@@ -76,7 +83,7 @@ const COLOR_FIELDS: Array<{ key: string; labelKey: TranslationKey }> = [
   { key: "spanBColor", labelKey: "spanBColor" },
 ];
 
-const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange }) => {
+const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange, status }) => {
   const { t } = useI18n();
   const [expanded, setExpanded] = useState<string | null>(null);
   const [query, setQuery] = useState("");
@@ -89,6 +96,8 @@ const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange }
   };
 
   const toggleVisible = (key: string) => {
+    const indicator = INDICATORS.find((item) => item.key === key);
+    if (indicator?.available === false) return;
     const cfg = indSettings[key];
     if (!cfg) return;
     set(key, "visible", !cfg.visible);
@@ -124,6 +133,15 @@ const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange }
             className="h-8 w-full rounded border border-gray-700 bg-gray-900 pl-7 pr-2 text-xs text-gray-200 outline-none transition-colors placeholder:text-gray-600 focus:border-blue-500"
           />
         </div>
+        {(status?.loading || status?.messageKey) && (
+          <div className={`mt-2 rounded border px-2 py-1.5 text-[10px] ${
+            status.loading
+              ? "border-blue-500/30 bg-blue-500/10 text-blue-200"
+              : "border-amber-500/30 bg-amber-500/10 text-amber-200"
+          }`}>
+            {status.loading ? t("indicatorLoading") : status.messageKey ? t(status.messageKey) : null}
+          </div>
+        )}
       </div>
 
       <div className="max-h-[440px] overflow-y-auto py-1">
@@ -139,8 +157,9 @@ const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange }
               {groupIndicators.map((indicator) => {
                 const cfg = indSettings[indicator.key] || { visible: false };
                 const isOpen = expanded === indicator.key;
+                const isAvailable = indicator.available !== false;
                 return (
-                  <div key={indicator.key} className="border-t border-gray-800 first:border-t-0">
+                  <div key={indicator.key} className={`border-t border-gray-800 first:border-t-0 ${isAvailable ? "" : "opacity-60"}`}>
                     <button
                       type="button"
                       className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left transition-colors hover:bg-gray-800"
@@ -158,6 +177,11 @@ const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange }
                           <span className="rounded bg-gray-900 px-1.5 py-0.5 text-[10px] uppercase text-gray-500">
                             {t(PANE_LABEL_KEYS[indicator.pane])}
                           </span>
+                          {!isAvailable && (
+                            <span className="rounded bg-gray-900 px-1.5 py-0.5 text-[10px] text-amber-300">
+                              {t("unavailable")}
+                            </span>
+                          )}
                         </div>
                         <p className="mt-0.5 truncate text-[10px] text-gray-500">{t(indicator.descriptionKey)}</p>
                       </div>
@@ -165,9 +189,10 @@ const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange }
                         <span
                           role="switch"
                           aria-checked={cfg.visible}
+                          aria-disabled={!isAvailable}
                           aria-label={`${t(indicator.labelKey)} ${cfg.visible ? t("active") : t("inactive")}`}
-                          title={cfg.visible ? t("active") : t("inactive")}
-                          tabIndex={0}
+                          title={isAvailable ? (cfg.visible ? t("active") : t("inactive")) : t("indicatorFutureUnavailable")}
+                          tabIndex={isAvailable ? 0 : -1}
                           onClick={(event) => {
                             event.stopPropagation();
                             toggleVisible(indicator.key);
@@ -180,12 +205,12 @@ const IndicatorPanel: React.FC<IndicatorPanelProps> = ({ indSettings, onChange }
                             }
                           }}
                           className={`h-4 w-8 rounded-full p-0.5 transition-colors ${
-                            cfg.visible ? "bg-blue-600" : "bg-gray-600"
+                            cfg.visible && isAvailable ? "bg-blue-600" : "bg-gray-600"
                           }`}
                         >
                           <span
                             className={`block h-3 w-3 rounded-full bg-white shadow transition-transform ${
-                              cfg.visible ? "translate-x-4" : "translate-x-0"
+                              cfg.visible && isAvailable ? "translate-x-4" : "translate-x-0"
                             }`}
                           />
                         </span>

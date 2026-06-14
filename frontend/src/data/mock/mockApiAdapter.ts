@@ -2,17 +2,21 @@ import { normalizeTimeframe, TIMEFRAMES } from "@/constants/timeframes";
 import {
   generateMockCandles,
   generateMockGainers,
+  generateMockHeatmapData,
   generateMockLosers,
-  generateMockMarketOverview,
+  generateMockMarketOverviewPayload,
   generateMockNews,
   generateMockOrderBook,
   generateMockTickers,
+  generateMockTrendingSymbols,
   generateMockTrades,
+  normalizeMockCandles,
 } from "@/data/mock/mockDataGenerator";
 import { generateMockAiResponse } from "@/data/mock/mockAi";
 import type {
   Candle,
-  MarketMetrics,
+  HeatmapItem,
+  MarketOverview,
   NewsArticle,
   NewsFilters,
   SymbolInfo,
@@ -55,7 +59,7 @@ export interface MockOrderBookResponse {
 }
 
 export interface MockMarketOverviewResponse {
-  data: MarketMetrics;
+  data: MarketOverview;
   metadata: MockMetadata;
 }
 
@@ -95,6 +99,7 @@ export interface DataSourceAdapter {
   fetchMarketOverview: () => Promise<MockMarketOverviewResponse>;
   fetchTopGainers: (limit: number) => Promise<MockListResponse<TopMover>>;
   fetchTopLosers: (limit: number) => Promise<MockListResponse<TopMover>>;
+  fetchHeatmapData: (limit: number) => Promise<MockListResponse<HeatmapItem>>;
   fetchLatestNews: (filters: NewsFilters) => Promise<MockNewsResponse>;
   searchNews: (filters: NewsFilters) => Promise<MockNewsResponse>;
   fetchTrendingSymbols: (limit: number) => Promise<MockTrendingSymbolsResponse>;
@@ -153,15 +158,16 @@ function normalizeMockNews(filters: NewsFilters): NewsArticle[] {
 
 export const mockDataAdapter: DataSourceAdapter = {
   async fetchCandles(symbol, timeframe, limit) {
-    return generateMockCandles(symbol, normalizeTimeframe(timeframe), limit);
+    return normalizeMockCandles(generateMockCandles(symbol, normalizeTimeframe(timeframe), limit));
   },
 
   subscribeCandle(symbol, timeframe, onCandle) {
     const interval = normalizeTimeframe(timeframe);
     let lastCandle: Candle | null = null;
     const timer = window.setInterval(() => {
-      const mockSeries = generateMockCandles(symbol, interval, 2);
+      const mockSeries = normalizeMockCandles(generateMockCandles(symbol, interval, 2));
       const latest = mockSeries[mockSeries.length - 1];
+      if (!latest) return;
       if (!lastCandle || latest.time >= lastCandle.time) {
         lastCandle = latest;
         onCandle(latest);
@@ -176,6 +182,10 @@ export const mockDataAdapter: DataSourceAdapter = {
     const openCandles: Record<string, Candle> = {};
     let price = getMockTickerPrice(symbol);
     const volatility = price * 0.008;
+    const emitCandle = (timeframe: string, candle: Candle) => {
+      const normalized = normalizeMockCandles([candle])[0];
+      if (normalized) onCandle(timeframe, normalized);
+    };
 
     const timer = window.setInterval(() => {
       const now = Math.floor(Date.now() / 1000);
@@ -188,7 +198,7 @@ export const mockDataAdapter: DataSourceAdapter = {
         const currentPeriod = Math.floor(now / tfSeconds) * tfSeconds;
 
         if (normalized === "1s") {
-          onCandle(normalized, {
+          emitCandle(normalized, {
             time: currentPeriod,
             open: +tickPrice.toFixed(2),
             high: +tickPrice.toFixed(2),
@@ -201,7 +211,7 @@ export const mockDataAdapter: DataSourceAdapter = {
 
         const openCandle = openCandles[normalized];
         if (!openCandle || openCandle.time < currentPeriod) {
-          if (openCandle) onCandle(normalized, { ...openCandle });
+          if (openCandle) emitCandle(normalized, { ...openCandle });
           openCandles[normalized] = {
             time: currentPeriod,
             open: +tickPrice.toFixed(2),
@@ -210,13 +220,13 @@ export const mockDataAdapter: DataSourceAdapter = {
             close: +tickPrice.toFixed(2),
             volume: Math.round(Math.random() * 1000),
           };
-          onCandle(normalized, { ...openCandles[normalized] });
+          emitCandle(normalized, { ...openCandles[normalized] });
         } else {
           openCandle.close = +tickPrice.toFixed(2);
           openCandle.high = Math.max(openCandle.high, tickPrice);
           openCandle.low = Math.min(openCandle.low, tickPrice);
           openCandle.volume += Math.round(Math.random() * 100);
-          onCandle(normalized, { ...openCandle });
+          emitCandle(normalized, { ...openCandle });
         }
       }
     }, 1000);
@@ -231,7 +241,9 @@ export const mockDataAdapter: DataSourceAdapter = {
   async fetchHistoricalCandles(symbol, startMs, endMs, limit, interval) {
     const hourMs = 3600 * 1000;
     const count = Math.min(Math.floor((endMs - startMs) / hourMs), limit);
-    return generateMockCandles(symbol, normalizeTimeframe(interval), Math.max(count, 10));
+    return normalizeMockCandles(
+      generateMockCandles(symbol, normalizeTimeframe(interval), Math.max(count, 10)),
+    );
   },
 
   async fetchOrderBook(symbol) {
@@ -269,7 +281,7 @@ export const mockDataAdapter: DataSourceAdapter = {
 
   async fetchMarketOverview() {
     return {
-      data: generateMockMarketOverview(),
+      data: generateMockMarketOverviewPayload(),
       metadata: metadata(),
     };
   },
@@ -284,6 +296,13 @@ export const mockDataAdapter: DataSourceAdapter = {
   async fetchTopLosers(limit) {
     return {
       data: generateMockLosers().slice(0, limit),
+      metadata: metadata(),
+    };
+  },
+
+  async fetchHeatmapData(limit) {
+    return {
+      data: generateMockHeatmapData(limit),
       metadata: metadata(),
     };
   },
@@ -308,12 +327,7 @@ export const mockDataAdapter: DataSourceAdapter = {
 
   async fetchTrendingSymbols(limit) {
     return {
-      trending_symbols: [
-        { symbol: "BTC", mention_count: 42, avg_sentiment: 0.18 },
-        { symbol: "ETH", mention_count: 35, avg_sentiment: 0.12 },
-        { symbol: "SOL", mention_count: 28, avg_sentiment: 0.32 },
-        { symbol: "BNB", mention_count: 20, avg_sentiment: 0.04 },
-      ].slice(0, limit),
+      trending_symbols: generateMockTrendingSymbols(limit),
       metadata: metadata(),
     };
   },

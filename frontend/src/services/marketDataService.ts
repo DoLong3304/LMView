@@ -4,7 +4,7 @@ import { apiGet, buildQuery, getWsBaseUrl } from "@/services/apiClient";
 import { isUnavailableApiPayload } from "@/services/apiMetadata";
 import { makeClientCacheKey, withClientCache } from "@/services/clientCache";
 import { getMockDataAdapter } from "@/services/dataSourceAdapter";
-import type { Candle, IndicatorStreamSnapshot, SymbolInfo, Ticker, Trade } from "@/types";
+import type { Candle, IndicatorSeriesResponse, IndicatorStreamSnapshot, SymbolInfo, Ticker, Trade } from "@/types";
 
 export { TIMEFRAMES };
 
@@ -67,6 +67,7 @@ const LIVE_TICK_CACHE_MS = 2_000;
 const ORDER_BOOK_CACHE_MS = 1_000;
 const CANDLE_LATEST_CACHE_MS = 3_000;
 const CANDLE_HISTORY_CACHE_MS = 5 * 60_000;
+const INDICATOR_SERIES_CACHE_MS = 30_000;
 const SYMBOLS_CACHE_MS = 10 * 60_000;
 const mockDataAdapter = getMockDataAdapter();
 
@@ -277,6 +278,57 @@ export function subscribeIndicatorStream(options: IndicatorStreamOptions): () =>
   }
 
   return () => {};
+}
+
+export async function fetchIndicatorSeries(
+  symbol: string,
+  timeframe: string = "1m",
+  indicators: string[] = [],
+  limit: number = 500,
+  exchange: string = "binance",
+): Promise<IndicatorSeriesResponse> {
+  const interval = normalizeTimeframe(timeframe);
+  const requested = indicators.filter(Boolean);
+
+  if (DATA_SOURCE === "api") {
+    const query = buildQuery({
+      exchange,
+      interval,
+      indicators: requested.join(","),
+      limit,
+    });
+    const cacheKey = makeClientCacheKey([
+      "indicators",
+      exchange,
+      symbol,
+      interval,
+      requested.join(","),
+      limit,
+    ]);
+
+    return withClientCache(
+      cacheKey,
+      INDICATOR_SERIES_CACHE_MS,
+      async () => apiGet<IndicatorSeriesResponse>(
+        `/indicators/${encodeURIComponent(symbol)}/series?${query}`,
+      ),
+      { persist: false, staleOnError: true },
+    );
+  }
+
+  return {
+    symbol,
+    exchange,
+    interval,
+    requested,
+    series: {},
+    latest_values: {},
+    source: "mock_mode_local_candles",
+    sources: ["mock_candles"],
+    candle_count: 0,
+    required_candles: 0,
+    warnings: [],
+  };
 }
 
 export async function fetchSymbols(): Promise<SymbolInfo[]> {

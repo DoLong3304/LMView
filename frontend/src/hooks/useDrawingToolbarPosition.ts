@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
-import type { IChartApi, ISeriesApi } from 'lightweight-charts';
+import type { IChartApi } from 'lightweight-charts';
 import type { Drawing, DataPoint } from "@/types";
 
 interface ToolbarPosition {
@@ -8,10 +8,14 @@ interface ToolbarPosition {
   visible: boolean;
 }
 
+interface DrawingPriceSeriesController {
+  priceToCoordinate: (price: number) => number | null;
+}
+
 interface UseDrawingToolbarPositionProps {
   drawing: Drawing | null;
   chartApi: IChartApi | null;
-  candleSeries: ISeriesApi<'Candlestick'> | null;
+  candleSeries: DrawingPriceSeriesController | null;
   offset?: { x: number; y: number };
 }
 

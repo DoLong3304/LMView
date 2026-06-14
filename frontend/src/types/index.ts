@@ -267,6 +267,27 @@ export interface IndicatorStreamSnapshot {
   indicators: Record<string, number>;
 }
 
+/** Indicator series point from backend API (timestamp in epoch ms). */
+export interface IndicatorSeriesPoint {
+  timestamp: number;
+  value: number;
+}
+
+/** Indicator series response from /api/indicators/{symbol}/series. */
+export interface IndicatorSeriesResponse {
+  symbol: string;
+  exchange: string;
+  interval: string;
+  requested: string[];
+  series: Record<string, IndicatorSeriesPoint[]>;
+  latest_values: Record<string, number | null>;
+  source: string;
+  sources: string[];
+  candle_count: number;
+  required_candles: number;
+  warnings: string[];
+}
+
 /** Point on the chart canvas for drawing tools (pixel space - for rendering only) */
 export interface DrawingPoint {
   x: number;

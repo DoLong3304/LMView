@@ -26,6 +26,22 @@ class IndicatorSeries(BaseModel):
     freshness: Optional[DataFreshness] = None
 
 
+class IndicatorSeriesResponse(BaseModel):
+    """Computed indicator series for one symbol/timeframe."""
+    symbol: str
+    exchange: str = "binance"
+    interval: str = "1m"
+    requested: List[str] = Field(default_factory=list)
+    series: Dict[str, List[IndicatorPoint]] = Field(default_factory=dict)
+    latest_values: Dict[str, Optional[float]] = Field(default_factory=dict)
+    source: str = "unknown"
+    sources: List[str] = Field(default_factory=list)
+    candle_count: int = 0
+    required_candles: int = 0
+    warnings: List[str] = Field(default_factory=list)
+    freshness: Optional[DataFreshness] = None
+
+
 class SupportedIndicator(BaseModel):
     """Description of a supported indicator."""
     name: str  # e.g. "sma", "rsi", "macd"
