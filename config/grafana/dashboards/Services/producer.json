@@ -1,0 +1,125 @@
+{
+  "annotations": {"list": []},
+  "description": "Producer service: WS connections, dedup state, Kafka send metrics, exchange status",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {"title": "Application Logs", "url": "/d/phase5-logs-producer", "type": "link", "asDropdown": false, "includeVars": false, "keepTime": true, "tags": ["logs"]}
+  ],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "WS Connected",
+      "id": 1,
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "none", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "producer_exchange_ws_connected", "refId": "A"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Dedup State Size",
+      "id": 2,
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "none"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "producer_dedup_state_size", "refId": "A"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Kafka Messages / sec",
+      "id": 3,
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "ops"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(rate(producer_kafka_messages_sent_total[1m]))", "refId": "A"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Direct Redis Active",
+      "id": 4,
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "none"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "producer_direct_redis_active", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Heartbeat Timestamp (sec ago)",
+      "id": 5,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "time() - producer_heartbeat_timestamp_seconds", "legendFormat": "{{instance}}", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Dedup (forwarded / duplicates skipped)",
+      "id": 6,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "fieldConfig": {"defaults": {"unit": "ops", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(producer_dedup_messages_forwarded_total[1m])", "legendFormat": "forwarded", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(producer_dedup_duplicates_skipped_total[1m])", "legendFormat": "duplicates", "refId": "B"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Probe Duration (Kafka / Flink)",
+      "id": 7,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 13},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 2}}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.50, sum by (le) (rate(producer_kafka_probe_duration_seconds_bucket[5m])))", "legendFormat": "kafka p50", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.99, sum by (le) (rate(producer_kafka_probe_duration_seconds_bucket[5m])))", "legendFormat": "kafka p99", "refId": "B"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.50, sum by (le) (rate(producer_flink_probe_duration_seconds_bucket[5m])))", "legendFormat": "flink p50", "refId": "C"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.99, sum by (le) (rate(producer_flink_probe_duration_seconds_bucket[5m])))", "legendFormat": "flink p99", "refId": "D"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Failover Duration (p50 / p99)",
+      "id": 8,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 13},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 2}}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.50, sum by (le) (rate(producer_failover_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "histogram_quantile(0.99, sum by (le) (rate(producer_failover_duration_seconds_bucket[5m])))", "legendFormat": "p99", "refId": "B"}
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["services", "producer"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Service / Producer",
+  "uid": "phase5-services-producer",
+  "version": 1,
+  "weekStart": ""
+}

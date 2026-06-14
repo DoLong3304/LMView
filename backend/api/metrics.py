@@ -55,6 +55,17 @@ HTTP_REQUESTS_IN_FLIGHT = Gauge(
     ["method", "endpoint"],
 )
 
+# Counter: per-request id hash, used to join metric and log
+# views. We use a 12-char SHA-256 prefix to keep the label
+# cardinality bounded (one entry per unique id), and the full
+# id is still in the log line for the rare case we need it.
+API_REQUEST_ID_SAMPLES = Counter(
+    "api_request_id_samples",
+    "One increment per unique request id (12-char hash) — "
+    "join with Loki logs via ``request_id`` field",
+    ["method", "path", "status_class", "rid_hash"],
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WebSocket connection observability

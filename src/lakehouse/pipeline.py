@@ -234,6 +234,7 @@ def run():
         .select(
             "event_time",
             "symbol",
+            "exchange",
             "close",
             "bid",
             "ask",
@@ -247,7 +248,6 @@ def run():
             "h24_trade_count",
             "event_timestamp",
             "ingested_at",
-            "exchange",
         )
         .withWatermark("event_timestamp", "1 minute")
         .dropDuplicates(["exchange", "symbol", "event_timestamp"])
@@ -273,6 +273,7 @@ def run():
         .select(
             "event_time",
             "symbol",
+            "exchange",
             "agg_trade_id",
             "price",
             "quantity",
@@ -281,7 +282,6 @@ def run():
             "event_timestamp",
             "trade_timestamp",
             "ingested_at",
-            "exchange",
         )
     )
 
@@ -305,6 +305,7 @@ def run():
         .select(
             "event_time",
             "symbol",
+            "exchange",
             "kline_start",
             "kline_close",
             "interval",
@@ -318,7 +319,6 @@ def run():
             "is_closed",
             "kline_timestamp",
             "ingested_at",
-            "exchange",
         )
         .withWatermark("kline_timestamp", "2 minutes")
         .dropDuplicates(["exchange", "symbol", "kline_start"])

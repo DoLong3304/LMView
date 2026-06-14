@@ -366,6 +366,53 @@ def record_inflight(job: str, subtask: str, operator: str, count: int) -> None:
     FLINK_OPERATOR_INFLIGHT.labels(job=job, subtask=subtask, operator=operator).set(count)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Whale alert metrics (Task 2, v0.24.4)
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Counter: whale alerts detected (filtered from crypto_trades)
+WHALE_ALERTS_DETECTED = Counter(
+    "flink_whale_alerts_detected_total",
+    "Whale alerts detected (single trade notional >= threshold)",
+    ["exchange", "symbol", "side"],  # side: buy | sell
+)
+
+# Histogram: distribution of notional USD values for whale alerts
+WHALE_ALERT_NOTIONAL = Histogram(
+    "flink_whale_alert_notional_usd",
+    "Notional USD value of detected whale alerts",
+    ["exchange", "side"],
+    buckets=(100_000, 250_000, 500_000, 1_000_000, 2_500_000, 5_000_000,
+             10_000_000, 25_000_000, 50_000_000, 100_000_000, float("inf")),
+)
+
+# Gauge: rolling count of whale alerts in last 5 min (per symbol)
+WHALE_ALERT_RECENT_COUNT = Gauge(
+    "flink_whale_alert_recent_count",
+    "Whale alerts in last 5 min, per symbol",
+    ["exchange", "symbol"],
+)
+
+
+def record_whale_alert(
+    exchange: str, symbol: str, side: str, notional_usd: float,
+) -> None:
+    """Record a detected whale alert.
+
+    Increments WHALE_ALERTS_DETECTED counter and updates the notional
+    histogram. The recent-count gauge is best updated by a sidecar
+    scraper (1-min interval) since Flink state for rolling counts is
+    non-trivial; we leave that hook in place but don't populate it
+    inline to keep the hot path lean.
+    """
+    WHALE_ALERTS_DETECTED.labels(
+        exchange=exchange, symbol=symbol, side=side,
+    ).inc()
+    WHALE_ALERT_NOTIONAL.labels(
+        exchange=exchange, side=side,
+    ).observe(notional_usd)
+
+
 __all__ = [
     # writer
     "WRITER_FLUSH_DURATION",
@@ -397,6 +444,10 @@ __all__ = [
     # backpressure
     "FLINK_OPERATOR_BACKPRESSURE",
     "FLINK_OPERATOR_INFLIGHT",
+    # whale alerts (Task 2)
+    "WHALE_ALERTS_DETECTED",
+    "WHALE_ALERT_NOTIONAL",
+    "WHALE_ALERT_RECENT_COUNT",
     # helpers
     "init_metrics",
     "record_flush",
@@ -414,4 +465,5 @@ __all__ = [
     "record_writer_new_key",
     "record_backpressure",
     "record_inflight",
+    "record_whale_alert",
 ]

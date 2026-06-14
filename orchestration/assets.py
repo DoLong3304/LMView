@@ -31,13 +31,29 @@ SPARK_PACKAGES = (
 
 
 def get_spark_session() -> SparkSession:
-    """Create Spark session with Iceberg support"""
+    """Create Spark session with Iceberg support.
+
+    Registers the iceberg catalog under TWO names so that the existing
+    SQL in src/lakehouse/gold/*.py (`iceberg.crypto_lakehouse.gold_*`)
+    and the older pipeline code in src/lakehouse/pipeline.py
+    (`iceberg_catalog.bronze.*`) both resolve to the same Hadoop catalog
+    backed by the s3a://lakehouse/warehouse MinIO bucket.
+
+    We also pass `spark.jars.packages` so the iceberg + s3 jars are
+    available on the classpath of the local SparkSession. Without these
+    the session would fail with
+    `ClassNotFoundException: IcebergSparkSessionExtensions`.
+    """
     return SparkSession.builder \
         .appName("Medallion_Pipeline") \
+        .config("spark.jars.packages", SPARK_PACKAGES) \
         .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
         .config("spark.sql.catalog.iceberg_catalog", "org.apache.iceberg.spark.SparkCatalog") \
         .config("spark.sql.catalog.iceberg_catalog.type", "hadoop") \
         .config("spark.sql.catalog.iceberg_catalog.warehouse", "s3a://lakehouse/warehouse") \
+        .config("spark.sql.catalog.iceberg", "org.apache.iceberg.spark.SparkCatalog") \
+        .config("spark.sql.catalog.iceberg.type", "hadoop") \
+        .config("spark.sql.catalog.iceberg.warehouse", "s3a://lakehouse/warehouse") \
         .getOrCreate()
 
 
@@ -244,6 +260,29 @@ def news_sentiment_multi_source(context: AssetExecutionContext):
     context.log.info(f"Sources: {set(a['source'] for a in articles)}")
 
 
+# ---------------------------------------------------------------------------
+# gold_news_market_impact depends on news_sentiment_multi_source which is
+# defined above. Placed here (after the @asset def) so Python sees the
+# forward reference at decoration time.
+# ---------------------------------------------------------------------------
+@asset(group_name="gold", compute_kind="spark", deps=[silver_ticker_unified, news_sentiment_multi_source])
+def gold_news_market_impact(context: AssetExecutionContext):
+    """
+    Join news sentiment scores with realized price changes (1h/4h/24h).
+    Per v0.24.5 (Task 4): we use the canonical Trino table schema defined
+    in src/lakehouse/gold_schema_manifest.py and the pure-function
+    builder in src/lakehouse/gold/news_impact.py.
+
+    Output: iceberg.gold.gold_news_market_impact (idempotent MERGE).
+    Reference exchange: binance (cross-venue divergence <50bps).
+    """
+    from lakehouse.gold.news_impact import compute_gold_news_market_impact
+    spark = get_spark_session()
+    context.log.info("Computing gold_news_market_impact (Task 4 / v0.24.5)...")
+    rows_written = compute_gold_news_market_impact(spark, lookback_hours=48)
+    context.log.info(f"gold_news_market_impact updated: {rows_written} rows")
+
+
 # ============================================================================
 # JOBS & SCHEDULES
 # ============================================================================
@@ -273,7 +312,8 @@ gold_aggregation_job = define_asset_job(
     selection=[
         gold_market_overview,
         gold_symbol_statistics,
-        gold_sector_performance
+        gold_sector_performance,
+        gold_news_market_impact,
     ]
 )
 
@@ -320,10 +360,26 @@ def news_sentiment_schedule():
 # ============================================================================
 # ADVANCED GOLD METRICS ASSETS
 # ============================================================================
+# --- DEPRECATED (v0.24.4 P1 fix) -----------------------------------------
+# These Spark-based assets were running every 5 minutes and producing
+# tables that NO API endpoint reads. The API consumes the Trino-based
+# ``gold_*`` tables written by ``compute_gold_layer`` (see below).
+#
+# See src/lakehouse/gold_schema_manifest.py for the canonical schema list
+# and DEPRECATED_SPARK_TABLES for the full deprecation rationale.
+#
+# The code is KEPT (not deleted) so future contributors can:
+#   1. Re-align the Spark output to the canonical schema and re-enable.
+#   2. Use it as a reference for how the per-row gold_* tables are derived
+#      in a different compute path.
+#
+# To re-enable: restore the @asset decorators and re-add to
+# ``gold_advanced_job`` selection below.
+# --------------------------------------------------------------------------
 
-@asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_ticker_unified])
-def gold_market_dominance(context: AssetExecutionContext):
-    """Calculate BTC/ETH dominance and market cap metrics"""
+# @asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_ticker_unified])
+def gold_market_dominance_deprecated(context: AssetExecutionContext):
+    """DEPRECATED: see gold_schema_manifest.DEPRECATED_SPARK_TABLES."""
     from lakehouse.gold.market_metrics import GoldMarketDominance
 
     spark = get_spark_session()
@@ -335,9 +391,9 @@ def gold_market_dominance(context: AssetExecutionContext):
     context.log.info("Gold market_dominance calculated")
 
 
-@asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_ticker_unified])
-def gold_volatility_ranking(context: AssetExecutionContext):
-    """Calculate volatility rankings for all symbols"""
+# @asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_ticker_unified])
+def gold_volatility_ranking_deprecated(context: AssetExecutionContext):
+    """DEPRECATED: see gold_schema_manifest.DEPRECATED_SPARK_TABLES."""
     from lakehouse.gold.market_metrics import GoldVolatilityRanking
 
     spark = get_spark_session()
@@ -349,9 +405,9 @@ def gold_volatility_ranking(context: AssetExecutionContext):
     context.log.info("Gold volatility_ranking calculated")
 
 
-@asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_ticker_unified])
-def gold_movers_ranking(context: AssetExecutionContext):
-    """Calculate top gainers/losers with volume context"""
+# @asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_ticker_unified])
+def gold_movers_ranking_deprecated(context: AssetExecutionContext):
+    """DEPRECATED: see gold_schema_manifest.DEPRECATED_SPARK_TABLES."""
     from lakehouse.gold.market_metrics import GoldMoversRanking
 
     spark = get_spark_session()
@@ -380,9 +436,12 @@ def compute_gold_layer(context: AssetExecutionContext):
     return {"status": "success"}
 
 
-@asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_kline_1h])
-def gold_momentum_indicators(context: AssetExecutionContext):
-    """Calculate RSI, MACD, Bollinger Bands"""
+# @asset(group_name="gold_advanced", compute_kind="spark", deps=[silver_kline_1h])
+def gold_momentum_indicators_deprecated(context: AssetExecutionContext):
+    """DEPRECATED: gold_momentum_indicators is now produced by the Trino
+    job ``compute_gold_layer`` (src/lakehouse/gold_aggregator_trino.py).
+    See gold_schema_manifest.DEPRECATED_SPARK_TABLES.
+    """
     import subprocess
 
     result = subprocess.run(
@@ -515,22 +574,31 @@ def compute_news_sentiment_daily(context: AssetExecutionContext):
 
 
 # Advanced gold metrics job (every 5 minutes)
+# --- v0.24.4 P1 fix ---
+# Spark-based gold_advanced assets are DEPRECATED (see comment block above).
+# The canonical Gold path is the Trino job ``compute_gold_layer`` which
+# is already scheduled in ``gold_layer_job`` below. We keep the job +
+# schedule (no-op selection) so existing Dagster deployment configs do
+# not break; new contributors will see the deprecation comment first.
 gold_advanced_job = define_asset_job(
     name="gold_advanced_metrics",
     selection=[
-        gold_market_dominance,
-        gold_volatility_ranking,
-        gold_movers_ranking,
-        gold_momentum_indicators,
+        # gold_market_dominance,        # DEPRECATED: see gold_schema_manifest
+        # gold_volatility_ranking,     # DEPRECATED
+        # gold_movers_ranking,         # DEPRECATED
+        # gold_momentum_indicators,     # DEPRECATED
+        # compute_gold_layer is here for backwards compatibility but the
+        # canonical schedule is gold_layer_job (below).
         compute_gold_layer,
     ]
 )
 
 @schedule(
     job=gold_advanced_job,
-    cron_schedule="*/5 * * * *"  # Every 5 minutes
+    cron_schedule="*/5 * * * *",  # Every 5 minutes (kept for back-compat)
 )
 def gold_advanced_schedule():
+    """Schedule is a no-op now (Trino path is in gold_layer_job)."""
     return {}
 
 
@@ -559,11 +627,12 @@ defs = Definitions(
         gold_market_overview,
         gold_symbol_statistics,
         gold_sector_performance,
+        gold_news_market_impact,
         news_sentiment_multi_source,
-        gold_market_dominance,
-        gold_volatility_ranking,
-        gold_movers_ranking,
-        gold_momentum_indicators,
+        # gold_market_dominance,        # DEPRECATED: see gold_schema_manifest (replaced by /api/market/dominance endpoint)
+        # gold_volatility_ranking,     # DEPRECATED
+        # gold_movers_ranking,         # DEPRECATED
+        # gold_momentum_indicators,    # DEPRECATED
         compute_gold_layer,
         compute_news_sentiment_daily,
     ],

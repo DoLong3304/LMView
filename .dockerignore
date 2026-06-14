@@ -1,0 +1,79 @@
+# .dockerignore — drastically reduce build context size
+# Without this, every docker build sends the whole project to the
+# daemon, including .git, frontend node_modules (if any), Python
+# __pycache__, and the AI service cache files. With this, only the
+# files needed for the image are sent.
+
+# Version control
+.git
+.gitignore
+.gitattributes
+.github
+
+# CI / dev tooling
+.vscode
+.idea
+.understand-anything
+.claude
+.cursorrules
+
+# Frontend (separate image)
+frontend
+node_modules
+*.log
+dist
+build
+
+# Python cache and venvs
+__pycache__
+**/__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv
+env/
+.python-version
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov/
+*.egg-info/
+
+# AI service caches (huge!)
+ai_service/.cache
+ai_service/__pycache__/
+ai_service/**/__pycache__/
+*.h5
+*.hdf5
+*.bin
+*.safetensors
+*.gguf
+*.pt
+*.pth
+*.onnx
+
+# Local artifacts
+*.tar
+*.tar.gz
+*.zip
+docker-data/
+data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation that does not need to ship in image
+docs/_build
+docs/audit_*
+docs/thesis_*
+docs/*.pdf
+*.md
+!backend/**/*.md
+!src/**/*.md
+
+# Test files (image is for runtime, not test)
+tests/
+playwright-report/
+.tox/

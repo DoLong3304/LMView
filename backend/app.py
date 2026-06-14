@@ -37,8 +37,13 @@ from backend.tasks.news_fetcher import news_fetcher
 from backend.tasks.market_fetcher import market_fetcher
 from backend.services.sentiment_service import batch_score_unscored_articles
 
+from common.logging import setup_logging_from_env
 import logging
 import os
+
+# Configure JSON logging at import time so even lifespan errors
+# are emitted in the structured format that Loki parses.
+setup_logging_from_env()
 
 logger = logging.getLogger("backend.app")
 
@@ -105,6 +110,12 @@ app.add_middleware(
 if os.environ.get("RATE_LIMIT_PER_MINUTE", "200") != "0":
     from backend.middleware.rate_limit import RateLimitMiddleware
     app.add_middleware(RateLimitMiddleware)
+
+# Request-id correlation middleware. Always on — it does not
+# change response shape, just adds an ``X-Request-Id`` header
+# and emits a single structured log line per request.
+from backend.middleware.request_id import RequestIdMiddleware
+app.add_middleware(RequestIdMiddleware)
 
 # Prometheus metrics instrumentation (optional — requires prometheus-fastapi-instrumentator)
 try:

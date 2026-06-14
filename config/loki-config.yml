@@ -24,5 +24,42 @@ schema_config:
         prefix: index_
         period: 24h
 
+# ───────────────────────────────────────────────────────────────────────
+# Retention policy (LOGGING_AUDIT_PLAN.md Step 4)
+# ───────────────────────────────────────────────────────────────────────
+# Keep 7 days of logs in the local filesystem. The compactor
+# deletes chunks older than ``retention_period`` once per
+# ``compaction_interval``. Tune these to balance disk usage
+# vs. incident response time. The default of 7 days is a
+# compromise: long enough to investigate a multi-day incident,
+# short enough that the Loki container's volume doesn't fill up.
+compactor:
+  working_directory: /loki/compactor
+  compaction_interval: 10m
+  retention_enabled: true
+  retention_delete_delay: 2h
+  retention_delete_worker_count: 150
+  delete_request_store: filesystem
+
+limits_config:
+  retention_period: 168h   # 7 days
+  # Ingestion rate cap — protects Loki from a runaway log
+  # producer (a verbose library that suddenly switches to INFO).
+  ingestion_rate_mb: 10
+  ingestion_burst_size_mb: 20
+  # Reject log lines longer than 256 KB (default is 256 KB
+  # anyway, but being explicit). This bounds the per-line
+  # memory cost in Loki's indexer.
+  max_line_size: 256KB
+  # Allow up to 5000 unique labels per series. The Promtail
+  # config uses 4 labels (container, logstream, service,
+  # log_level) so this is comfortable headroom.
+  max_label_names_per_series: 30
+
+# Per-tenant retention override (in case we ever go multi-tenant).
+table_manager:
+  retention_deletes_enabled: true
+  retention_period: 168h
+
 ruler:
   alertmanager_url: http://localhost:9093

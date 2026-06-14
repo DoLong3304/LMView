@@ -33,6 +33,7 @@ from writers.influxdb_ticker import InfluxDBWriter
 from writers.influxdb_kline import InfluxDBKlineWriter
 from writers.indicators import IndicatorWriter
 from writers.kline_aggregator import KlineWindowAggregator
+from writers.whale_alert import WhaleAlertWriter, DEFAULT_MIN_WHALE_USD
 from writers.metrics import record_checkpoint
 
 # Job name used for checkpoint / observability labels
@@ -132,7 +133,10 @@ def run():
         # operators a single-pane-of-glass view in our dashboards
         # without needing to query both ``flink_*`` and our
         # application metrics.
-        from pyflink.datastream import StreamExecutionEnvironment
+        # NOTE: ``StreamExecutionEnvironment`` is already imported at
+        # module top (line 23). Re-importing it here would create a
+        # local binding inside ``run()`` and trip Python's
+        # UnboundLocalError at the first use of the symbol.
         # ``enable_checkpointing`` already wired above; the poller
         # itself is launched as a side-thread in the Flink TaskManager
         # so we just record a synthetic "0-second success" at boot
@@ -323,6 +327,28 @@ def run():
         DepthWriter(), output_type=Types.STRING()
     ).name("Write_Depth_To_KeyDB")
 
+    # ────────────────────────────────────────────────────────────────────
+    # Liquidity heatmap pipeline (Task 5, v0.24.5b)
+    # ────────────────────────────────────────────────────────────────────
+    # The heatmap writer is a side-effect of the depth stream: it
+    # consumes the SAME crypto_depth Kafka topic and aggregates depth
+    # by price bucket (0.1% per bucket, max ±1% from mid). Output goes
+    # to:
+    #   - InfluxDB measurement : liquidity_heatmap
+    # Parallel to the depth writer; if this branch fails, the depth
+    # writer is unaffected.
+    #
+    # Default exchange=binance because AGENTS.md notes the depth topic
+    # drops the exchange field. Override via env var HEATMAP_EXCHANGE.
+    from writers.liquidity_heatmap import LiquidityHeatmapWriter  # noqa: E402
+    import os as _os_h
+    _heat_exchange = _os_h.environ.get("HEATMAP_EXCHANGE", "binance")
+    log.info("[Pipeline] liquidity heatmap exchange = %s", _heat_exchange)
+    ds_depth_dict.flat_map(
+        LiquidityHeatmapWriter(default_exchange=_heat_exchange),
+        output_type=Types.STRING(),
+    ).name("Liquidity_Heatmap_To_InfluxDB")
+
 
     # --------------------------------------------------------------------------
     # Trade pipeline: crypto_trades -> KeyDB (hot cache)
@@ -373,6 +399,30 @@ def run():
     ds_trades_dict.flat_map(
         KeyDBTradeWriter(), output_type=Types.STRING()
     ).name("Write_Trades_To_KeyDB")
+
+    # ────────────────────────────────────────────────────────────────────
+    # Whale alert pipeline (Task 2, v0.24.4)
+    # ────────────────────────────────────────────────────────────────────
+    # The whale alert writer is a side-effect of the trade stream:
+    # it consumes the SAME crypto_trades Kafka topic (cheap; already
+    # in memory after the deserializer) and filters for trades whose
+    # notional USD >= WHALE_ALERT_MIN_USD. Detected alerts go to:
+    #   - Redis sorted set  : whale:alerts:{exchange}:{symbol}
+    #   - InfluxDB          : whale_alerts measurement
+    # This branch is parallel to the trade writer; if the writer fails
+    # the trade writer is unaffected (separate pipeline path).
+    #
+    # Default threshold $100K is the standard retail "whale" cut-off.
+    # Override at deploy time via env var WHALE_ALERT_MIN_USD.
+    import os as _os
+    _whale_min_usd = float(
+        _os.environ.get("WHALE_ALERT_MIN_USD", str(DEFAULT_MIN_WHALE_USD))
+    )
+    log.info("[Pipeline] whale alert threshold = $%.0f", _whale_min_usd)
+    ds_trades_dict.flat_map(
+        WhaleAlertWriter(min_whale_usd=_whale_min_usd),
+        output_type=Types.STRING(),
+    ).name("Whale_Alerts_To_KeyDB+InfluxDB")
 
     env.execute("Crypto_MultiStream_Kafka_to_KeyDB_InfluxDB")
 

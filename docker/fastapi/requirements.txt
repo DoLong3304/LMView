@@ -1,3 +1,9 @@
+# Core API dependencies (always installed)
+# This file MUST stay small. sentence-transformers / torch / triton
+# (which together pull in ~5GB) live in requirements-ai.txt and are
+# only installed when AI_ENABLE_REAL_LLM=true. By default the system
+# uses the mock provider (per docs/CHANGELOG.md v0.24.3) so these
+# heavy ML libraries are not needed.
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 redis[hiredis]==5.2.1
@@ -11,7 +17,6 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 litellm==1.52.0
 PyYAML==6.0.2
-sentence-transformers==3.3.1
 
 # News scraping dependencies
 feedparser==6.0.11

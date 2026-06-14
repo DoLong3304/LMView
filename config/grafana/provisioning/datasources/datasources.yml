@@ -5,6 +5,7 @@ datasources:
   # PROMETHEUS (Metrics)
   # ─────────────────────────────────────────────────────────────────────────────
   - name: Prometheus
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://prometheus:9090/prometheus
@@ -19,6 +20,7 @@ datasources:
   # INFLUXDB (Candle Data)
   # ─────────────────────────────────────────────────────────────────────────────
   - name: InfluxDB
+    uid: influxdb
     type: influxdb
     access: proxy
     url: http://influxdb:8086
@@ -35,6 +37,7 @@ datasources:
   # LOKI (Logs) - Will be added in Phase 3
   # ─────────────────────────────────────────────────────────────────────────────
   - name: Loki
+    uid: loki
     type: loki
     access: proxy
     url: http://loki:3100

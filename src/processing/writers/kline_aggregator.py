@@ -59,6 +59,17 @@ class KlineWindowAggregator(KeyedProcessFunction):
         )
 
     def process_element(self, value, ctx: 'KeyedProcessFunction.Context'):
+        # NOTE: this method is a *generator* (it uses ``yield`` below).
+        # A Python generator that falls off the end without yielding
+        # still produces StopIteration correctly, but pyflink's
+        # process_element wrapper expects the user function to yield
+        # *at least once* per call so it can iterate the result.
+        # The ``yield`` calls below handle the success path; the bare
+        # ``return`` / ``return None`` statements here are safe — they
+        # are just early exits for the no-emit paths. The only path
+        # that needs special care is the ``except`` branch: when an
+        # exception is caught we still want the function to terminate
+        # cleanly as a generator, which an empty ``return`` provides.
         try:
             candle = json.loads(value) if isinstance(value, str) else value
             interval = candle.get("interval", "1s")
@@ -107,8 +118,10 @@ class KlineWindowAggregator(KeyedProcessFunction):
             log.error("[Window/agg] process_element error: %s", e)
             try:
                 record_kafka_source_drop(topic=SOURCE_TOPIC, reason=type(e).__name__)
-            except Exception:
-                pass
+            except Exception as metric_exc:
+                # Never let a metric hiccup hide the real error.
+                log.debug("[Window/agg] metric record failed: %s", metric_exc)
+            return
 
     def on_timer(self, timestamp: int, ctx: 'KeyedProcessFunction.OnTimerContext'):
         try:

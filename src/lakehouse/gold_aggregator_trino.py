@@ -110,6 +110,36 @@ def ensure_tables():
             _partition_date DATE
         ) WITH (format='PARQUET', partitioning=ARRAY['_partition_date'])
         """,
+        # v0.24.5 (Task 4): News ↔ Price Impact. Per-article, per-symbol
+        # measurement of the realized forward return (t+1h/4h/24h) at the
+        # time the article was published. Schema is mirrored from
+        # src/lakehouse/gold_schema_manifest.GOLD_TABLE_NEWS_MARKET_IMPACT
+        # and from src/lakehouse/gold/news_impact.py (Spark version).
+        # The Trino aggregator creates the table so /api/market/news-impact
+        # can query it; population happens via the news consumer in
+        # src/news/enhanced_scraper.py when CRYPTOPANIC_API_KEY is set.
+        """
+        CREATE TABLE IF NOT EXISTS gold_news_market_impact (
+            news_id BIGINT,
+            symbol VARCHAR,
+            exchange VARCHAR,
+            published_at TIMESTAMP(6) WITH TIME ZONE,
+            headline VARCHAR,
+            url VARCHAR,
+            source VARCHAR,
+            sentiment DOUBLE,
+            price_at_news DOUBLE,
+            price_1h_after DOUBLE,
+            price_4h_after DOUBLE,
+            price_24h_after DOUBLE,
+            change_1h_pct DOUBLE,
+            change_4h_pct DOUBLE,
+            change_24h_pct DOUBLE,
+            impact_score DOUBLE,
+            computed_at TIMESTAMP(6) WITH TIME ZONE,
+            _partition_date DATE
+        ) WITH (format='PARQUET', partitioning=ARRAY['_partition_date'])
+        """,
     ]
     for sql in statements:
         run_query(sql)
@@ -307,7 +337,6 @@ def main():
     logger.info("Populating sector")
     populate_sector()
     logger.info("Gold aggregation via Trino complete")
-
 
 if __name__ == "__main__":
     main()

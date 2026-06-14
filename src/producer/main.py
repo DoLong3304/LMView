@@ -47,7 +47,7 @@ from common.config import (
 )
 from common.avro_serializer import AvroSerializer
 from common.kafka_client import flush_and_close, init_producer, send_to_kafka
-from common.logging import setup_logging
+from common.logging import setup_logging_from_env
 from exchanges.base import ExchangeClient
 from exchanges.binance.client import BinanceClient
 from exchanges.binance.redis_writer import get_direct_writer
@@ -59,6 +59,7 @@ from producer.metrics import (
     DEDUP_STATE_SIZE,
     EXCHANGE_MESSAGES_RECEIVED,
     EXCHANGE_WS_CONNECTED,
+    HEARTBEAT_TIMESTAMP,
     HEARTBEAT_TIMESTAMP as PROD_HEARTBEAT,
     RECONNECT_BACKOFF_SECONDS,
     init_metrics,
@@ -601,7 +602,25 @@ def _register_thread(name: str, target, *args) -> None:
 def run_streams(client: ExchangeClient) -> None:
     """Spawn all WebSocket stream threads for a given exchange client."""
     is_subscription = hasattr(client, "uses_subscription_frames") and client.uses_subscription_frames
-    symbols = client.fetch_symbols()[:MAX_SYMBOLS]
+
+    # P0 fix: use top-by-volume selection when available (Binance). This
+    # replaces the previous alphabetical ``fetch_symbols()[:N]`` which was
+    # missing 116/200 high-volume symbols (SOL, XRP, PEPE, SUI, TON, etc.).
+    # Falls back to alphabetical only if the volume fetch is unavailable
+    # (e.g. OKX which doesn't expose the same 24h ticker endpoint).
+    if hasattr(client, "fetch_top_symbols_by_volume"):
+        symbols = client.fetch_top_symbols_by_volume("USDT", MAX_SYMBOLS)
+        log.info(
+            "Symbol universe: top %d by 24h volume (P0 fix active)",
+            len(symbols),
+        )
+    else:
+        symbols = client.fetch_symbols()[:MAX_SYMBOLS]
+        log.warning(
+            "Symbol universe: top %d by alphabetical sort (no volume API). "
+            "This misses high-volume symbols.",
+            len(symbols),
+        )
 
     # For OKX, filter to well-known pairs and adjust interval
     kline_interval = KLINE_INTERVAL_WS
@@ -721,7 +740,7 @@ def run_streams(client: ExchangeClient) -> None:
 
 def run() -> None:
     """Main entry point."""
-    setup_logging("producer")
+    setup_logging_from_env()
 
     log.info("=" * 60)
     log.info("Multi-Exchange Producer starting...")

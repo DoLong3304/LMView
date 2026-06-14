@@ -449,8 +449,11 @@ class IndicatorWriter(FlatMapFunction):
             log.error("[Indicators] flat_map error | symbol=%s error=%s", s, e)
             try:
                 record_kafka_source_drop(topic=SOURCE_TOPIC, reason=type(e).__name__)
-            except Exception:
-                pass
+            except Exception as metric_exc:
+                # Never let a metric hiccup hide the real error.
+                # We log at DEBUG because the parent ``log.error``
+                # already carries the user-facing information.
+                log.debug("[Indicators] metric record failed: %s", metric_exc)
         return []
 
     def _persist_state(self, exchange: str) -> None:

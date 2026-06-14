@@ -16,7 +16,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: rate(flink_jobmanager_job_uptime[5m]) > 0
               refId: A
@@ -37,7 +37,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: (flink_taskmanager_Status_JVM_Memory_Heap_Used / flink_taskmanager_Status_JVM_Memory_Heap_Max) > 0.9
               refId: A
@@ -65,7 +65,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: kafka_consumergroup_lag > 10000
               refId: A
@@ -86,7 +86,7 @@ groups:
             relativeTimeRange:
               from: 60
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: kafka_brokers < 3
               refId: A
@@ -114,7 +114,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket{job="fastapi"}[5m])) > 1
               refId: A
@@ -135,7 +135,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: (rate(http_requests_total{job="fastapi",status=~"5.."}[5m]) / rate(http_requests_total{job="fastapi"}[5m])) > 0.05
               refId: A
@@ -163,7 +163,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes > 0.9
               refId: A
@@ -184,7 +184,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: (1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m]))) > 0.9
               refId: A
@@ -213,7 +213,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: pg_stat_database_numbackends / pg_settings_max_connections > 0.8
               refId: A
@@ -234,7 +234,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: pg_stat_replication_replay_lag_seconds > 10
               refId: A
@@ -262,7 +262,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: rate(http_request_errors_total{job="influxdb"}[5m]) > 0
               refId: A
@@ -290,7 +290,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: (sum(rate(nginx_http_requests_total{status=~"5.."}[5m])) / sum(rate(nginx_http_requests_total[5m]))) > 0.05
               refId: A
@@ -318,7 +318,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: changes(zk_leader_uptime_seconds[5m]) > 0
               refId: A
@@ -346,7 +346,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: increase(dagster_pipeline_run_failure_total[5m]) > 0
               refId: A
@@ -374,7 +374,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: increase(producer_ws_reconnections_total[5m]) > 3
               refId: A
@@ -402,7 +402,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Loki
+            datasourceUid: loki
             model:
               expr: sum(rate({log_level="ERROR"} [5m])) > 10
               refId: A
@@ -423,7 +423,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Loki
+            datasourceUid: loki
             model:
               expr: count_over_time({compose_service=~".+"} |~ "Starting|Booting|initialize" [5m]) > 2
               refId: A
@@ -444,7 +444,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Loki
+            datasourceUid: loki
             model:
               expr: count_over_time({service=~"kafka-.*"} |~ "(?i)disconnect|connection reset" [5m]) > 0
               refId: A
@@ -472,7 +472,7 @@ groups:
             relativeTimeRange:
               from: 60
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: producer_direct_redis_active == 1
               refId: A
@@ -493,7 +493,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: rate(producer_direct_redis_failures_total[5m]) > 0.5
               refId: A
@@ -514,7 +514,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: producer_kafka_healthy == 0
               refId: A
@@ -535,7 +535,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: producer_flink_healthy == 0
               refId: A
@@ -556,7 +556,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: time() - producer_exchange_last_message_timestamp_seconds > 30
               refId: A
@@ -584,7 +584,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: sum(websocket_connections_active) > 1000
               refId: A
@@ -605,7 +605,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: histogram_quantile(0.99, rate(websocket_message_push_duration_seconds_bucket[5m])) > 0.1
               refId: A
@@ -626,7 +626,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: sum(rate(websocket_connection_errors_total[5m])) by (route) > 0.1
               refId: A
@@ -647,7 +647,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: max(websocket_client_buffer_size) by (route) > 1000
               refId: A
@@ -668,7 +668,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: sum(rate(websocket_messages_dropped_total[5m])) by (route) > 1
               refId: A
@@ -696,7 +696,7 @@ groups:
             relativeTimeRange:
               from: 600
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: |
                 sum(rate(multi_source_lookups_total{source="redis",result="success"}[5m]))
@@ -721,7 +721,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: sum(rate(multi_source_lookups_total{source="influxdb",result="success"}[5m])) > 50
               refId: A
@@ -742,7 +742,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: sum(increase(source_stale_data_total[5m])) > 20
               refId: A
@@ -763,7 +763,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: sum(rate(source_unavailable_total[5m])) by (source) > 0.1
               refId: A
@@ -791,7 +791,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: |
                 sum(rate(ai_provider_requests_total{status="error"}[5m]))
@@ -816,7 +816,7 @@ groups:
             relativeTimeRange:
               from: 600
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: |
                 sum(rate(ai_provider_requests_total{status="fallback"}[5m])) by (provider)
@@ -841,7 +841,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: histogram_quantile(0.95, rate(ai_rag_retrieval_duration_seconds_bucket[5m])) > 2
               refId: A
@@ -862,7 +862,7 @@ groups:
             relativeTimeRange:
               from: 600
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: |
                 sum(rate(ai_rag_zero_results_total[5m]))
@@ -887,7 +887,7 @@ groups:
             relativeTimeRange:
               from: 600
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: sum(rate(ai_output_guard_flags_total[5m])) by (flag_type) > 0.5
               refId: A
@@ -908,7 +908,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: ai_embedding_models_loaded == 0
               refId: A
@@ -936,7 +936,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: increase(flink_checkpoint_failures_total[5m]) > 0
               refId: A
@@ -957,7 +957,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: histogram_quantile(0.99, rate(flink_writer_flush_duration_seconds_bucket[5m])) > 1
               refId: A
@@ -978,7 +978,7 @@ groups:
             relativeTimeRange:
               from: 600
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: flink_kafka_source_watermark_lag_seconds > 60
               refId: A
@@ -1006,7 +1006,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: |
                 (1 - (
@@ -1032,7 +1032,7 @@ groups:
             relativeTimeRange:
               from: 3600
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: |
                 (1 - (
@@ -1058,7 +1058,7 @@ groups:
             relativeTimeRange:
               from: 300
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: |
                 sum(rate(websocket_messages_pushed_total[5m]))
@@ -1083,7 +1083,7 @@ groups:
             relativeTimeRange:
               from: 600
               to: 0
-            datasourceUid: Prometheus
+            datasourceUid: prometheus
             model:
               expr: |
                 sum(rate(source_stale_data_total[5m]))
@@ -1102,7 +1102,7 @@ groups:
 
   # Frontend RUM (A9.1 — JS error rate)
   - name: frontend_rum_alerts
-    folder: 'LMView / Frontend'
+    folder: 'Alerts'
     interval: 1m
     rules:
       - uid: a9-1-frontend-js-error-rate
@@ -1113,7 +1113,7 @@ groups:
             relativeTimeRange:
               from: 600
               to: 0
-            datasourceUid: PBFA97CFB590B2093
+            datasourceUid: loki
             model:
               expr: 'sum(rate(frontend_rum_errors_total[5m])) by (type)'
               instant: true
@@ -1150,7 +1150,7 @@ groups:
 
   # Rate limit (A10.2 — API rate limit hit)
   - name: api_security_alerts
-    folder: 'LMView / Security'
+    folder: 'Alerts'
     interval: 1m
     rules:
       - uid: a10-1-auth-failure-spike
@@ -1161,7 +1161,7 @@ groups:
             relativeTimeRange:
               from: 600
               to: 0
-            datasourceUid: PBFA97CFB590B2093
+            datasourceUid: loki
             model:
               expr: 'sum(rate(api_auth_failures_total[5m]))'
               instant: true
@@ -1204,7 +1204,7 @@ groups:
             relativeTimeRange:
               from: 600
               to: 0
-            datasourceUid: PBFA97CFB590B2093
+            datasourceUid: loki
             model:
               expr: 'sum(rate(api_rate_limited_total[5m]))'
               instant: true
