@@ -16,17 +16,17 @@ Lambda Architecture:
 - Serving layer: FastAPI REST/WebSocket APIs with Redis/Influx/Trino/PostgreSQL clients.
 - Frontend layer: React 19 trading dashboard with charts, drawings, replay, auth, settings, market/news, and AI Ask/Interact surfaces.
 
-Latest project release from `docs/CHANGELOG.md`: **0.24.2**.
+Latest project release from `docs/CHANGELOG.md`: **0.25.0**.
 
 Repository facts from this audit:
 
 - Branch: `main`.
-- FastAPI app metadata version: `0.24.0`.
+- FastAPI app metadata version: `0.25.0`.
 - Frontend package version: `0.3.0`.
 - Compose source of truth: one `docker-compose.yml` with profiles.
 - Core compose services from static YAML audit: 40 concrete services plus 2 template services.
 - Core profile counts from static YAML audit: 29 dev services, 36 dev+monitoring+logging services, 38 prod+monitoring+logging services.
-- Optional AI compose overlay: 3 services; `ai-api` starts 2 services and `ai-local` starts 2 services.
+- Optional AI compose overlay: 4 services; `ai-api` starts 2 services, `ai-local` starts 2 services, and `ai-nlp` starts 1 FinBERT worker.
 - Python tests in source: 341 test functions across 27 files.
 - Frontend hook specs in source: 35 `it(...)` specs across 2 files; no frontend test script is currently declared.
 
@@ -986,11 +986,26 @@ Current AI state is **0.24 centralized Ask/Interact orchestration**.
 
 | Service | File | Current behavior |
 |---|---|---|
-| Orchestrator | `ai_service/core/orchestrator.py` | Shared Ask/Interact pipeline |
+| Orchestrator | `ai_service/core/orchestrator.py` | Dispatches to LangGraph DAG or legacy linear pipeline based on `AI_ORCHESTRATION` env var |
+| LangGraph DAG | `ai_service/agents/graph.py` | StateGraph DAG: scope_gate → intent_router → expert_execution → synthesis → reflection with revision loop |
+| Agent state | `ai_service/agents/state.py` | `AgentState` TypedDict with ~30 typed fields for graph execution |
+| Agent types | `ai_service/agents/types.py` | `ExpertOutput`, `IntentClassification`, `IntentCategory`, `ExpertName`, `ValidationResult` |
+| Intent router | `ai_service/agents/intent_router.py` | Hybrid rule-based + LLM fallback intent classification with multi-intent detection |
+| Expert base | `ai_service/agents/experts/base.py` | `BaseExpert` ABC with `safe_execute()`, timeout, and structured output |
+| TA expert | `ai_service/agents/experts/technical_analysis.py` | RSI/MACD/SMA/Bollinger signal extraction from chart context |
+| Market expert | `ai_service/agents/experts/market_data.py` | Ticker/orderbook/trades data extraction with provenance |
+| News expert | `ai_service/agents/experts/news_sentiment.py` | News/sentiment data assembly; reads FinBERT cache |
+| RAG expert | `ai_service/agents/experts/rag_knowledge.py` | Knowledge base retrieval via existing RAG pipeline |
+| Chart expert | `ai_service/agents/experts/chart_interaction.py` | Interact mode tool-call proposal with typed allowlist |
+| General expert | `ai_service/agents/experts/general.py` | Fallback for general queries |
+| Synthesis | `ai_service/agents/synthesis.py` | Single LLM call merging all expert outputs; bilingual prompt |
+| Reflection | `ai_service/agents/reflection.py` | Quality gate with revision loop (max 2) |
+| Agent persistence | `ai_service/agents/persistence.py` | PostgreSQL trace storage for executions and expert runs |
 | Scope gate | `ai_service/safety/scope_gate.py` | Rule-based topic and prompt-injection classification before model/RAG calls |
 | Chat persistence | `ai_service/persistence/chat_store.py` | PostgreSQL sessions/messages access |
 | Provider interface | `ai_service/providers/base.py` | Shared provider protocol |
 | Provider router | `ai_service/providers/router.py` | `auto/local/api/none` routing with `none` final fallback |
+| Provider health | `ai_service/providers/health.py` | Circuit breaker pattern with CLOSED/OPEN/HALF_OPEN states and auto-failover |
 | API/local provider | `ai_service/providers/litellm_provider.py` | Lazy `litellm` import and OpenAI-compatible completion calls |
 | None provider | `ai_service/providers/none_provider.py` | Generic system guidance when no model is available |
 | Prompt builder | `ai_service/prompts/prompt_builder.py` | System prompt, temporal context, chart context, RAG chunks, conversation history, data caveats, user message |
@@ -998,17 +1013,25 @@ Current AI state is **0.24 centralized Ask/Interact orchestration**.
 | Output guard | `ai_service/safety/output_guard.py` | Financial-safety validation, code-block removal, disclaimer handling |
 | Knowledge service | `ai_service/rag/knowledge_service.py` | Registry-gated markdown chunking, content hash, embedding generation, PostgreSQL storage |
 | Retrieval service | `ai_service/rag/retrieval_service.py` | pgvector cosine search requiring approved and allowed-for-RAG sources |
-| Actions | `ai_service/actions/*` | Function schemas, validation, and chart-action compatibility |
+| Actions | `ai_service/actions/*` | Function schemas, validation, executor with audit trail, undo stack |
+| FinBERT analyzer | `ai_service/nlp/finbert.py` | Lazy-loaded ProsusAI/finbert with GPU/CPU auto-detection |
+| Entity extractor | `ai_service/nlp/entity_extractor.py` | Crypto entity extraction, event classification, market relevance |
+| News processor | `ai_service/nlp/news_processor.py` | Background worker processing news with FinBERT sentiment |
 
 ### Provider and RAG Configuration
 
 | Setting | Default in code/env | Current effect |
 |---|---|---|
 | `AI_MODE` | `auto` | `auto`, `local`, `api`, or `none` provider routing |
+| `AI_ORCHESTRATION` | `legacy` | `legacy` (linear pipeline) or `langgraph` (multi-agent DAG) |
 | `AI_CONFIG_PATH` | mode-based YAML (`ai.local.yaml` for `auto`) | Provider/model catalog path |
 | `AI_ENABLE_RAG` | `true` | Enables retrieval attempt in AI orchestration |
 | `DASHSCOPE_API_KEY` | unset | Primary API key for DashScope International |
 | `QWEN_API_KEY` | unset | Legacy alias if `DASHSCOPE_API_KEY` is unset |
+| `DEEPSEEK_API_KEY` | unset | DeepSeek API key for fallback chain |
+| `LITELLM_BASE_URL` | `http://litellm:4000` | LiteLLM proxy URL |
+| `VLLM_BASE_URL` | `http://vllm:8000/v1` | vLLM local inference URL |
+| `FINBERT_DEVICE` | `auto` | FinBERT device: `auto`, `cuda`, `cpu` |
 | `AI_RAG_TOP_K` | `6` | Retrieval result limit |
 | `AI_RAG_MIN_SCORE` | `0.25` | Minimum similarity score |
 | `AI_KB_APPROVED_ONLY` | `true` | Limits retrieval to approved sources |
@@ -1018,7 +1041,9 @@ Runtime dependency state from repository files:
 - `docker/fastapi/requirements.txt` includes `asyncpg`, auth dependencies, FastAPI, Redis, InfluxDB, Trino, news scraping packages, `litellm`, `PyYAML`, and `sentence-transformers`.
 - `ai_service/providers/litellm_provider.py` imports `litellm` lazily.
 - `ai_service/rag/knowledge_service.py` imports `sentence_transformers` lazily.
+- `ai_service/nlp/finbert.py` imports `transformers` and `torch` lazily.
 - `backend/migrations/003_phase1_ai_rag.sql` creates pgvector-backed knowledge sources, chunks, embeddings, HNSW index, and retrieval logs.
+- `backend/migrations/004_agents_metadata.sql` creates agent execution tracking, expert runs, chart actions, and news sentiment cache tables.
 
 ---
 

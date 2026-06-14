@@ -94,7 +94,7 @@ async def lifespan(app: FastAPI):
     await close_pg_pool()
 
 
-app = FastAPI(title="LMView API", version="0.24.0", lifespan=lifespan)
+app = FastAPI(title="LMView API", version="0.25.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
