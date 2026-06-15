@@ -20,13 +20,21 @@ import { CandlestickChart } from "@/features/chart";
 import ChartOverlay from "@/features/drawing/components/ChartOverlay";
 import DrawingContextToolbar from "@/features/drawing/components/DrawingContextToolbar";
 import { ReplayControls } from "@/features/replay/components/ReplayControls";
-import RightPanel from "@/features/watchlist/components/RightPanel";
+import RightPanel, {
+    type RightPanelTab,
+    type RightPanelTopTab,
+} from "@/features/watchlist/components/RightPanel";
 import NewsPage from "@/pages/NewsPage";
 import ScreenerPage from "@/pages/ScreenerPage";
 import { FALLBACK_SYMBOLS } from "@/constants/market";
 import { fetchTickers, fetchSymbols, getLivePrices } from "@/services/marketDataService";
 import { fetchLatestNews } from "@/services/newsService";
-import { fetchUserSettings } from "@/services/settingsService";
+import {
+    DEFAULT_CHART_PREFERENCES,
+    fetchUserSettings,
+    normalizeChartPreferences,
+    type ChartPreferenceSettings,
+} from "@/services/settingsService";
 import { loadFromStorage, saveToStorage } from "@/utils/storageHelpers";
 import {
     loadDrawings,
@@ -135,6 +143,10 @@ const TradingDashboard: React.FC = () => {
     const [themeMode, setThemeMode] = useState<ThemeMode>(getInitialTheme);
     const [isDesktop, setIsDesktop] = useState(isDesktopLayout);
     const [isRightPanelOpen, setIsRightPanelOpen] = useState(isDesktopLayout);
+    const [rightPanelTopTab, setRightPanelTopTab] =
+        useState<RightPanelTopTab>("overview");
+    const [rightPanelTab, setRightPanelTab] =
+        useState<RightPanelTab>("watchlist");
     const [isDrawingToolbarOpen, setIsDrawingToolbarOpen] =
         useState(isDesktopLayout);
     const [appView, setAppView] = useState<AppView>("charts");
@@ -150,6 +162,8 @@ const TradingDashboard: React.FC = () => {
     const [settingsInitialTab, setSettingsInitialTab] =
         useState<SettingsTab>("account");
     const [magnetEnabled, setMagnetEnabled] = useState(false);
+    const [chartPreferences, setChartPreferences] =
+        useState<ChartPreferenceSettings>(DEFAULT_CHART_PREFERENCES);
     const [currentTimeframe, setCurrentTimeframe] =
         useState<TimeframeKey>(getInitialTimeframe);
     const [chartType, setChartType] = useState<ChartType>(getInitialChartType);
@@ -562,6 +576,7 @@ const TradingDashboard: React.FC = () => {
                 if (defaults.default_symbol.endsWith("USDT")) {
                     setSelectedSymbol(defaults.default_symbol);
                 }
+                setChartPreferences(normalizeChartPreferences(defaults));
             })
             .catch(() => {
                 // User defaults are optional; local storage still provides anonymous defaults.
@@ -735,11 +750,66 @@ const TradingDashboard: React.FC = () => {
     }, [selectedDrawing, t]);
 
     // Resizable right sidebar
-    const SIDEBAR_MIN = 320;
+    const SIDEBAR_MIN = 280;
     const SIDEBAR_MAX = 520;
     const SIDEBAR_DEFAULT = 360;
+    const SIDEBAR_MAX_VIEWPORT_RATIO = 0.36;
+    const CHART_MIN_WIDTH_WITH_PANEL = 560;
     const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT);
     const dragging = useRef(false);
+    const clampSidebarWidth = useCallback((width: number) => {
+        if (typeof window === "undefined") {
+            return Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, width));
+        }
+
+        const viewportMax = Math.floor(
+            window.innerWidth * SIDEBAR_MAX_VIEWPORT_RATIO,
+        );
+        const chartSafeMax = window.innerWidth - CHART_MIN_WIDTH_WITH_PANEL;
+        const maxWidth = Math.max(
+            SIDEBAR_MIN,
+            Math.min(SIDEBAR_MAX, viewportMax, chartSafeMax),
+        );
+        return Math.max(SIDEBAR_MIN, Math.min(maxWidth, width));
+    }, []);
+
+    useEffect(() => {
+        const onTopTab = (event: Event) => {
+            const tab = (event as CustomEvent<{ tab?: RightPanelTopTab }>)
+                .detail?.tab;
+            if (tab === "aiHelper" && !user) return;
+            if (tab === "overview" || tab === "aiHelper") {
+                setRightPanelTopTab(tab);
+            }
+        };
+        const onPanelTab = (event: Event) => {
+            const tab = (event as CustomEvent<{ tab?: RightPanelTab }>)
+                .detail?.tab;
+            if (
+                tab === "watchlist" ||
+                tab === "orderBook" ||
+                tab === "recentTrades"
+            ) {
+                setRightPanelTopTab("overview");
+                setRightPanelTab(tab);
+            }
+        };
+        window.addEventListener("lmview:right-panel-top-tab", onTopTab);
+        window.addEventListener("lmview:right-panel-tab", onPanelTab);
+        return () => {
+            window.removeEventListener("lmview:right-panel-top-tab", onTopTab);
+            window.removeEventListener("lmview:right-panel-tab", onPanelTab);
+        };
+    }, [user]);
+
+    useEffect(() => {
+        const onResize = () => {
+            setSidebarWidth((width) => clampSidebarWidth(width));
+        };
+        onResize();
+        window.addEventListener("resize", onResize);
+        return () => window.removeEventListener("resize", onResize);
+    }, [clampSidebarWidth]);
 
     const onDragStart = useCallback((e: React.MouseEvent) => {
         e.preventDefault();
@@ -747,7 +817,7 @@ const TradingDashboard: React.FC = () => {
         const onMove = (ev: MouseEvent) => {
             if (!dragging.current) return;
             const newW = window.innerWidth - ev.clientX;
-            setSidebarWidth(Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, newW)));
+            setSidebarWidth(clampSidebarWidth(newW));
         };
         const onUp = () => {
             dragging.current = false;
@@ -756,7 +826,7 @@ const TradingDashboard: React.FC = () => {
         };
         document.addEventListener("mousemove", onMove);
         document.addEventListener("mouseup", onUp);
-    }, []);
+    }, [clampSidebarWidth]);
 
     const isChartsView = appView === "charts";
     const showDrawingToolbar = isChartsView;
@@ -811,7 +881,7 @@ const TradingDashboard: React.FC = () => {
     ) : null;
 
     return (
-        <ErrorBoundary>
+        <ErrorBoundary isAdmin={user?.role === "admin"}>
             <AiActionProvider>
             <AiActionRuntimeBridge
                 setDrawingTool={handleToolChange}
@@ -821,16 +891,20 @@ const TradingDashboard: React.FC = () => {
                 setChartType={setChartType}
                 setView={setAppView}
                 setRightPanelOpen={setIsRightPanelOpen}
+                setRightPanelTopTab={setRightPanelTopTab}
+                setRightPanelTab={setRightPanelTab}
                 openSettings={() => handleOpenSettings()}
                 closeSettings={() => setIsSettingsModalOpen(false)}
                 currentView={appView}
                 rightPanelOpen={isRightPanelOpen}
+                rightPanelTopTab={rightPanelTopTab}
+                rightPanelTab={rightPanelTab}
                 currentTimeframe={currentTimeframe}
                 selectedSymbol={selectedSymbol}
                 chartType={chartType}
                 chartController={aiChartController}
             />
-            <div data-ai-section="app-shell" className="bg-gray-900 text-white h-screen flex flex-col overflow-hidden">
+            <div data-ai-section="app-shell" className="bg-gray-900 text-white h-dvh flex flex-col overflow-hidden">
                 <div data-ai-section="header">
                     <Header
                     themeMode={themeMode}
@@ -912,6 +986,7 @@ const TradingDashboard: React.FC = () => {
                                         themeMode={themeMode}
                                         chartType={chartType}
                                         onChartTypeChange={setChartType}
+                                        chartPreferences={chartPreferences}
                                         isReplayActive={isReplayActive}
                                         newsItems={newsArticles}
                                         showNewsMarkers={true}
@@ -992,6 +1067,9 @@ const TradingDashboard: React.FC = () => {
                                                                     }
                                                                     drawingsLocked={
                                                                         drawingsLocked
+                                                                    }
+                                                                    favoriteTools={
+                                                                        chartPreferences.favorite_drawing_tools
                                                                     }
                                                                 />
                                                             </div>
@@ -1187,6 +1265,10 @@ const TradingDashboard: React.FC = () => {
                                             candles={chartCandles}
                                             timeframe={currentTimeframe}
                                             onOpenSettings={handleOpenSettings}
+                                            activeTopTab={rightPanelTopTab}
+                                            activeTab={rightPanelTab}
+                                            onTopTabChange={setRightPanelTopTab}
+                                            onTabChange={setRightPanelTab}
                                         />
                                     </div>
                                 </>
@@ -1234,10 +1316,14 @@ function AiActionRuntimeBridge({
     setChartType,
     setView,
     setRightPanelOpen,
+    setRightPanelTopTab,
+    setRightPanelTab,
     openSettings,
     closeSettings,
     currentView,
     rightPanelOpen,
+    rightPanelTopTab,
+    rightPanelTab,
     currentTimeframe,
     selectedSymbol,
     chartType,
@@ -1250,10 +1336,14 @@ function AiActionRuntimeBridge({
     setChartType: (chartType: ChartType) => void;
     setView: (view: AppView) => void;
     setRightPanelOpen: (open: boolean) => void;
+    setRightPanelTopTab: (tab: RightPanelTopTab) => void;
+    setRightPanelTab: (tab: RightPanelTab) => void;
     openSettings: () => void;
     closeSettings: () => void;
     currentView: AppView;
     rightPanelOpen: boolean;
+    rightPanelTopTab: RightPanelTopTab;
+    rightPanelTab: RightPanelTab;
     currentTimeframe: TimeframeKey;
     selectedSymbol: string;
     chartType: ChartType;
@@ -1269,10 +1359,14 @@ function AiActionRuntimeBridge({
             setChartType,
             setView,
             setRightPanelOpen,
+            setRightPanelTopTab,
+            setRightPanelTab,
             openSettings,
             closeSettings,
             currentView,
             rightPanelOpen,
+            rightPanelTopTab,
+            rightPanelTab,
             currentTimeframe,
             selectedSymbol,
             chartType,
@@ -1291,10 +1385,14 @@ function AiActionRuntimeBridge({
         setChartType,
         setDrawingTool,
         setRightPanelOpen,
+        setRightPanelTab,
+        setRightPanelTopTab,
         setRuntime,
         setSymbol,
         setTimeframe,
         setView,
+        rightPanelTab,
+        rightPanelTopTab,
     ]);
     return null;
 }

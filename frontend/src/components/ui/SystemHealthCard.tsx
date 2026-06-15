@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Info } from "lucide-react";
+import { useAuth } from "@/features/auth/AuthContext";
 import { useI18n } from "@/i18n";
 import { fetchHealthStatus } from "@/services/healthService";
+import { getRoleAwareErrorMessage } from "@/utils/errors";
 import type { HealthData } from "@/types";
 
 const REFRESH_MS = 3000;
@@ -22,6 +24,8 @@ function formatUptime(sec: number | null | undefined): string {
 
 const SystemHealthCard: React.FC = () => {
   const { t } = useI18n();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [showTooltip, setShowTooltip] = useState(false);
   const [loading, setLoading] = useState(false);
   const [healthData, setHealthData] = useState<(HealthData & { api_rtt_ms?: number }) | null>(null);
@@ -37,11 +41,11 @@ const SystemHealthCard: React.FC = () => {
       const apiRttMs = Number((performance.now() - started).toFixed(2));
       setHealthData({ ...data, api_rtt_ms: apiRttMs });
     } catch (e) {
-      setError((e as Error).message || t("loadingHealth"));
+      setError(getRoleAwareErrorMessage(e, { isAdmin, fallback: t("loadingHealth") }));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [isAdmin, t]);
 
   useEffect(() => {
     if (!showTooltip) return;

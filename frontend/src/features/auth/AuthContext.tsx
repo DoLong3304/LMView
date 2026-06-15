@@ -25,6 +25,7 @@ import {
   hasStoredSession,
   clearStoredSession,
 } from "@/services/authService";
+import { getRoleAwareErrorMessage } from "@/utils/errors";
 
 interface AuthContextValue {
   user: UserResponse | null;
@@ -53,11 +54,28 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
+const AUTH_ROLE_SNAPSHOT_KEY = "lmview_auth_role";
+
+function storeRoleSnapshot(user: UserResponse | null): void {
+  try {
+    if (user?.role) {
+      localStorage.setItem(AUTH_ROLE_SNAPSHOT_KEY, user.role);
+    } else {
+      localStorage.removeItem(AUTH_ROLE_SNAPSHOT_KEY);
+    }
+  } catch {
+    // Storage unavailable
+  }
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<UserResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    storeRoleSnapshot(user);
+  }, [user]);
 
   // Restore session on mount
   useEffect(() => {
@@ -109,8 +127,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(data.user);
         return { success: true };
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Login failed";
+        const message = getRoleAwareErrorMessage(err, {
+          area: "auth",
+          fallback: "We could not sign you in. Please check your account information and try again.",
+        });
         setError(message);
         return { success: false, error: message };
       }
@@ -139,8 +159,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(data.user);
         return { success: true };
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Registration failed";
+        const message = getRoleAwareErrorMessage(err, {
+          area: "auth",
+          fallback: "We could not create the account. Please check the form and try again.",
+        });
         setError(message);
         return { success: false, error: message };
       }
@@ -179,12 +201,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(updated);
         return { success: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Profile update failed";
+        const message = getRoleAwareErrorMessage(err, {
+          isAdmin: user?.role === "admin",
+          fallback: "Profile update failed",
+        });
         setError(message);
         return { success: false, error: message };
       }
     },
-    [],
+    [user?.role],
   );
 
   const changePassword = useCallback(
@@ -202,12 +227,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(updated);
         return { success: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Password change failed";
+        const message = getRoleAwareErrorMessage(err, {
+          isAdmin: user?.role === "admin",
+          fallback: "Password change failed",
+        });
         setError(message);
         return { success: false, error: message };
       }
     },
-    [],
+    [user?.role],
   );
 
   const deleteAccount = useCallback(
@@ -224,12 +252,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setError(null);
         return { success: true };
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Account deletion failed";
+        const message = getRoleAwareErrorMessage(err, {
+          isAdmin: user?.role === "admin",
+          fallback: "Account deletion failed",
+        });
         setError(message);
         return { success: false, error: message };
       }
     },
-    [],
+    [user?.role],
   );
 
   return (

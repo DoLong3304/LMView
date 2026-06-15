@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useRef, useState } from "react";
 import { Search, ChevronDown, Star } from "lucide-react";
 import { useI18n } from "@/i18n";
+import DropdownPortal from "@/components/ui/DropdownPortal";
 import { useSymbolMeta } from "@/hooks/useSymbolMeta";
 import { DEFAULT_SYMBOL_ICON } from "@/services/symbolMetaService";
 
@@ -23,20 +24,7 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
   const { getMeta } = useSymbolMeta();
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node)
-      ) {
-        setIsOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const filtered = symbols.filter((s) => {
     const meta = getMeta(s);
@@ -51,8 +39,9 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
   const selectedMeta = getMeta(selectedSymbol);
 
   return (
-    <div ref={dropdownRef} className="relative w-[148px] flex-shrink-0 sm:w-[164px]">
+    <div className="relative w-36 min-w-28 max-w-[46vw] flex-shrink sm:w-40 sm:flex-shrink-0">
       <button
+        ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
         className="flex h-8 w-full cursor-pointer items-center gap-2 rounded border border-[var(--lm-border-strong)] bg-[var(--lm-bg-tertiary)] px-2.5 text-sm text-[var(--lm-text-primary)] transition-colors hover:border-[var(--lm-blue-border)] hover:bg-[var(--lm-blue-soft)] focus:border-blue-500 focus:outline-none"
       >
@@ -68,8 +57,15 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
         <ChevronDown size={14} className="ml-auto text-[var(--lm-text-secondary)]" />
       </button>
 
-      {isOpen && (
-        <div className="lm-menu-surface absolute top-full left-0 mt-1 w-[min(288px,calc(100vw-1rem))] overflow-hidden rounded-lg border shadow-2xl z-[150]">
+      <DropdownPortal
+        anchorRef={buttonRef}
+        className="lm-menu-surface overflow-hidden rounded-lg border shadow-2xl"
+        maxWidth={288}
+        minWidth={224}
+        onClose={() => setIsOpen(false)}
+        open={isOpen}
+        width={288}
+      >
           {/* Search */}
           <div className="border-b border-[var(--lm-border)] p-2">
             <div className="relative">
@@ -145,8 +141,7 @@ const MarketSelector: React.FC<MarketSelectorProps> = ({
               );
             })}
           </div>
-        </div>
-      )}
+      </DropdownPortal>
     </div>
   );
 };

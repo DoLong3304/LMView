@@ -7,6 +7,7 @@
 
 import { API_BASE_URL, DATA_SOURCE } from "@/constants/env";
 import { getAuthHeaders } from "@/services/authService";
+import { createApiError } from "@/utils/errors";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -164,9 +165,7 @@ async function aiFetch<T>(
 
   if (!resp.ok) {
     const errorData = await resp.json().catch(() => ({}));
-    throw new Error(
-      errorData.detail || `AI API error: ${resp.status}`
-    );
+    throw createApiError("ai", resp.status, errorData, { endpoint: path });
   }
 
   return resp.json();

@@ -62,10 +62,10 @@ const RecentTrades: React.FC<RecentTradesProps> = ({ symbol }) => {
 
       {/* Column headers */}
       <div className="flex px-2 py-1 text-gray-500 border-b border-gray-700">
-        <span className="w-16">{t("time")}</span>
-        <span className="flex-1">{t("price")}</span>
-        <span className="flex-1 text-right">{t("amount")}</span>
-        <span className="w-10 text-right">{t("side")}</span>
+        <span className="w-16 flex-shrink-0">{t("time")}</span>
+        <span className="min-w-0 flex-1 truncate">{t("price")}</span>
+        <span className="min-w-0 flex-1 truncate text-right">{t("amount")}</span>
+        <span className="w-10 flex-shrink-0 text-right">{t("side")}</span>
       </div>
 
       {/* Trade list */}
@@ -80,19 +80,19 @@ const RecentTrades: React.FC<RecentTradesProps> = ({ symbol }) => {
             key={i}
             className="flex px-2 py-0.5 hover:bg-gray-800 transition-colors"
           >
-            <span className="w-16 text-gray-500">
+            <span className="w-16 flex-shrink-0 text-gray-500">
               {formatTime(trade.time)}
             </span>
             <span
-              className={`flex-1 truncate ${trade.side === "buy" ? "text-green-400" : "text-red-400"}`}
+              className={`min-w-0 flex-1 truncate ${trade.side === "buy" ? "text-green-400" : "text-red-400"}`}
             >
               {f(trade.price)}
             </span>
-            <span className="flex-1 truncate text-right text-gray-300">
+            <span className="min-w-0 flex-1 truncate text-right text-gray-300">
               {trade.volume}
             </span>
             <span
-              className={`w-10 text-right font-sans ${trade.side === "buy" ? "text-green-400" : "text-red-400"}`}
+              className={`w-10 flex-shrink-0 text-right font-sans ${trade.side === "buy" ? "text-green-400" : "text-red-400"}`}
             >
               {t(trade.side)}
             </span>

@@ -5,11 +5,15 @@ import {
   fetchTopLosers,
 } from "@/services/marketOverviewService";
 import { fetchLatestNews } from "@/services/newsService";
+import { useAuth } from "@/features/auth/AuthContext";
 import { useI18n } from "@/i18n";
+import { getRoleAwareErrorMessage, sanitizeTechnicalDetails } from "@/utils/errors";
 import type { MarketMetrics, NewsArticle, TopMover } from "@/types";
 
 const MarketNews: React.FC = () => {
   const { t } = useI18n();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [news, setNews] = useState<NewsArticle[]>([]);
   const [metrics, setMetrics] = useState<MarketMetrics | null>(null);
   const [gainers, setGainers] = useState<TopMover[]>([]);
@@ -33,8 +37,10 @@ const MarketNews: React.FC = () => {
         setLosers(topLosers);
         setError(null);
       } catch (err) {
-        setError(err instanceof Error ? err.message : t("unexpectedError"));
-        console.error("Error fetching data:", err);
+        setError(getRoleAwareErrorMessage(err, { isAdmin, area: "market", fallback: t("unexpectedError") }));
+        if (isAdmin || import.meta.env.DEV) {
+          console.error("[MarketNews] Load error:", sanitizeTechnicalDetails(err));
+        }
       } finally {
         setLoading(false);
       }
@@ -43,7 +49,7 @@ const MarketNews: React.FC = () => {
     fetchData();
     const interval = setInterval(fetchData, 60000);
     return () => clearInterval(interval);
-  }, [t]);
+  }, [isAdmin, t]);
 
   const formatNumber = (num: number): string => {
     if (num >= 1e12) return `$${(num / 1e12).toFixed(2)}T`;

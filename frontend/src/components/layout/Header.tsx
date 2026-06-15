@@ -126,7 +126,7 @@ const Header: React.FC<HeaderProps> = ({
 
         <div className="hidden lg:block w-px h-6 bg-gray-700" />
 
-        <div className="ml-auto flex items-center gap-1.5 sm:gap-2">
+        <div className="flex min-w-0 basis-full flex-wrap items-center justify-start gap-1.5 sm:ml-auto sm:basis-auto sm:justify-end sm:gap-2">
           <div className="flex items-center gap-1 rounded border border-gray-700 bg-gray-800 p-0.5">
             <button
               onClick={() => onViewChange("charts")}
@@ -225,7 +225,7 @@ const Header: React.FC<HeaderProps> = ({
                 )}
               </button>
               {isNotificationsOpen && (
-                <div className="absolute right-0 top-full z-[500] mt-2 w-80 overflow-hidden rounded border border-gray-700 bg-gray-900 shadow-2xl">
+                <div className="absolute right-0 top-full z-[500] mt-2 w-[calc(100vw-1rem)] max-w-80 overflow-hidden rounded border border-gray-700 bg-gray-900 shadow-2xl">
                   <div className="flex items-center justify-between border-b border-gray-800 px-3 py-2">
                     <span className="text-xs font-semibold text-white">{t("notifications")}</span>
                     <button
@@ -281,13 +281,15 @@ const Header: React.FC<HeaderProps> = ({
             <Settings className="w-5 h-5" />
           </button>
           {isAuthenticated && user ? (
-            <div className="flex min-w-0 items-center gap-1 rounded border border-gray-700 bg-gray-800 px-1.5 py-1">
+            <div className="flex min-w-0 max-w-[9.5rem] items-center gap-1 rounded border border-gray-700 bg-gray-800 px-1 py-1 sm:max-w-[13rem]">
               <div
                 className="flex min-w-0 items-center gap-1.5 px-1 text-xs font-medium text-gray-300"
                 title={user.email}
               >
-                <UserRound className="h-4 w-4 flex-shrink-0" />
-                <span className="hidden max-w-28 truncate md:inline">
+                <span className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-full border border-blue-500/30 bg-blue-500/15 text-[10px] font-bold text-blue-100">
+                  {getHeaderUserInitials(user.display_name || user.email)}
+                </span>
+                <span className="hidden min-w-0 max-w-24 truncate md:inline lg:max-w-32">
                   {user.display_name || user.email}
                 </span>
               </div>
@@ -297,6 +299,7 @@ const Header: React.FC<HeaderProps> = ({
                 disabled={isLoggingOut}
                 className="rounded p-1 text-gray-400 transition-colors hover:bg-gray-700 hover:text-white disabled:cursor-wait disabled:opacity-60"
                 title={t("logout")}
+                aria-label={t("logout")}
               >
                 {isLoggingOut ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -326,5 +329,16 @@ const Header: React.FC<HeaderProps> = ({
     </>
   );
 };
+
+function getHeaderUserInitials(value: string): string {
+  const words = value
+    .replace(/@.*/, "")
+    .split(/\s|\.|_/)
+    .filter(Boolean);
+  const initials = words.length > 1
+    ? `${words[0][0]}${words[1][0]}`
+    : value.slice(0, 2);
+  return initials.toUpperCase() || "LM";
+}
 
 export default Header;

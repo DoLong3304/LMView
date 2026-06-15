@@ -206,7 +206,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
                     {isUser ? <UserRound size={10} /> : <Sparkles size={10} />}
                     <span>{isUser ? t("you") : assistantLabel}</span>
                   </div>
-                  <div className={`rounded px-3 py-2 text-xs leading-5 shadow-sm ${isUser ? "bg-blue-600 text-white" : "border border-gray-800 bg-gray-850 text-gray-200"}`}>
+                  <div className={`max-w-full rounded px-3 py-2 text-xs leading-5 shadow-sm ${isUser ? "bg-blue-600 text-white" : "border border-gray-800 bg-gray-850 text-gray-200"}`}>
                     <MarkdownContent content={message.content} compact={isUser} />
                   </div>
                   {!isUser && actionCalls.length > 0 && (
@@ -310,8 +310,8 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
               className="min-h-20 w-full resize-none rounded-t bg-transparent px-3 py-2 text-xs text-white outline-none placeholder-gray-500"
               disabled={loading}
             />
-            <div className="flex items-center justify-between gap-2 border-t border-gray-800 px-2 py-1.5">
-              <label className="flex items-center gap-2 text-[11px] font-semibold text-gray-400">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-800 px-2 py-1.5">
+              <label className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-semibold text-gray-400">
                 <span>{t("askMode")}</span>
                 <button
                   type="button"
@@ -324,7 +324,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
                 </button>
                 <span>{t("interactMode")}</span>
               </label>
-              <div className="flex min-w-0 items-center gap-1.5 text-[10px] text-gray-500">
+              <div className="order-last flex min-w-0 flex-1 items-center gap-1.5 text-[10px] text-gray-500 sm:order-none">
                 <CornerDownLeft size={11} />
                 <span className="hidden truncate sm:inline">{t("sendHint")}</span>
               </div>
@@ -332,7 +332,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
                 type="button"
                 onClick={handleSend}
                 disabled={!inputValue.trim() || loading}
-                className={`flex h-7 items-center gap-1.5 rounded px-2 text-xs font-semibold ${inputValue.trim() && !loading ? "bg-blue-600 text-white hover:bg-blue-500" : "cursor-not-allowed bg-gray-800 text-gray-600"}`}
+                className={`flex h-7 flex-shrink-0 items-center gap-1.5 rounded px-2 text-xs font-semibold ${inputValue.trim() && !loading ? "bg-blue-600 text-white hover:bg-blue-500" : "cursor-not-allowed bg-gray-800 text-gray-600"}`}
                 title={t("sendMessage")}
               >
                 {loading ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}

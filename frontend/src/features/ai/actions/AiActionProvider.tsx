@@ -5,7 +5,13 @@ import { TOOL_GROUPS } from "@/features/drawing/components/DrawingToolbar";
 import { useI18n } from "@/i18n";
 import { fetchHistoricalCandles } from "@/services/marketDataService";
 import { CHART_TYPES } from "@/types";
+import { sanitizeTechnicalDetails } from "@/utils/errors";
 import type { ChartType, Drawing, IndicatorSettings, TimeframeKey } from "@/types";
+
+type AppView = "charts" | "marketsNews" | "screener";
+type RightPanelTopTab = "overview" | "aiHelper";
+type RightPanelTab = "watchlist" | "orderBook" | "recentTrades";
+type PanelTarget = "ai" | "overview" | RightPanelTab;
 
 export interface AiActionCall {
   name: string;
@@ -46,12 +52,16 @@ interface AiActionRuntime {
   setTimeframe?: (timeframe: TimeframeKey) => void;
   setSymbol?: (symbol: string) => void;
   setChartType?: (chartType: ChartType) => void;
-  setView?: (view: "charts" | "marketsNews" | "screener") => void;
+  setView?: (view: AppView) => void;
   setRightPanelOpen?: (open: boolean) => void;
+  setRightPanelTopTab?: (tab: RightPanelTopTab) => void;
+  setRightPanelTab?: (tab: RightPanelTab) => void;
   openSettings?: () => void;
   closeSettings?: () => void;
-  currentView?: "charts" | "marketsNews" | "screener";
+  currentView?: AppView;
   rightPanelOpen?: boolean;
+  rightPanelTopTab?: RightPanelTopTab;
+  rightPanelTab?: RightPanelTab;
   currentTimeframe?: TimeframeKey;
   selectedSymbol?: string;
   chartType?: ChartType;
@@ -62,8 +72,17 @@ interface TourSnapshot {
   timeframe?: TimeframeKey;
   selectedSymbol?: string;
   chartType?: ChartType;
-  currentView?: "charts" | "marketsNews" | "screener";
+  currentView?: AppView;
   rightPanelOpen?: boolean;
+  rightPanelTopTab?: RightPanelTopTab;
+  rightPanelTab?: RightPanelTab;
+}
+
+interface UiSnapshot {
+  currentView?: AppView;
+  rightPanelOpen?: boolean;
+  rightPanelTopTab?: RightPanelTopTab;
+  rightPanelTab?: RightPanelTab;
 }
 
 interface ChartRegion {
@@ -123,6 +142,8 @@ const SECTION_SELECTORS: Record<string, string> = {
 
 const TIMEFRAMES: TimeframeKey[] = ["1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"];
 const HISTORICAL_TIMEFRAMES: TimeframeKey[] = TIMEFRAMES.filter((item) => item !== "1s");
+const PANEL_TARGETS: PanelTarget[] = ["ai", "overview", "watchlist", "orderBook", "recentTrades"];
+const APP_VIEWS: AppView[] = ["charts", "marketsNews", "screener"];
 
 function drawingTools(): string[] {
   return TOOL_GROUPS.flatMap((group) => group.tools.map((tool) => tool.id));
@@ -144,6 +165,37 @@ function parseDrawingDataPoints(points: unknown[]): Drawing["dataPoints"] | null
   });
   if (parsed.some((point) => point === null)) return null;
   return parsed as Drawing["dataPoints"];
+}
+
+function panelTargetToSection(target: PanelTarget): string {
+  if (target === "ai") return "ai";
+  if (target === "overview") return "rightPanelOverview";
+  return target;
+}
+
+function openPanelTarget(runtime: AiActionRuntime, target: PanelTarget): void {
+  runtime.setView?.("charts");
+  runtime.setRightPanelOpen?.(true);
+
+  if (target === "ai") {
+    runtime.setRightPanelTopTab?.("aiHelper");
+    window.dispatchEvent(new CustomEvent("lmview:right-panel-top-tab", { detail: { tab: "aiHelper" } }));
+    return;
+  }
+
+  runtime.setRightPanelTopTab?.("overview");
+  window.dispatchEvent(new CustomEvent("lmview:right-panel-top-tab", { detail: { tab: "overview" } }));
+
+  if (target !== "overview") {
+    runtime.setRightPanelTab?.(target);
+    window.dispatchEvent(new CustomEvent("lmview:right-panel-tab", { detail: { tab: target } }));
+  }
+}
+
+function switchAppView(runtime: AiActionRuntime, view: AppView): void {
+  runtime.setView?.(view);
+  if (view === "charts") return;
+  runtime.setRightPanelOpen?.(false);
 }
 
 function actionDefinitions(): AiActionDefinition[] {
@@ -263,6 +315,52 @@ function actionDefinitions(): AiActionDefinition[] {
       },
     },
     {
+      name: "open_panel",
+      description: "Open a right-panel target for the user and optionally highlight it.",
+      parameters: {
+        type: "object",
+        properties: {
+          target: { type: "string", enum: PANEL_TARGETS },
+          highlight: { type: "boolean", default: true },
+          label: { type: "string" },
+          message: { type: "string" },
+        },
+        required: ["target"],
+      },
+    },
+    {
+      name: "close_panel",
+      description: "Close the right panel.",
+      parameters: {
+        type: "object",
+        properties: {},
+      },
+    },
+    {
+      name: "switch_panel_tab",
+      description: "Switch the right panel to watchlist, order book, or recent trades.",
+      parameters: {
+        type: "object",
+        properties: {
+          tab: { type: "string", enum: ["watchlist", "orderBook", "recentTrades"] },
+          highlight: { type: "boolean", default: true },
+        },
+        required: ["tab"],
+      },
+    },
+    {
+      name: "switch_app_view",
+      description: "Switch between charts, markets/news, and screener views.",
+      parameters: {
+        type: "object",
+        properties: {
+          view: { type: "string", enum: APP_VIEWS },
+          highlight: { type: "boolean", default: true },
+        },
+        required: ["view"],
+      },
+    },
+    {
       name: "view_section",
       description: "Open and highlight a major app section.",
       parameters: {
@@ -326,6 +424,11 @@ function actionDefinitions(): AiActionDefinition[] {
       description: "Clear AI highlights and action overlays.",
       parameters: { type: "object", properties: {} },
     },
+    {
+      name: "restore_ui_state",
+      description: "Return the UI to the state saved before the latest AI navigation.",
+      parameters: { type: "object", properties: {} },
+    },
   ];
 }
 
@@ -341,6 +444,8 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
   const [actionLog, setActionLog] = useState<Array<{ call: AiActionCall; at: number; detail: string }>>([]);
   const actionLogRef = useRef<Array<{ call: AiActionCall; at: number; detail: string }>>([]);
   const tourSnapshotRef = useRef<TourSnapshot | null>(null);
+  const uiSnapshotRef = useRef<UiSnapshot | null>(null);
+  const [restoreAvailable, setRestoreAvailable] = useState(false);
 
   const recordAction = useCallback((call: AiActionCall, detail: string) => {
     const entry = { call, at: Date.now(), detail };
@@ -352,35 +457,59 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
     runtimeRef.current = { ...runtimeRef.current, ...runtime };
   }, []);
 
-  const showSection = useCallback((target: string) => {
+  const captureUiSnapshot = useCallback(() => {
+    if (uiSnapshotRef.current) return;
     const runtime = runtimeRef.current;
-    if (target === "marketsNews") runtime.setView?.("marketsNews");
-    if (target === "screener") runtime.setView?.("screener");
+    uiSnapshotRef.current = {
+      currentView: runtime.currentView,
+      rightPanelOpen: runtime.rightPanelOpen,
+      rightPanelTopTab: runtime.rightPanelTopTab,
+      rightPanelTab: runtime.rightPanelTab,
+    };
+    setRestoreAvailable(true);
+  }, []);
+
+  const restoreUiState = useCallback(() => {
+    const runtime = runtimeRef.current;
+    const snapshot = uiSnapshotRef.current;
+    if (!snapshot) return;
+    if (snapshot.currentView) runtime.setView?.(snapshot.currentView);
+    if (typeof snapshot.rightPanelOpen === "boolean") {
+      runtime.setRightPanelOpen?.(snapshot.rightPanelOpen);
+    }
+    if (snapshot.rightPanelTopTab) {
+      runtime.setRightPanelTopTab?.(snapshot.rightPanelTopTab);
+    }
+    if (snapshot.rightPanelTab) {
+      runtime.setRightPanelTab?.(snapshot.rightPanelTab);
+    }
+    runtime.closeSettings?.();
+    uiSnapshotRef.current = null;
+    setRestoreAvailable(false);
+    setHighlight(null);
+  }, []);
+
+  const showSection = useCallback((target: string) => {
+    captureUiSnapshot();
+    const runtime = runtimeRef.current;
+    if (target === "marketsNews") switchAppView(runtime, "marketsNews");
+    if (target === "screener") switchAppView(runtime, "screener");
     if (
       ["chart", "chartToolbar", "chartCanvas", "drawingTools", "rightPanel", "rightPanelOverview", "watchlist", "watchlistList", "orderBook", "recentTrades", "ai"].includes(target)
     ) {
       runtime.setView?.("charts");
     }
-    if (["rightPanel", "rightPanelOverview", "watchlist", "watchlistList", "orderBook", "recentTrades", "ai"].includes(target)) {
-      runtime.setRightPanelOpen?.(true);
-    }
-    if (target === "ai") {
-      window.dispatchEvent(new CustomEvent("lmview:right-panel-top-tab", { detail: { tab: "aiHelper" } }));
-    }
-    if (["rightPanelOverview", "watchlist", "watchlistList", "orderBook", "recentTrades"].includes(target)) {
-      window.dispatchEvent(new CustomEvent("lmview:right-panel-top-tab", { detail: { tab: "overview" } }));
+    if (target === "rightPanel" || target === "rightPanelOverview") {
+      openPanelTarget(runtime, "overview");
     }
     if (target === "watchlist" || target === "watchlistList") {
-      window.dispatchEvent(new CustomEvent("lmview:right-panel-tab", { detail: { tab: "watchlist" } }));
+      openPanelTarget(runtime, "watchlist");
     }
-    if (target === "orderBook") {
-      window.dispatchEvent(new CustomEvent("lmview:right-panel-tab", { detail: { tab: "orderBook" } }));
-    }
-    if (target === "recentTrades") {
-      window.dispatchEvent(new CustomEvent("lmview:right-panel-tab", { detail: { tab: "recentTrades" } }));
+    if (target === "orderBook" || target === "recentTrades" || target === "ai") {
+      openPanelTarget(runtime, target as PanelTarget);
     }
     if (target === "settings" || target === "account") runtime.openSettings?.();
-  }, []);
+  }, [captureUiSnapshot]);
 
   const executeAction = useCallback(async (call: AiActionCall) => {
     const args = call.arguments || {};
@@ -478,12 +607,63 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
         showSection("chartToolbar");
         return done(true, `Changed market to ${symbol}`);
       }
+      case "open_panel": {
+        const target = PANEL_TARGETS.includes(String(args.target) as PanelTarget)
+          ? String(args.target) as PanelTarget
+          : "overview";
+        captureUiSnapshot();
+        openPanelTarget(runtime, target);
+        if (args.highlight !== false) {
+          setHighlight({
+            target: panelTargetToSection(target),
+            label: typeof args.label === "string" ? args.label : undefined,
+            message: typeof args.message === "string" ? args.message : undefined,
+            includeChat: target === "ai",
+          });
+        }
+        return done(true, `Opened ${target} panel`);
+      }
+      case "close_panel": {
+        captureUiSnapshot();
+        runtime.setRightPanelOpen?.(false);
+        return done(true, "Closed right panel");
+      }
+      case "switch_panel_tab": {
+        const tab = String(args.tab || "watchlist") as RightPanelTab;
+        if (!["watchlist", "orderBook", "recentTrades"].includes(tab)) {
+          return done(false, `Unsupported right-panel tab: ${String(args.tab)}`);
+        }
+        captureUiSnapshot();
+        openPanelTarget(runtime, tab);
+        if (args.highlight !== false) {
+          setHighlight({ target: panelTargetToSection(tab), label: tab });
+        }
+        return done(true, `Switched right panel to ${tab}`);
+      }
+      case "switch_app_view": {
+        const view = String(args.view || "charts") as AppView;
+        if (!APP_VIEWS.includes(view)) {
+          return done(false, `Unsupported app view: ${String(args.view)}`);
+        }
+        captureUiSnapshot();
+        switchAppView(runtime, view);
+        if (args.highlight !== false) {
+          setHighlight({
+            target: view === "marketsNews" ? "marketsNews" : view === "screener" ? "screener" : "chart",
+            label: view,
+          });
+        }
+        return done(true, `Switched app view to ${view}`);
+      }
       case "view_section": {
         const target = String(args.target || "chart");
         showSection(target);
         setHighlight({ target, label: target });
         return done(true, `Opened ${target}`);
       }
+      case "restore_ui_state":
+        restoreUiState();
+        return done(true, "Restored previous UI state");
       case "zoom_chart": {
         const direction = String(args.direction || "in") === "out" ? "out" : "in";
         runtime.chartController?.zoomChart(direction, Number(args.anchor_ratio ?? 0.5));
@@ -517,6 +697,8 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
           chartType: runtime.chartType,
           currentView: runtime.currentView,
           rightPanelOpen: runtime.rightPanelOpen,
+          rightPanelTopTab: runtime.rightPanelTopTab,
+          rightPanelTab: runtime.rightPanelTab,
         };
         actionLogRef.current = [];
         setActionLog([]);
@@ -532,7 +714,7 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
       default:
         return done(false, `Unsupported action: ${call.name}`);
     }
-  }, [recordAction, showSection]);
+  }, [captureUiSnapshot, recordAction, restoreUiState, showSection]);
 
   useEffect(() => {
     const openDebug = () => setDebugOpen(true);
@@ -553,11 +735,11 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
       { target: "chartToolbar", label: t("tourIndicatorsTitle"), message: t("tourIndicatorsBody") },
       { target: "chartCanvas", label: t("tourZoomTitle"), message: t("tourZoomBody") },
       { target: "rightPanelOverview", label: t("tourRightPanelTitle"), message: t("tourRightPanelBody") },
-      { target: "watchlistList", label: t("tourWatchlistTitle"), message: t("tourWatchlistBody"), action: { name: "view_section", arguments: { target: "watchlistList" } } },
-      { target: "orderBook", label: t("tourOrderBookTitle"), message: t("tourOrderBookBody"), action: { name: "view_section", arguments: { target: "orderBook" } } },
-      { target: "recentTrades", label: t("tourTradesTitle"), message: t("tourTradesBody"), action: { name: "view_section", arguments: { target: "recentTrades" } } },
-      { target: "marketsNews", label: t("tourMarketsNewsTitle"), message: t("tourMarketsNewsBody"), action: { name: "view_section", arguments: { target: "marketsNews" } } },
-      { target: "screener", label: t("tourScreenerTitle"), message: t("tourScreenerBody"), action: { name: "view_section", arguments: { target: "screener" } } },
+      { target: "watchlistList", label: t("tourWatchlistTitle"), message: t("tourWatchlistBody"), action: { name: "open_panel", arguments: { target: "watchlist", highlight: false } } },
+      { target: "orderBook", label: t("tourOrderBookTitle"), message: t("tourOrderBookBody"), action: { name: "switch_panel_tab", arguments: { tab: "orderBook", highlight: false } } },
+      { target: "recentTrades", label: t("tourTradesTitle"), message: t("tourTradesBody"), action: { name: "switch_panel_tab", arguments: { tab: "recentTrades", highlight: false } } },
+      { target: "marketsNews", label: t("tourMarketsNewsTitle"), message: t("tourMarketsNewsBody"), action: { name: "switch_app_view", arguments: { view: "marketsNews", highlight: false } } },
+      { target: "screener", label: t("tourScreenerTitle"), message: t("tourScreenerBody"), action: { name: "switch_app_view", arguments: { view: "screener", highlight: false } } },
       { target: "header", label: t("tourHeaderTitle"), message: t("tourHeaderBody") },
       { target: "settings", label: t("tourSettingsTitle"), message: t("tourSettingsBody"), action: { name: "view_section", arguments: { target: "settings" } } },
       { target: "ai", label: t("tourAiTitle"), message: t("tourAiBody"), includeChat: true },
@@ -575,9 +757,10 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
     if (snapshot?.chartType) runtime.setChartType?.(snapshot.chartType);
     runtime.setDrawingTool?.("cursor");
     runtime.closeSettings?.();
-    runtime.setView?.("charts");
-    runtime.setRightPanelOpen?.(true);
-    window.dispatchEvent(new CustomEvent("lmview:right-panel-top-tab", { detail: { tab: "aiHelper" } }));
+    if (snapshot?.currentView) runtime.setView?.(snapshot.currentView);
+    runtime.setRightPanelOpen?.(snapshot?.rightPanelOpen ?? true);
+    if (snapshot?.rightPanelTopTab) runtime.setRightPanelTopTab?.(snapshot.rightPanelTopTab);
+    if (snapshot?.rightPanelTab) runtime.setRightPanelTab?.(snapshot.rightPanelTab);
   }, []);
 
   function completeTour() {
@@ -615,6 +798,15 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
   return (
     <AiActionContext.Provider value={{ definitions, executeAction, openDebugWindow: () => setDebugOpen(true), setRuntime }}>
       {children}
+      {restoreAvailable && (
+        <RestoreUiBanner
+          onRestore={restoreUiState}
+          onDismiss={() => {
+            uiSnapshotRef.current = null;
+            setRestoreAvailable(false);
+          }}
+        />
+      )}
       {activeHighlight && (
         <HighlightOverlay
           target={activeHighlight.target}
@@ -660,6 +852,8 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
               chartType: runtime.chartType,
               currentView: runtime.currentView,
               rightPanelOpen: runtime.rightPanelOpen,
+              rightPanelTopTab: runtime.rightPanelTopTab,
+              rightPanelTab: runtime.rightPanelTab,
             };
             actionLogRef.current = [];
             setActionLog([]);
@@ -687,6 +881,35 @@ export function useAiActions(): AiActionContextValue {
     throw new Error("useAiActions must be used inside AiActionProvider");
   }
   return context;
+}
+
+function RestoreUiBanner({
+  onRestore,
+  onDismiss,
+}: {
+  onRestore: () => void;
+  onDismiss: () => void;
+}) {
+  const { t } = useI18n();
+  return (
+    <div className="fixed bottom-5 left-1/2 z-[675] flex max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-wrap items-center justify-center gap-2 rounded border border-sky-500/30 bg-gray-950 px-3 py-2 text-xs text-gray-100 shadow-2xl">
+      <span className="text-gray-300">{t("aiChangedView")}</span>
+      <button
+        type="button"
+        onClick={onRestore}
+        className="rounded bg-blue-600 px-2.5 py-1 font-semibold text-white transition-colors hover:bg-blue-500"
+      >
+        {t("returnToPreviousView")}
+      </button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="rounded border border-gray-700 px-2.5 py-1 font-semibold text-gray-300 transition-colors hover:border-gray-500 hover:text-white"
+      >
+        {t("close")}
+      </button>
+    </div>
+  );
 }
 
 function HighlightOverlay({
@@ -896,7 +1119,7 @@ function AiActionDebugWindow({
       const output = await onRun({ name: definition.name, arguments: parsed });
       setResult(`${output.ok ? "success" : "error"}: ${output.detail}`);
     } catch (error) {
-      setResult(`error: ${error instanceof Error ? error.message : "unknown"}`);
+      setResult(`error: ${sanitizeTechnicalDetails(error || "unknown")}`);
     } finally {
       setRunning(false);
     }

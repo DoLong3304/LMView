@@ -20,8 +20,8 @@ import AiAssistantPanel from "@/features/ai/components/AiAssistantPanel";
 import type { WatchlistItem, Candle, SettingsTab } from "@/types";
 import type { TranslationKey } from "@/i18n/translations";
 
-type RightPanelTopTab = "overview" | "aiHelper";
-type RightPanelTab = "watchlist" | "orderBook" | "recentTrades";
+export type RightPanelTopTab = "overview" | "aiHelper";
+export type RightPanelTab = "watchlist" | "orderBook" | "recentTrades";
 
 const TOP_TABS: Array<{
   id: RightPanelTopTab;
@@ -52,6 +52,10 @@ interface RightPanelProps {
   candles?: Candle[];
   timeframe?: string;
   onOpenSettings?: (tab?: SettingsTab) => void;
+  activeTopTab: RightPanelTopTab;
+  activeTab: RightPanelTab;
+  onTopTabChange: (tab: RightPanelTopTab) => void;
+  onTabChange: (tab: RightPanelTab) => void;
 }
 
 const RightPanel: React.FC<RightPanelProps> = ({
@@ -64,6 +68,10 @@ const RightPanel: React.FC<RightPanelProps> = ({
   candles = [],
   timeframe = "1m",
   onOpenSettings,
+  activeTopTab,
+  activeTab,
+  onTopTabChange,
+  onTabChange,
 }) => {
   const { t } = useI18n();
   const { showWarning } = useToast();
@@ -71,34 +79,11 @@ const RightPanel: React.FC<RightPanelProps> = ({
   const { getMeta } = useSymbolMeta();
   const [filter, setFilter] = useState<"all" | "starred">("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTopTab, setActiveTopTab] = useState<RightPanelTopTab>("overview");
-  const [activeTab, setActiveTab] = useState<RightPanelTab>("watchlist");
   useEffect(() => {
     if (activeTopTab === "aiHelper" && !isAuthenticated) {
-      setActiveTopTab("overview");
+      onTopTabChange("overview");
     }
-  }, [activeTopTab, isAuthenticated]);
-
-  useEffect(() => {
-    const onTopTab = (event: Event) => {
-      const tab = (event as CustomEvent<{ tab?: RightPanelTopTab }>).detail?.tab;
-      if (tab === "aiHelper" && !isAuthenticated) return;
-      if (tab === "overview" || tab === "aiHelper") setActiveTopTab(tab);
-    };
-    const onPanelTab = (event: Event) => {
-      const tab = (event as CustomEvent<{ tab?: RightPanelTab }>).detail?.tab;
-      if (tab === "watchlist" || tab === "orderBook" || tab === "recentTrades") {
-        setActiveTopTab("overview");
-        setActiveTab(tab);
-      }
-    };
-    window.addEventListener("lmview:right-panel-top-tab", onTopTab);
-    window.addEventListener("lmview:right-panel-tab", onPanelTab);
-    return () => {
-      window.removeEventListener("lmview:right-panel-top-tab", onTopTab);
-      window.removeEventListener("lmview:right-panel-tab", onPanelTab);
-    };
-  }, [isAuthenticated]);
+  }, [activeTopTab, isAuthenticated, onTopTabChange]);
 
 
   // Sort: starred first, then by % change (gainers → losers)
@@ -193,13 +178,13 @@ const RightPanel: React.FC<RightPanelProps> = ({
       showWarning("You must log in to use AI Helper");
       return;
     }
-    setActiveTopTab(id);
+    onTopTabChange(id);
   };
 
   return (
     <div
       className="bg-gray-900 border-l border-gray-700 flex h-full min-w-0 flex-col overflow-hidden"
-      style={{ width, minWidth: width, maxWidth: "100%" }}
+      style={{ width, minWidth: Math.min(width, 280), maxWidth: "100%" }}
     >
       <div className="grid grid-cols-2 gap-1 border-b border-gray-800 bg-gray-900 px-1.5 py-1.5">
         {TOP_TABS.map(({ id, labelKey, icon: Icon }) => (
@@ -207,7 +192,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
             key={id}
             type="button"
             onClick={() => handleTopTabClick(id)}
-            className={`flex min-w-0 items-center justify-center gap-1.5 rounded px-2 py-1.5 text-xs font-semibold transition-colors ${
+            className={`flex min-w-0 items-center justify-center gap-1 rounded px-1.5 py-1.5 text-xs font-semibold transition-colors sm:gap-1.5 sm:px-2 ${
               activeTopTab === id
                 ? "bg-blue-600 text-white"
                 : "text-gray-400 hover:bg-gray-800 hover:text-white"
@@ -353,8 +338,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
         {PANEL_TABS.map(({ id, labelKey, icon: Icon }) => (
           <button
             key={id}
-            onClick={() => setActiveTab(id)}
-            className={`flex min-w-0 items-center justify-center gap-0.5 border-r border-gray-800 px-0.5 py-1 text-[9px] font-medium leading-none transition-colors last:border-r-0 ${
+            onClick={() => onTabChange(id)}
+            className={`flex min-w-0 items-center justify-center gap-0.5 border-r border-gray-800 px-0.5 py-1 text-[9px] font-medium leading-none transition-colors last:border-r-0 sm:text-[10px] ${
               activeTab === id
                 ? "bg-blue-600 text-white"
                 : "text-gray-400 hover:bg-gray-800 hover:text-white"
@@ -372,8 +357,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
         <>
       {/* Filter tabs */}
       <div className="px-2 py-1.5 border-b border-gray-800 flex-shrink-0">
-        <div className="flex items-center gap-1.5">
-          <div className="flex-1 relative">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          <div className="relative min-w-32 flex-1">
             <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500" />
             <input
               type="text"
@@ -383,7 +368,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
               className="w-full pl-8 pr-2 py-1.5 bg-gray-800 border border-gray-700 rounded text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
             />
           </div>
-          <div className="flex gap-1">
+          <div className="flex flex-shrink-0 gap-1">
             <button
               onClick={() => setFilter("all")}
               className={`px-1.5 py-1 rounded text-xs transition-colors ${

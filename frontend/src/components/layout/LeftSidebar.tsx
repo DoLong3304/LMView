@@ -38,6 +38,7 @@ interface LeftSidebarProps {
   isReplayActive: boolean;
   isReplaySelectionMode: boolean;
   drawingsLocked?: boolean;
+  favoriteTools?: string[];
 }
 
 interface ToolItem {
@@ -55,8 +56,6 @@ interface ToolGroup {
 
 const DIRECT_TOOLS: ToolItem[] = [
   { id: "cursor", icon: MousePointer2, labelKey: "cursor" },
-  { id: "anchoredText", icon: TextCursorInput, labelKey: "anchoredText" },
-  { id: "note", icon: TextCursorInput, labelKey: "note" },
   { id: "text", icon: TextCursorInput, labelKey: "textNotes" },
   { id: "ruler", icon: Ruler, labelKey: "ruler" },
 ];
@@ -161,6 +160,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   isReplayActive,
   isReplaySelectionMode,
   drawingsLocked = false,
+  favoriteTools = [],
 }) => {
   const { t } = useI18n();
   const [openGroupId, setOpenGroupId] = useState<string | null>(null);
@@ -172,6 +172,27 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const activeGroupId = useMemo(() => {
     return TOOL_GROUPS.find((group) => group.tools.some((tool) => tool.id === activeTool))?.id ?? null;
   }, [activeTool]);
+  const favoriteToolItems = useMemo(() => {
+    const allTools = [...DIRECT_TOOLS, ...TOOL_GROUPS.flatMap((group) => group.tools)];
+    const seen = new Set<string>();
+    return favoriteTools
+      .map((toolId) => allTools.find((tool) => tool.id === toolId))
+      .filter((tool): tool is ToolItem => Boolean(tool))
+      .filter((tool) => {
+        if (tool.id === "cursor" || seen.has(tool.id)) return false;
+        seen.add(tool.id);
+        return true;
+      })
+      .slice(0, 8);
+  }, [favoriteTools]);
+  const favoriteToolIds = useMemo(
+    () => new Set(favoriteToolItems.map((tool) => tool.id)),
+    [favoriteToolItems],
+  );
+  const directToolItems = useMemo(
+    () => DIRECT_TOOLS.filter((tool) => tool.id === "cursor" || !favoriteToolIds.has(tool.id)),
+    [favoriteToolIds],
+  );
 
   const clearCloseTimer = useCallback(() => {
     if (closeTimerRef.current !== null) {
@@ -247,7 +268,7 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
   return (
     <div ref={rootRef} className="relative overflow-visible">
       <div
-        className="lm-left-toolbar flex max-h-[calc(100vh-9rem)] flex-shrink-0 flex-col justify-start overflow-visible rounded-lg border shadow-2xl"
+        className="lm-left-toolbar flex max-h-[calc(100dvh-7rem)] flex-shrink-0 flex-col justify-start overflow-visible rounded-lg border shadow-2xl"
         style={{ width: 56, minWidth: 56, maxWidth: 56 }}
       >
         <button
@@ -260,8 +281,8 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
           <Play size={20} />
         </button>
 
-        <div className="flex min-h-0 flex-col justify-start gap-0 overflow-y-auto overflow-x-visible py-2">
-          {DIRECT_TOOLS.map(({ id, icon: Icon, labelKey }) => (
+        <div className="flex min-h-0 flex-1 flex-col justify-start gap-0 overflow-y-auto overflow-x-visible py-2 pb-5">
+          {directToolItems.map(({ id, icon: Icon, labelKey }) => (
             <button
               key={id}
               type="button"
@@ -272,6 +293,23 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
               <Icon size={20} />
             </button>
           ))}
+
+          {favoriteToolItems.length > 0 && (
+            <>
+              <div className="lm-tool-separator" />
+              {favoriteToolItems.map(({ id, icon: Icon, labelKey }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => selectTool(id)}
+                  className={sidebarButtonClass(activeTool === id)}
+                  title={t(labelKey)}
+                >
+                  <Icon size={20} />
+                </button>
+              ))}
+            </>
+          )}
 
           <div className="lm-tool-separator" />
 
@@ -342,8 +380,9 @@ const LeftSidebar: React.FC<LeftSidebarProps> = ({
           <button
             type="button"
             onClick={onClearAll}
-            className="lm-tool-button flex h-11 w-full flex-shrink-0 items-center justify-center transition-colors hover:text-red-500"
+            className="lm-tool-button mb-1 flex h-11 w-full flex-shrink-0 items-center justify-center text-gray-300 transition-colors hover:bg-red-500/10 hover:text-red-400 focus:outline-none focus:ring-2 focus:ring-red-400/60 focus:ring-offset-2 focus:ring-offset-gray-950"
             title={t("deleteAllDrawings")}
+            aria-label={t("deleteAllDrawings")}
           >
             <Trash2 size={20} />
           </button>

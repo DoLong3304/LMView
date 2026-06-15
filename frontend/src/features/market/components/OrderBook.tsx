@@ -82,9 +82,9 @@ const OrderBook: React.FC<OrderBookProps> = ({ symbol }) => {
 
       {/* Column headers */}
       <div className="flex px-2 py-1 text-gray-500 border-b border-gray-700 bg-gray-850">
-        <span className="flex-1">{t("price")}</span>
-        <span className="flex-1 text-right">{t("amount")}</span>
-        <span className="flex-1 text-right">{t("total")}</span>
+        <span className="min-w-0 flex-1 truncate">{t("price")}</span>
+        <span className="min-w-0 flex-1 truncate text-right">{t("amount")}</span>
+        <span className="min-w-0 flex-1 truncate text-right">{t("total")}</span>
       </div>
 
       {error && asks.length === 0 && bids.length === 0 && (
@@ -102,13 +102,13 @@ const OrderBook: React.FC<OrderBookProps> = ({ symbol }) => {
                 className="absolute right-0 top-0 bottom-0 bg-red-500 bg-opacity-10"
                 style={{ width: `${(ask.total / maxAskTotal) * 100}%` }}
               />
-              <span className="flex-1 text-red-400 relative z-10">
+              <span className="relative z-10 min-w-0 flex-1 truncate text-red-400">
                 {f(ask.price)}
               </span>
-              <span className="flex-1 text-right text-gray-300 relative z-10">
+              <span className="relative z-10 min-w-0 flex-1 truncate text-right text-gray-300">
                 {ask.amount}
               </span>
-              <span className="flex-1 text-right text-gray-500 relative z-10">
+              <span className="relative z-10 min-w-0 flex-1 truncate text-right text-gray-500">
                 {ask.total}
               </span>
             </div>
@@ -130,13 +130,13 @@ const OrderBook: React.FC<OrderBookProps> = ({ symbol }) => {
                 className="absolute right-0 top-0 bottom-0 bg-green-500 bg-opacity-10"
                 style={{ width: `${(bid.total / maxBidTotal) * 100}%` }}
               />
-              <span className="flex-1 text-green-400 relative z-10">
+              <span className="relative z-10 min-w-0 flex-1 truncate text-green-400">
                 {f(bid.price)}
               </span>
-              <span className="flex-1 text-right text-gray-300 relative z-10">
+              <span className="relative z-10 min-w-0 flex-1 truncate text-right text-gray-300">
                 {bid.amount}
               </span>
-              <span className="flex-1 text-right text-gray-500 relative z-10">
+              <span className="relative z-10 min-w-0 flex-1 truncate text-right text-gray-500">
                 {bid.total}
               </span>
             </div>

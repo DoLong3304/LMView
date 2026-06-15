@@ -1,5 +1,6 @@
 import { API_BASE_URL, DATA_SOURCE } from "@/constants/env";
 import { getAuthHeaders } from "@/services/authService";
+import { createApiError } from "@/utils/errors";
 import type { UserResponse } from "@/services/authService";
 
 export interface NotificationPreferences {
@@ -13,8 +14,42 @@ export interface NotificationPreferences {
   position: string;
 }
 
+export type ChartThemePreset = "dark" | "light" | "highContrast" | "custom";
+export type GridLineStyle = "solid" | "dashed";
+export type CrosshairStyle = "standard" | "magnet";
+export type LayoutPreference = "compact" | "comfortable";
+
+export interface CandleStyleSettings {
+  up_color: string;
+  down_color: string;
+  wick_visible: boolean;
+  border_visible: boolean;
+}
+
+export interface GridCrosshairSettings {
+  grid_visible: boolean;
+  grid_style: GridLineStyle;
+  crosshair_style: CrosshairStyle;
+}
+
+export interface ScaleSettings {
+  price_labels_visible: boolean;
+  time_labels_visible: boolean;
+  seconds_visible: boolean;
+  bar_spacing: number;
+}
+
+export interface ChartPreferenceSettings {
+  chart_theme_preset: ChartThemePreset;
+  candle_style: CandleStyleSettings;
+  grid_crosshair: GridCrosshairSettings;
+  scale: ScaleSettings;
+  favorite_drawing_tools: string[];
+  layout_preference: LayoutPreference;
+}
+
 export interface CustomizationDefaults {
-  theme: "dark" | "light";
+  theme: ChartThemePreset;
   default_timeframe: string;
   default_chart_type: string;
   default_symbol: string;
@@ -76,6 +111,35 @@ export interface AdminUsersResponse {
 const MOCK_SETTINGS_KEY = "lmview_mock_settings";
 const MOCK_NOTIFICATIONS_KEY = "lmview_mock_notifications";
 
+export const DEFAULT_CHART_PREFERENCES: ChartPreferenceSettings = {
+  chart_theme_preset: "dark",
+  candle_style: {
+    up_color: "#22c55e",
+    down_color: "#ef4444",
+    wick_visible: true,
+    border_visible: true,
+  },
+  grid_crosshair: {
+    grid_visible: true,
+    grid_style: "solid",
+    crosshair_style: "standard",
+  },
+  scale: {
+    price_labels_visible: true,
+    time_labels_visible: true,
+    seconds_visible: true,
+    bar_spacing: 8,
+  },
+  favorite_drawing_tools: [
+    "trendline",
+    "horizontalRay",
+    "rectangle",
+    "fibRetracement",
+    "ruler",
+  ],
+  layout_preference: "comfortable",
+};
+
 export const DEFAULT_USER_SETTINGS: UserSettings = {
   notification_preferences: {
     system: true,
@@ -94,7 +158,9 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     default_symbol: "BTCUSDT",
     default_exchange: "binance",
     visible_indicators: [],
-    drawing_defaults: {},
+    drawing_defaults: {
+      chart_preferences: DEFAULT_CHART_PREFERENCES,
+    },
   },
   ai_settings: {
     response_style: "concise",
@@ -127,7 +193,7 @@ async function settingsFetch<T>(path: string, options: RequestInit = {}): Promis
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.detail || `Settings API error: ${response.status}`);
+    throw createApiError("settings", response.status, payload, { endpoint: path });
   }
   return response.json() as Promise<T>;
 }
@@ -232,19 +298,109 @@ export async function fetchAppSettings(): Promise<Record<string, unknown>> {
   return payload.settings;
 }
 
+export function normalizeChartPreferences(
+  defaults: CustomizationDefaults,
+): ChartPreferenceSettings {
+  const stored = defaults.drawing_defaults?.chart_preferences as Partial<ChartPreferenceSettings> | undefined;
+  return {
+    ...DEFAULT_CHART_PREFERENCES,
+    ...stored,
+    chart_theme_preset: stored?.chart_theme_preset || defaults.theme || DEFAULT_CHART_PREFERENCES.chart_theme_preset,
+    candle_style: {
+      ...DEFAULT_CHART_PREFERENCES.candle_style,
+      ...stored?.candle_style,
+    },
+    grid_crosshair: {
+      ...DEFAULT_CHART_PREFERENCES.grid_crosshair,
+      ...stored?.grid_crosshair,
+    },
+    scale: {
+      ...DEFAULT_CHART_PREFERENCES.scale,
+      ...stored?.scale,
+    },
+    favorite_drawing_tools: Array.isArray(stored?.favorite_drawing_tools)
+      ? stored.favorite_drawing_tools
+      : DEFAULT_CHART_PREFERENCES.favorite_drawing_tools,
+    layout_preference: stored?.layout_preference
+      || (defaults.drawing_defaults?.compact_panels === true
+        ? "compact"
+        : DEFAULT_CHART_PREFERENCES.layout_preference),
+  };
+}
+
 function getMockSettings(): UserSettings {
   try {
     const stored = localStorage.getItem(MOCK_SETTINGS_KEY);
-    return stored ? { ...DEFAULT_USER_SETTINGS, ...JSON.parse(stored) } : DEFAULT_USER_SETTINGS;
+    return normalizeUserSettings(stored ? JSON.parse(stored) : DEFAULT_USER_SETTINGS);
   } catch {
     return DEFAULT_USER_SETTINGS;
   }
 }
 
 function saveMockSettings(patch: Partial<UserSettings>): UserSettings {
-  const next = { ...getMockSettings(), ...patch };
+  const current = getMockSettings();
+  const next = normalizeUserSettings({
+    ...current,
+    ...patch,
+    notification_preferences: {
+      ...current.notification_preferences,
+      ...patch.notification_preferences,
+    },
+    customization_defaults: {
+      ...current.customization_defaults,
+      ...patch.customization_defaults,
+      drawing_defaults: {
+        ...current.customization_defaults.drawing_defaults,
+        ...patch.customization_defaults?.drawing_defaults,
+      },
+    },
+    ai_settings: {
+      ...current.ai_settings,
+      ...patch.ai_settings,
+    },
+    alert_settings: {
+      ...current.alert_settings,
+      ...patch.alert_settings,
+    },
+  });
   localStorage.setItem(MOCK_SETTINGS_KEY, JSON.stringify(next));
   return next;
+}
+
+function normalizeUserSettings(value: Partial<UserSettings>): UserSettings {
+  const customization = value.customization_defaults ?? DEFAULT_USER_SETTINGS.customization_defaults;
+  const drawingDefaults = customization.drawing_defaults ?? {};
+  return {
+    ...DEFAULT_USER_SETTINGS,
+    ...value,
+    notification_preferences: {
+      ...DEFAULT_USER_SETTINGS.notification_preferences,
+      ...value.notification_preferences,
+    },
+    customization_defaults: {
+      ...DEFAULT_USER_SETTINGS.customization_defaults,
+      ...customization,
+      drawing_defaults: {
+        ...DEFAULT_USER_SETTINGS.customization_defaults.drawing_defaults,
+        ...drawingDefaults,
+        chart_preferences: normalizeChartPreferences({
+          ...DEFAULT_USER_SETTINGS.customization_defaults,
+          ...customization,
+          drawing_defaults: {
+            ...drawingDefaults,
+          },
+        }),
+      },
+    },
+    ai_settings: {
+      ...DEFAULT_USER_SETTINGS.ai_settings,
+      ...value.ai_settings,
+    },
+    alert_settings: {
+      ...DEFAULT_USER_SETTINGS.alert_settings,
+      ...value.alert_settings,
+    },
+  };
 }
 
 function getMockNotifications(): NotificationList {

@@ -1,6 +1,7 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useRef, useState } from "react";
 import { Calendar, X, Clock } from "lucide-react";
 import { useI18n } from "@/i18n";
+import DropdownPortal from "@/components/ui/DropdownPortal";
 import type { HistoricalRange } from "@/types";
 
 interface DateRangePickerProps {
@@ -16,7 +17,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({
 }) => {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   // Default to last 30 days
   const today = new Date();
@@ -30,16 +31,6 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({
 
   const [startDt, setStartDt] = useState(toLocalISO(thirtyDaysAgo));
   const [endDt, setEndDt] = useState(toLocalISO(today));
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
 
   const handleApply = () => {
     const startMs = new Date(startDt).getTime();
@@ -63,8 +54,9 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({
   };
 
   return (
-    <div className="relative" ref={ref}>
+    <div className="relative">
       <button
+        ref={buttonRef}
         onClick={() => setOpen((v) => !v)}
         className={`flex h-7 items-center justify-center gap-1.5 rounded px-2 text-xs font-semibold transition-colors
           ${active ? "bg-amber-600 text-white shadow-sm shadow-amber-950/40" : "text-gray-400 hover:bg-gray-700 hover:text-white"}`}
@@ -78,8 +70,15 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({
         {active ? t("historical") : t("history")}
       </button>
 
-      {open && (
-        <div className="absolute left-0 top-full mt-1 z-[110] w-[min(288px,calc(100vw-1rem))] rounded-lg border border-gray-600 bg-gray-800 p-3 shadow-xl">
+      <DropdownPortal
+        anchorRef={buttonRef}
+        className="rounded-lg border border-gray-600 bg-gray-800 p-3 shadow-xl"
+        maxWidth={288}
+        minWidth={260}
+        onClose={() => setOpen(false)}
+        open={open}
+        width={288}
+      >
           <div className="text-xs text-gray-400 mb-2 font-medium">
             {t("selectDateRange")}
           </div>
@@ -148,8 +147,7 @@ const DateRangePicker: React.FC<DateRangePickerProps> = ({
               </button>
             )}
           </div>
-        </div>
-      )}
+      </DropdownPortal>
     </div>
   );
 };

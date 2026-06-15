@@ -37,6 +37,7 @@ import {
   TIMEFRAMES as SERVICE_TIMEFRAMES,
 } from "@/services/marketDataService";
 import DateRangePicker from "./DateRangePicker";
+import DropdownPortal from "@/components/ui/DropdownPortal";
 import {
   getChartTheme,
   DEFAULT_INDICATOR_SETTINGS,
@@ -67,6 +68,8 @@ import MarketSelector from "./MarketSelector";
 import OHLCVBar from "./OHLCVBar";
 import type { AiChartActionController } from "@/features/ai/actions/AiActionProvider";
 import { CHART_TYPES } from "@/types";
+import { DEFAULT_CHART_PREFERENCES, type ChartPreferenceSettings } from "@/services/settingsService";
+import { formatNormalizedError, normalizeError, sanitizeTechnicalDetails } from "@/utils/errors";
 import type {
   Candle,
   ChartType,
@@ -182,6 +185,57 @@ function warningMessageKey(warnings: string[] = []): TranslationKey | null {
   return null;
 }
 
+function resolveChartTheme(
+  baseTheme: ReturnType<typeof getChartTheme>,
+  preferences: ChartPreferenceSettings,
+): ReturnType<typeof getChartTheme> {
+  const withCandleColors = {
+    ...baseTheme,
+    upColor: preferences.candle_style.up_color,
+    downColor: preferences.candle_style.down_color,
+    volumeUp: `${preferences.candle_style.up_color}80`,
+    volumeDown: `${preferences.candle_style.down_color}80`,
+  };
+
+  if (preferences.chart_theme_preset === "light") {
+    return {
+      ...withCandleColors,
+      background: "#f8fafc",
+      textColor: "#334155",
+      gridColor: "#dbe4ee",
+      borderColor: "#cbd5e1",
+      crosshair: "#475569",
+      crosshairLabelBg: "#e2e8f0",
+    };
+  }
+
+  if (preferences.chart_theme_preset === "highContrast") {
+    return {
+      ...withCandleColors,
+      background: "#050505",
+      textColor: "#f8fafc",
+      gridColor: "#3f3f46",
+      borderColor: "#e4e4e7",
+      crosshair: "#facc15",
+      crosshairLabelBg: "#111111",
+    };
+  }
+
+  return withCandleColors;
+}
+
+function gridLineStyle(preferences: ChartPreferenceSettings): LineStyle {
+  return preferences.grid_crosshair.grid_style === "dashed"
+    ? LineStyle.Dashed
+    : LineStyle.Solid;
+}
+
+function crosshairMode(preferences: ChartPreferenceSettings): CrosshairMode {
+  return preferences.grid_crosshair.crosshair_style === "magnet"
+    ? CrosshairMode.Magnet
+    : CrosshairMode.Normal;
+}
+
 function hasSeriesData(payload: IndicatorSeriesResponse, indicator: string): boolean {
   const series = payload.series || {};
   if (indicator === "rsi") return Boolean(series.rsi?.length || series.rsi14?.length);
@@ -204,6 +258,7 @@ interface CandlestickChartProps {
   onTimeframeChange?: (timeframe: TimeframeKey) => void;
   themeMode?: "dark" | "light";
   chartType?: ChartType;
+  chartPreferences?: ChartPreferenceSettings;
   onChartTypeChange?: (type: ChartType) => void;
   newsItems?: NewsArticle[];
   showNewsMarkers?: boolean;
@@ -234,6 +289,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   onTimeframeChange,
   themeMode = "dark",
   chartType = "candles",
+  chartPreferences = DEFAULT_CHART_PREFERENCES,
   onChartTypeChange,
   newsItems = [],
   showNewsMarkers = true,
@@ -244,7 +300,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartStageRef = useRef<HTMLDivElement>(null);
-  const timeframeDropdownRef = useRef<HTMLDivElement>(null);
+  const timeframeButtonRef = useRef<HTMLButtonElement>(null);
+  const indicatorButtonRef = useRef<HTMLButtonElement>(null);
   const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
   const candleRef = useRef<any>(null);
   const barRef = useRef<any>(null);
@@ -417,18 +474,6 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   }, [resizeChartToContainer]);
 
   useEffect(() => {
-    if (!isTimeframeMenuOpen) return;
-
-    const handlePointerDown = (event: MouseEvent) => {
-      if (timeframeDropdownRef.current?.contains(event.target as Node)) return;
-      setIsTimeframeMenuOpen(false);
-    };
-
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [isTimeframeMenuOpen]);
-
-  useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(document.fullscreenElement === rootRef.current);
       scheduleChartResize();
@@ -456,7 +501,6 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const CHART_CONFIG = {
     VISIBLE_BARS: 150,        // All timeframes show 150 bars
     MAX_BARS_MEMORY: 10000,   // All timeframes keep 10000 bars in memory
-    SHOW_SECONDS: true,       // All timeframes show seconds (consistent display)
   };
 
   const getActivePriceSeries = useCallback(() => {
@@ -656,7 +700,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   // Init chart once
   useEffect(() => {
     if (!containerRef.current) return;
-    const chartTheme = getChartTheme();
+    const preferences = chartPreferences ?? DEFAULT_CHART_PREFERENCES;
+    const chartTheme = resolveChartTheme(getChartTheme(), preferences);
+    const lineStyle = gridLineStyle(preferences);
     themeRef.current = chartTheme;
     const chart = createChart(containerRef.current, {
       layout: {
@@ -670,11 +716,17 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         timeFormatter: localTimeFormatter,
       },
       grid: {
-        vertLines: { color: chartTheme.gridColor, style: LineStyle.Dashed },
-        horzLines: { color: chartTheme.gridColor, style: LineStyle.Dashed },
+        vertLines: {
+          color: preferences.grid_crosshair.grid_visible ? chartTheme.gridColor : "transparent",
+          style: lineStyle,
+        },
+        horzLines: {
+          color: preferences.grid_crosshair.grid_visible ? chartTheme.gridColor : "transparent",
+          style: lineStyle,
+        },
       },
       crosshair: {
-        mode: CrosshairMode.Normal,
+        mode: crosshairMode(preferences),
         vertLine: {
           color: chartTheme.crosshair,
           labelBackgroundColor: chartTheme.crosshairLabelBg,
@@ -690,20 +742,21 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         borderColor: chartTheme.borderColor,
         scaleMargins: { top: 0.05, bottom: 0.25 },
         entireTextOnly: true,
+        visible: preferences.scale.price_labels_visible,
         mode: 0,
       },
       timeScale: {
         borderColor: chartTheme.borderColor,
         timeVisible: true,
-        secondsVisible: timeframe === "1s",
-        barSpacing: 6,
+        secondsVisible: preferences.scale.seconds_visible && timeframe === "1s",
+        barSpacing: preferences.scale.bar_spacing,
         minBarSpacing: 2,
         rightOffset: 8,
         fixLeftEdge: false,
         fixRightEdge: false,
         lockVisibleTimeRangeOnResize: true,
         tickMarkFormatter: localTickMarkFormatter,
-        visible: true,
+        visible: preferences.scale.time_labels_visible,
       },
       handleScroll: { mouseWheel: false, pressedMouseMove: true },
       handleScale: {
@@ -719,7 +772,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       borderDownColor: chartTheme.downColor,
       wickUpColor: chartTheme.upColor,
       wickDownColor: chartTheme.downColor,
-      wickVisible: true,
+      borderVisible: preferences.candle_style.border_visible,
+      wickVisible: preferences.candle_style.wick_visible && timeframe !== "1s",
       visible: usesCandleSeries(chartType),
     });
     const bs = chart.addSeries(BarSeries, {
@@ -1036,7 +1090,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   }, []);
 
   useEffect(() => {
-    const chartTheme = getChartTheme();
+    const preferences = chartPreferences ?? DEFAULT_CHART_PREFERENCES;
+    const chartTheme = resolveChartTheme(getChartTheme(), preferences);
+    const lineStyle = gridLineStyle(preferences);
     themeRef.current = chartTheme;
 
     if (!chartRef.current) return;
@@ -1047,25 +1103,37 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         textColor: chartTheme.textColor,
       },
       grid: {
-        vertLines: { color: chartTheme.gridColor, style: LineStyle.Dashed },
-        horzLines: { color: chartTheme.gridColor, style: LineStyle.Dashed },
+        vertLines: {
+          color: preferences.grid_crosshair.grid_visible ? chartTheme.gridColor : "transparent",
+          style: lineStyle,
+        },
+        horzLines: {
+          color: preferences.grid_crosshair.grid_visible ? chartTheme.gridColor : "transparent",
+          style: lineStyle,
+        },
       },
       crosshair: {
+        mode: crosshairMode(preferences),
         vertLine: {
           color: chartTheme.crosshair,
           labelBackgroundColor: chartTheme.crosshairLabelBg,
+          style: lineStyle,
         },
         horzLine: {
           color: chartTheme.crosshair,
           labelBackgroundColor: chartTheme.crosshairLabelBg,
+          style: lineStyle,
         },
       },
       rightPriceScale: {
         borderColor: chartTheme.borderColor,
+        visible: preferences.scale.price_labels_visible,
       },
       timeScale: {
         borderColor: chartTheme.borderColor,
-        secondsVisible: timeframe === "1s",
+        secondsVisible: preferences.scale.seconds_visible && timeframe === "1s",
+        barSpacing: preferences.scale.bar_spacing,
+        visible: preferences.scale.time_labels_visible,
       },
     });
 
@@ -1076,7 +1144,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       borderDownColor: chartTheme.downColor,
       wickUpColor: chartTheme.upColor,
       wickDownColor: chartTheme.downColor,
-      wickVisible: true,
+      borderVisible: preferences.candle_style.border_visible,
+      wickVisible: preferences.candle_style.wick_visible && timeframe !== "1s",
     });
 
     barRef.current?.applyOptions({
@@ -1101,12 +1170,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         color: c.close >= c.open ? chartTheme.volumeUp : chartTheme.volumeDown,
       })),
     );
-  // Apply wickVisible based on timeframe: tick (1s) has no wicks, others do
-    const isTickChart = timeframe === "1s";
-    candleRef.current?.applyOptions({
-      wickVisible: !isTickChart,
-    });
-  }, [timeframe, themeMode]);
+  }, [timeframe, themeMode, chartPreferences]);
 
   useEffect(() => {
     chartTypeRef.current = chartType;
@@ -1566,7 +1630,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       scrollCooldownRef.current = Date.now();
       isLoadingMoreRef.current = false;
     } catch (error) {
-      console.error('Failed to load more historical data:', error);
+      if (import.meta.env.DEV) {
+        console.error("[Chart] Historical pagination error:", sanitizeTechnicalDetails(error));
+      }
       isLoadingMoreRef.current = false;
     }
   }, [symbol, timeframe, historicalRange, commitCandlesState, setAllPriceSeriesData, syncIndicatorData]);
@@ -1701,8 +1767,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         // Only show error if this request is still current
         if (currentRequestId === historicalRequestIdRef.current) {
           setIsLoading(false);
-          setFetchError(t("failedLoadCandles"));
-          console.error("[Historical] Load error:", err);
+          setFetchError(formatNormalizedError(normalizeError(err, { area: "chart", fallbackMessage: t("failedLoadCandles") }), false));
+          if (import.meta.env.DEV) {
+            console.error("[Chart] Historical range error:", sanitizeTechnicalDetails(err));
+          }
         }
       }
     },
@@ -1724,11 +1792,13 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     if (!candleRef.current || !isLiveMode) return;
     let cancelled = false;
 
-    // Update secondsVisible based on UNIFIED config (all timeframes show seconds)
+    const preferences = chartPreferences ?? DEFAULT_CHART_PREFERENCES;
     if (chartRef.current) {
       chartRef.current
         .timeScale()
-        .applyOptions({ secondsVisible: CHART_CONFIG.SHOW_SECONDS });
+        .applyOptions({
+          secondsVisible: preferences.scale.seconds_visible && timeframe === "1s",
+        });
     }
 
     // Use unified settings for all timeframes (no is1s branching)
@@ -1754,10 +1824,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
         applyDataToChart(data);
         setIsLoading(false);
-      } catch {
+      } catch (err) {
         if (cancelled) return;
         setIsLoading(false);
-        setFetchError(t("failedLoadCandles"));
+        setFetchError(formatNormalizedError(normalizeError(err, { area: "chart", fallbackMessage: t("failedLoadCandles") }), false));
       }
     };
 
@@ -2302,13 +2372,13 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     <div
       ref={rootRef}
       className={`flex min-h-0 w-full flex-col overflow-hidden bg-[var(--lm-bg-primary)] ${
-        isFullscreen ? "h-screen rounded-none" : "h-full rounded-lg"
+        isFullscreen ? "h-dvh rounded-none" : "h-full rounded-lg"
       }`}
     >
       <div data-ai-section="chart-toolbar" className="lm-toolbar-surface flex-none border-b">
-        <div className="max-xl:overflow-x-auto xl:overflow-visible">
-          <div className="flex h-11 w-full min-w-max flex-nowrap items-center gap-2 px-2 py-1.5 sm:px-3 xl:min-w-0">
-            <div className="flex flex-shrink-0 items-center gap-2">
+        <div className="overflow-x-auto overflow-y-visible">
+          <div className="flex min-h-11 w-max min-w-full items-center gap-2 px-2 py-1.5 sm:px-3">
+            <div className="flex min-w-0 flex-shrink-0 items-center gap-2">
               <MarketSelector
                 symbols={marketSelectorSymbols}
                 selectedSymbol={symbol}
@@ -2318,7 +2388,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
               />
 
               {lastCandle && (
-                <div className="flex h-8 flex-shrink-0 items-center gap-2 whitespace-nowrap">
+                <div className="flex h-8 min-w-0 flex-shrink-0 items-center gap-2 whitespace-nowrap">
                   <span
                     className={`font-mono text-sm font-bold ${isUp ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
                   >
@@ -2343,9 +2413,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
               )}
             </div>
 
-            <div className="ml-auto flex min-w-0 flex-shrink-0 items-center gap-1.5">
-              <div ref={timeframeDropdownRef} className="relative flex-shrink-0">
+            <div className="ml-auto flex min-w-0 flex-shrink-0 items-center justify-end gap-1.5">
+              <div className="relative flex-shrink-0">
                 <button
+                  ref={timeframeButtonRef}
                   type="button"
                   onClick={() => setIsTimeframeMenuOpen((open) => !open)}
                   className={`${toolbarButtonBase} min-w-14 gap-1 border border-[var(--lm-border)] px-2.5 ${
@@ -2360,8 +2431,15 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                     className={`transition-transform ${isTimeframeMenuOpen ? "rotate-180" : ""}`}
                   />
                 </button>
-                {isTimeframeMenuOpen && (
-                  <div className="lm-menu-surface absolute left-0 top-full z-[110] mt-2 w-24 max-w-[calc(100vw-1rem)] overflow-hidden rounded border shadow-2xl">
+                <DropdownPortal
+                  anchorRef={timeframeButtonRef}
+                  className="lm-menu-surface overflow-hidden rounded border shadow-2xl"
+                  maxWidth={112}
+                  minWidth={96}
+                  onClose={() => setIsTimeframeMenuOpen(false)}
+                  open={isTimeframeMenuOpen}
+                  width={112}
+                >
                     {(isLiveMode ? TIMEFRAME_KEYS : HISTORICAL_TIMEFRAME_KEYS).map((key) => {
                       const active = normalizeTimeframe(timeframe) === key;
                       return (
@@ -2379,13 +2457,13 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                         </button>
                       );
                     })}
-                  </div>
-                )}
+                </DropdownPortal>
               </div>
 
-              <div className={toolbarGroupClass}>
+              <div className={`${toolbarGroupClass} overflow-x-auto overscroll-x-contain`}>
                 <div className="relative">
                   <button
+                    ref={indicatorButtonRef}
                     onClick={() => setShowIndPanel((v) => !v)}
                     className={`${toolbarButtonBase} gap-1.5 ${
                       showIndPanel ? toolbarActiveClass : toolbarIdleClass
@@ -2394,15 +2472,21 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                   >
                     <Activity size={13} /> {t("indicators")}
                   </button>
-                  {showIndPanel && (
-                    <div className="absolute left-0 top-full mt-1 z-[100] max-w-[calc(100vw-1rem)]">
+                  <DropdownPortal
+                    anchorRef={indicatorButtonRef}
+                    className="max-w-[calc(100vw-1rem)]"
+                    maxWidth={320}
+                    minWidth={280}
+                    onClose={() => setShowIndPanel(false)}
+                    open={showIndPanel}
+                    width={320}
+                  >
                       <IndicatorPanel
                         indSettings={indSettings}
                         onChange={setIndSettings}
                         status={indicatorStatus}
                       />
-                    </div>
-                  )}
+                  </DropdownPortal>
                 </div>
 
                 <DateRangePicker
@@ -2421,7 +2505,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 </button>
               </div>
 
-              <div className={`${toolbarGroupClass} max-w-36 overflow-x-auto overscroll-x-contain`} aria-label={t("chartTypeSettings")}>
+              <div className={`${toolbarGroupClass} max-w-[18rem] overflow-x-auto overscroll-x-contain`} aria-label={t("chartTypeSettings")}>
                 {CHART_TYPE_ORDER.map((type) => {
                   const Icon = CHART_TYPE_ICONS[type];
                   const label = t(CHART_TYPE_LABELS[type]);

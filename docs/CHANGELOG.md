@@ -8,6 +8,578 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.24.37] - 2026-06-16
+
+### Changed
+
+- **Auth modal header separation 16.1 supplement** - Moved the Login/Register close button out of the tab/form overlay area into a dedicated top header row, keeping the Sign In/Sign Up switcher full width below the header so the close control no longer overlaps the register tab, headline, subtitle, or first input.
+- **Settings Customization layout 16.3 supplement** - Expanded the desktop Settings modal to `max-w-7xl` with a taller bounded shell and reorganized the Customization tab into responsive appearance, saved defaults/controls, and preview/presets columns so form controls and the chart preview no longer crowd each other.
+- **Saved Defaults layout 16.3b** - Pulled `Saved defaults` into its own Customization column/card section with explicit spacing around default timeframe, chart type, symbol, exchange, and help text so Vietnamese labels and dropdowns have room to align cleanly.
+
+### Tests
+
+- `npm.cmd run typecheck` passed after the 16.1 supplemental auth modal header fix.
+- `npm.cmd run build` passed after the 16.1 supplemental auth modal header fix.
+- `npm.cmd run typecheck` passed after the 16.3 supplemental Settings Customization layout fix.
+- `npm.cmd run build` passed after the 16.3 supplemental Settings Customization layout fix.
+- **Task 17 final verification** - Source-smoked the Auth modal header/close-button separation and the widened Settings Customization grid, then reran final frontend checks.
+- `npm.cmd run typecheck` passed for Task 17 final verification.
+- `npm.cmd run build` passed for Task 17 final verification.
+
+### Files
+
+- `frontend/src/features/auth/AuthModal.tsx`
+- `frontend/src/features/settings/SettingsModal.tsx`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.36] - 2026-06-15
+
+### Changed
+
+- **Auth modal close button 16.1** - Polished the Login/Register modal close control with a 40px hit target, safer corner spacing from the mobile form header, red danger hover/focus states, and a clear keyboard focus ring while preserving Escape/backdrop close behavior.
+- **Vietnamese Auth/Settings i18n 16.2** - Fixed missing Vietnamese diacritics across Login/Register validation/loading/success copy, Settings tab descriptions, About resource labels, chart/drawing preset labels, AI session labels, and tour copy touched by Auth/Settings surfaces. Added localized AI response-style labels so Vietnamese UI shows `Ngắn gọn`, `Cân bằng`, and `Chi tiết` instead of raw `concise`, `balanced`, and `detailed` option IDs.
+- **Settings text layout 16.3** - Reworked shared Settings row helpers so Saved defaults, AI Helper controls, About system status, and About resources use responsive label/control grids with safer wrapping, truncation, and mobile stacking instead of narrow flex rows that squeezed Vietnamese labels.
+- **Drawing toolbar delete visibility 16.4** - Added stable scroll height and bottom padding to the left drawing toolbar list, and gave the delete-all drawings control a clearer red hover/focus treatment with an explicit accessible label so the trash icon stays fully visible and distinct from eraser mode.
+
+### Tests
+
+- `npm.cmd run typecheck` passed after 16.1 auth modal close-button polish.
+- `npm.cmd run build` passed after 16.1 auth modal close-button polish.
+- `npm.cmd run typecheck` passed after 16.2 Vietnamese Auth/Settings i18n polish.
+- `npm.cmd run build` passed after 16.2 Vietnamese Auth/Settings i18n polish.
+- `npm.cmd run typecheck` passed after 16.3 Settings text layout polish.
+- `npm.cmd run build` passed after 16.3 Settings text layout polish.
+- `npm.cmd run typecheck` passed after 16.4 drawing toolbar delete visibility fix.
+- `npm.cmd run build` passed after 16.4 drawing toolbar delete visibility fix.
+- `npm.cmd exec vitest -- run src/features/drawing/__tests__/drawingGeometry.test.ts` passed after rerunning outside the sandbox; the first sandboxed run failed path resolution before executing tests.
+
+### Files
+
+- `frontend/src/features/auth/AuthModal.tsx`
+- `frontend/src/components/layout/LeftSidebar.tsx`
+- `frontend/src/features/settings/SettingsModal.tsx`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/vi.ts`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.35] - 2026-06-15
+
+### Verified
+
+- **Chart toolbar final verification 15** - Verified the Task 14 chart toolbar bugfix wiring for market/coin search, timeframe, indicators, and history dropdowns using the shared fixed-position `DropdownPortal`; the dropdowns now render outside chart/toolbar overflow contexts and close through outside click/Escape wiring without changing layout flow.
+- **Drawing text tool final verification 15** - Confirmed the left drawing toolbar and Settings favorite-tool picker expose one `Text/Note` entry for new selection while `ChartOverlay` still supports legacy `anchoredText`, `note`, and `text` drawing payloads for existing drawings.
+- **Toolbar layout final verification 15** - Confirmed the toolbar source layout keeps market, timeframe, indicators/history/export, chart type, zoom, and fullscreen controls in non-stretching groups with horizontal overflow for narrower or zoomed widths; right-panel layout wiring remains outside the chart toolbar row.
+
+### Tests
+
+- `npm.cmd exec vitest -- run src/features/drawing/__tests__/drawingGeometry.test.ts` passed.
+- `npm.cmd run typecheck` passed.
+- `npm.cmd run build` passed.
+
+### Notes
+
+- Browser-only manual checks for visual zoom/fullscreen behavior were not run in this terminal verification; no source-level or build/test regressions were found.
+- No functional files were changed during Task 15 beyond this changelog entry.
+
+### Files
+
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.34] - 2026-06-15
+
+### Changed
+
+- **Chart dropdown layering 14.1** - Moved the chart toolbar market/coin search, timeframe selector, indicators menu, and history range picker into a shared fixed-position `DropdownPortal` so menus render above the chart canvas/overlays instead of being clipped by toolbar horizontal scrolling, chart container `overflow-hidden`, or local stacking contexts. Dropdowns still close on outside click, item selection, and Escape.
+- **Drawing text tool consolidation 14.2** - Consolidated the left drawing toolbar and Settings favorite-tool picker to a single `text` tool labeled `Text/Note`, hiding duplicate `anchoredText` and `note` choices from new UI selection while keeping `ChartOverlay` support for legacy `anchoredText`, `note`, and `text` drawings.
+- **Chart toolbar layout 14.3** - Reworked the chart toolbar row so market selector/price, timeframe, indicators/history/export, chart type, zoom, and fullscreen groups stay on a stable single row when space allows, with explicit non-stretching group behavior and horizontal toolbar overflow instead of uneven wrapping or group distortion on narrower/zoomed layouts.
+
+### Tests
+
+- `npm.cmd run typecheck` passed after 14.1 chart dropdown layering fix.
+- `npm.cmd run build` passed after 14.1 chart dropdown layering fix.
+- `npm.cmd exec vitest -- run src/features/drawing/__tests__/drawingGeometry.test.ts` passed after rerunning focused for 14.2 drawing text tool consolidation.
+- `npm.cmd run typecheck` passed after 14.2 drawing text tool consolidation.
+- `npm.cmd run build` passed after 14.2 drawing text tool consolidation.
+- `npm.cmd run typecheck` passed after 14.3 chart toolbar layout fix.
+- `npm.cmd run build` passed after 14.3 chart toolbar layout fix.
+
+### Files
+
+- `frontend/src/components/ui/DropdownPortal.tsx`
+- `frontend/src/features/chart/MarketSelector.tsx`
+- `frontend/src/features/chart/DateRangePicker.tsx`
+- `frontend/src/features/chart/CandlestickChart.tsx`
+- `frontend/src/components/layout/LeftSidebar.tsx`
+- `frontend/src/features/settings/SettingsModal.tsx`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/vi.ts`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.33] - 2026-06-15
+
+### Changed
+
+- **Frontend error normalizer foundation 12.1** - Rebuilt the shared frontend error layer in `frontend/src/utils/errors.ts` around normalized role-aware errors with standard categories (`AUTH_*`, `SETTINGS_*`, `DATA_*`, `CHART_*`, `AI_*`, `NETWORK_*`, `VALIDATION_*`, `UNKNOWN_*`), user/admin messages, retryability metadata, request IDs, sanitized endpoints, timestamps, and redacted technical details while preserving existing `AppError`, `createApiError`, `categorizeError`, and `getRoleAwareErrorMessage` exports.
+- **ErrorBoundary role-aware details 12.2** - Updated both app and root ErrorBoundary surfaces so normal users see only a generic crash message with an error code plus retry/reload actions, while admins can expand sanitized technical details and component traces. Auth now stores only a non-sensitive role snapshot for root-boundary admin detection.
+- **Auth normalized errors 12.3** - Routed auth API failures through endpoint-aware normalized errors and preserved `[AUTH_*]` short messages in the Login/Register modal without exposing raw backend JSON; existing field-level validation remains local and concise.
+- **Settings normalized errors 12.4** - Routed settings API failures through endpoint-aware normalized errors and upgraded the Settings status banner so normal users see short `[SETTINGS_*]` messages while admins can expand sanitized technical details for load/save/admin-account failures.
+- **Market/chart/data normalized errors 12.5** - Added endpoint-aware market API errors, normalized Market & News failures to `[DATA_*]` messages, normalized chart candle failures to `[CHART_*]` messages, and replaced raw chart/market console errors with sanitized dev/admin diagnostics.
+- **AI normalized errors 12.6** - Added endpoint-aware AI API errors, normalized AI Helper request failures to `[AI_*]` messages, kept provider/routing details out of normal-user warnings, and sanitized admin AI action-debug catch output.
+
+### Tests
+
+- `npm.cmd exec vitest -- run src/utils/errors.test.ts` passed after 12.1 normalizer foundation.
+- `npm.cmd run typecheck` passed after 12.1 normalizer foundation.
+- `npm.cmd run typecheck` passed after 12.2 ErrorBoundary role-based details.
+- `npm.cmd exec vitest -- run src/utils/errors.test.ts` passed after 12.3 Auth/Login normalized errors.
+- `npm.cmd run typecheck` passed after 12.3 Auth/Login normalized errors.
+- `npm.cmd run typecheck` passed after 12.4 Settings normalized errors.
+- `npm.cmd run typecheck` passed after 12.5 Market/chart/data normalized errors.
+- `npm.cmd run typecheck` passed after 12.6 AI normalized errors.
+- Final Task 12 verification passed with `npm.cmd exec vitest -- run src/utils/errors.test.ts`, `npm.cmd run typecheck`, and `npm.cmd run build`.
+
+### Files
+
+- `frontend/src/utils/errors.ts`
+- `frontend/src/utils/errors.test.ts`
+- `frontend/src/components/ErrorBoundary.tsx`
+- `frontend/src/components/ui/ErrorBoundary.tsx`
+- `frontend/src/features/auth/AuthContext.tsx`
+- `frontend/src/features/auth/AuthModal.tsx`
+- `frontend/src/services/authService.ts`
+- `frontend/src/features/settings/SettingsModal.tsx`
+- `frontend/src/services/settingsService.ts`
+- `frontend/src/services/apiClient.ts`
+- `frontend/src/features/market/components/MarketNews.tsx`
+- `frontend/src/features/chart/CandlestickChart.tsx`
+- `frontend/src/services/aiService.ts`
+- `frontend/src/features/ai/hooks/useAiChat.ts`
+- `frontend/src/features/ai/actions/AiActionProvider.tsx`
+- `frontend/src/App.tsx`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/vi.ts`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.32] - 2026-06-15
+
+### Changed
+
+- **Auth login layout 11.1** - Polished the existing Login/Register modal shell with mobile bottom-sheet behavior, dynamic viewport height, clearer mobile title/subtitle spacing, and preserved desktop two-panel structure. Affects Login and Register entry layout in `frontend/src/features/auth/AuthModal.tsx`.
+- **Auth register validation 11.2** - Added field-level validation for missing/invalid email, missing password, missing display name, missing confirm password, password length, and password mismatch, with explicit label/input associations for accessibility. Affects Login and Register form validation in `AuthModal.tsx` and auth i18n copy.
+- **Auth loading/success/error states 11.3** - Added explicit signing-in/account-creation loading copy, short success feedback before closing the modal, accessible alert/status regions, and safe fallback auth error copy so unknown backend error strings are not rendered directly to normal users. Affects Login and Register submit feedback in `AuthModal.tsx`.
+- **Authenticated header polish 11.4** - Tightened the signed-in header chip with a compact initials avatar, bounded display-name width, accessible logout label, and mobile-safe notification dropdown width so authenticated controls stay compact across responsive header wraps. Affects `frontend/src/components/layout/Header.tsx`.
+
+### Tests
+
+- `npm.cmd run typecheck` passed after 11.1 Login layout and responsive redesign.
+- `npm.cmd run typecheck` passed after 11.2 Register layout and validation.
+- `npm.cmd run typecheck` passed after 11.3 Auth loading/success/error states.
+- `npm.cmd run typecheck` passed after 11.4 Header authenticated state polish.
+- Final Task 11 verification passed with `npm.cmd run typecheck` and `npm.cmd run build`.
+
+### Files
+
+- `frontend/src/features/auth/AuthModal.tsx`
+- `frontend/src/components/layout/Header.tsx`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/vi.ts`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.31] - 2026-06-15
+
+### Changed
+
+- **Settings layout consistency 10.1** - Added tab-specific heading descriptions and a tone-aware status banner for Settings success/error/info feedback, keeping the existing Account, Notifications, Customization, AI Helper, About, Debug, and Admin Accounts tab structure intact. Affects `frontend/src/features/settings/SettingsModal.tsx` and Settings i18n copy.
+- **Settings responsive polish 10.2** - Tightened the Settings modal shell for small screens with dynamic viewport height, mobile bottom-sheet framing, safer tab overflow, non-squeezing header copy, responsive account refresh/admin search controls, and mobile-friendly select/number rows. Affects Account, Notifications, Customization, AI Helper, About, Debug, and Admin Accounts layout surfaces in `SettingsModal.tsx`.
+- **Settings loading/error/empty states 10.3** - Added dedicated settings fetch loading feedback for authenticated settings tabs, admin-account loading feedback for the Admin Accounts table, cancellable settings/admin fetch updates, and role-aware admin fetch errors through the shared Settings status banner. Affects Account, Notifications, Customization, AI Helper, and Admin Accounts in `SettingsModal.tsx`.
+- **Settings admin/debug visibility cleanup 10.4** - Added a runtime guard that returns non-admin users away from Debug/Admin Accounts if role state changes while Settings is open, and replaced About resource details that exposed local documentation paths or raw health API labels with user-facing resource copy. Affects About, Debug, and Admin Accounts in `SettingsModal.tsx`.
+
+### Tests
+
+- `npm.cmd run typecheck` passed after 10.1 Settings layout consistency.
+- `npm.cmd run typecheck` passed after 10.2 Settings responsive/mobile polish.
+- `npm.cmd run typecheck` passed after 10.3 Settings loading/error/empty states.
+- `npm.cmd run typecheck` passed after 10.4 Settings admin/debug visibility cleanup.
+- Final Task 10 verification passed with `npm.cmd run typecheck` and `npm.cmd run build`.
+
+### Files
+
+- `frontend/src/features/settings/SettingsModal.tsx`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/vi.ts`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.30] - 2026-06-15
+
+### Analysis
+
+- **Task 9 Settings/Login/Error Handling audit** - Audited the current post-`0.24.29` frontend state for `SettingsModal`, auth modal/context/service flows, settings/auth/market/news/screener/AI services, error utilities, error boundaries, shared UI components, and English/Vietnamese i18n strings.
+- **Settings audit findings** - Confirmed account/customization/about/debug/admin settings work is already present and admin/debug tabs are gated by `isAdmin`; remaining concerns are visual/status-state polish, missing dedicated settings/admin fetch loading states, shared success/error status styling, and mobile tab/content stress checks.
+- **Auth audit findings** - Confirmed `AuthModal.tsx` is the main Login/Register UI, with login/register flows through `AuthContext` and `authService`; remaining concerns are visual QA, optional stronger field-level validation, and mock-auth demo credential exposure in source comments/mock seed data.
+- **Error-handling audit findings** - Confirmed `utils/errors.ts` now provides `AppError`, `createApiError`, `categorizeError`, `getRoleAwareErrorMessage`, and sanitizer support; remaining concerns include incomplete adoption in WebSocket paths, some console logging, debug window raw error strings, and no central UI helper for rendering `AppError` by role.
+
+### Notes
+
+- No code changes were made for this audit/planning task beyond this changelog entry.
+- Frontend tests were not run because this task was read-only audit plus changelog documentation.
+
+### Files
+
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.29] - 2026-06-15
+
+### Changed
+
+- **Login/Register UI redesign** - Reworked `frontend/src/features/auth/AuthModal.tsx` into a responsive two-panel authentication modal with segmented sign-in/sign-up switching, icon-supported fields, clearer loading/error states, password guidance, and mobile-friendly spacing.
+- **Settings modal polish** - Updated `frontend/src/features/settings/SettingsModal.tsx` so the settings navigation becomes a horizontal scrollable rail on narrow screens, keeps the desktop sidebar on larger screens, tightens mobile content padding, and adds an accessible close label.
+- **Frontend role-aware error foundation** - Added structured frontend error normalization in `frontend/src/utils/errors.ts` and wired auth/settings/AI/shared API services so normal users receive short safe messages while admin/debug paths can show sanitized technical details.
+- **User-facing error surface sweep** - Updated app error boundaries, Market & News loading errors, and the system health tooltip so normal-user UI avoids raw exception text while admin-capable surfaces use sanitized diagnostics where available.
+
+### Fixed
+
+- **Normal-user error privacy** - Prevented raw auth/settings/AI API detail strings from flowing directly into normal-user auth, settings, and AI fallback surfaces.
+- **Boundary error privacy** - Replaced direct exception-message rendering in frontend error boundaries with generic recovery copy.
+
+### Tests
+
+- `npm.cmd run typecheck` passed.
+- `npm.cmd run build` passed after rerunning outside the sandbox because the sandboxed Vite build hit `EPERM` copying `public/manifest.json` into `dist/manifest.json`.
+- `npm.cmd run typecheck` passed after Settings modal polish.
+- `npm.cmd run build` passed after Settings modal polish.
+- `npm.cmd run typecheck` passed after the user-facing error surface sweep.
+- `npm.cmd run build` passed after the user-facing error surface sweep.
+
+### Files
+
+- `frontend/src/features/auth/AuthModal.tsx`
+- `frontend/src/features/auth/AuthContext.tsx`
+- `frontend/src/features/ai/hooks/useAiChat.ts`
+- `frontend/src/features/market/components/MarketNews.tsx`
+- `frontend/src/features/settings/SettingsModal.tsx`
+- `frontend/src/components/ErrorBoundary.tsx`
+- `frontend/src/components/ui/ErrorBoundary.tsx`
+- `frontend/src/components/ui/SystemHealthCard.tsx`
+- `frontend/src/services/apiClient.ts`
+- `frontend/src/services/aiService.ts`
+- `frontend/src/services/authService.ts`
+- `frontend/src/services/settingsService.ts`
+- `frontend/src/utils/errors.ts`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/vi.ts`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.28] - 2026-06-15
+
+### Verified
+
+- **Final verification Task 8** - Ran the final frontend verification pass after the Settings redesign and AI panel-orchestration work.
+- **Frontend build checks** - `npm run typecheck` passed, and `npm run build` passed after rerunning outside the sandbox because the sandboxed Vite build hit `EPERM` copying `public/manifest.json` into `dist/manifest.json`.
+- **UI smoke checks** - Verified source wiring for chart controls, indicator toggles, drawing tool registry/render paths, right-panel anchors, AI panel actions, Market & News/Screener anchors, and Settings Account/Customization/About content.
+- **Mock app smoke** - Started the frontend in `VITE_DATA_SOURCE=mock` dev mode and confirmed the app served successfully over HTTP for chart-shell verification.
+
+### Notes
+
+- Backend pytest was skipped because the current Task 5-7 worktree does not include backend changes.
+- Headless Edge screenshot capture did not produce files in this environment, so full visual click-through checks for drawing every tool, fullscreen, and browser zoom levels still need a human browser pass before release.
+
+### Files
+
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.27] - 2026-06-15
+
+### Changed
+
+- **UI orchestration 7B.4** - Updated the AI tour flow to use the new panel/app-view actions for Watchlist, Order Book, Recent Trades, Market & News, and Screener targets.
+- **Highlight/action smoke** - Verified the source anchors used by AI highlights still exist for right panel, overview, watchlist, order book, recent trades, AI panel, Market & News, and Screener.
+
+### Tests
+
+- `npm run typecheck` passed.
+- `npm run build` passed after rerunning outside the sandbox because the sandboxed build hit `EPERM` copying `public/manifest.json` into `dist/manifest.json`.
+- Source smoke checks passed for new AI action definitions, controlled right-panel state wiring, and `data-ai-section` highlight anchors.
+
+### Files
+
+- `frontend/src/features/ai/actions/AiActionProvider.tsx`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.26] - 2026-06-15
+
+### Changed
+
+- **UI orchestration 7B.3** - Added previous-UI-state capture before AI-driven panel/view navigation and a persistent user-controlled restore banner.
+- **Restore behavior** - AI no longer needs to close panels automatically after opening context; users can read the highlighted panel and choose when to return to their previous app view and right-panel tab state.
+
+### Tests
+
+- `npm run typecheck` passed.
+
+### Files
+
+- `frontend/src/features/ai/actions/AiActionProvider.tsx`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/vi.ts`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.25] - 2026-06-15
+
+### Changed
+
+- **UI orchestration 7B.2** - Added explicit AI action runtime support for opening/closing the right panel, switching right-panel tabs, and switching app views while keeping the existing layout unchanged.
+- **AI panel targeting** - Updated AI section navigation to use controlled right-panel state first, with existing custom events kept as compatibility fallback during the migration.
+
+### Tests
+
+- `npm run typecheck` passed.
+
+### Files
+
+- `frontend/src/App.tsx`
+- `frontend/src/features/ai/actions/AiActionProvider.tsx`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.24] - 2026-06-15
+
+### Changed
+
+- **UI orchestration 7B.1** - Standardized right-panel tab state by lifting the top-level `overview/aiHelper` state and the nested `watchlist/orderBook/recentTrades` state into `App.tsx`.
+- **Right panel control** - Converted `RightPanel` to receive controlled tab props while preserving existing event compatibility so current AI tour/action flows can still switch right-panel tabs during the migration.
+
+### Tests
+
+- `npm run typecheck` passed.
+
+### Files
+
+- `frontend/src/App.tsx`
+- `frontend/src/features/watchlist/components/RightPanel.tsx`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.23] - 2026-06-15
+
+### Analysis
+
+- **UI architecture analysis Task 6** - Compared two restructuring paths for LMView: moving market/context modules into a bottom dock while keeping AI on the right, versus preserving the current layout and letting AI temporarily open/switch/highlight the relevant panels.
+- **Recommendation** - Recommended the lower-risk panel-orchestration path first because `App.tsx`, `RightPanel`, and `AiActionProvider` already expose most of the needed primitives: app view switching, right-panel open state, right-panel tab events, and `data-ai-section` highlight anchors.
+- **Deferred migration** - Noted that the bottom-dock architecture remains a possible later migration, but it should wait until panel/tab state and AI restore behavior are standardized.
+
+### Tests
+
+- Not run; analysis and changelog-only task with no UI/code implementation.
+
+### Files
+
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.22] - 2026-06-15
+
+### Changed
+
+- **Settings About UI 5.3** - Redesigned the About tab into a compact responsive overview for LMView with product description, frontend/backend version fields, core feature chips, data disclaimer, resources, and system status.
+- **About system status** - Reused the existing health service to show backend status, latency, and last checked time without exposing raw debug payloads to normal users.
+- **Version metadata** - Added frontend/backend version constants in the frontend env module. Frontend version falls back to `frontend/package.json`; backend version is shown when provided by deploy env and otherwise reports unavailable.
+
+### Tests
+
+- `npm run typecheck` passed.
+- `npm run build` passed after rerunning outside the sandbox because the sandboxed build hit `EPERM` copying `public/manifest.json` into `dist/manifest.json`.
+
+### Files
+
+- `frontend/src/constants/env.ts`
+- `frontend/src/features/settings/SettingsModal.tsx`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/vi.ts`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.21] - 2026-06-15
+
+### Changed
+
+- **Settings Customization UI 5.2** - Redesigned the Customization tab around chart presets with Save/Reset controls, a lightweight chart preview, chart theme presets, candle colors, wick/border visibility, grid/crosshair controls, price/time scale controls, default chart type, and compact/comfortable layout preference.
+- **Chart preference persistence** - Added frontend settings types and defaults for chart preferences stored under `customization_defaults.drawing_defaults.chart_preferences`, preserving the existing settings API payload and providing a migration path for older settings that only had the legacy `drawing_defaults` keys.
+- **Runtime chart preset support** - Applied saved chart preferences to the chart runtime where lightweight-charts supports it: candle colors, candle wick/border visibility, grid visibility/style, crosshair mode/style, price/time label visibility, seconds visibility for 1s charts, and bar spacing.
+- **Favorite drawing tools** - Added favorite drawing tool selection in Settings and pinned saved favorites near the top of the left drawing toolbar after settings load.
+
+### Tests
+
+- `npm run typecheck` passed.
+- `npm run build` passed after rerunning outside the sandbox because the sandboxed build hit `EPERM` copying `public/manifest.json` into `dist/manifest.json`.
+
+### Files
+
+- `frontend/src/services/settingsService.ts`
+- `frontend/src/features/settings/SettingsModal.tsx`
+- `frontend/src/features/chart/CandlestickChart.tsx`
+- `frontend/src/components/layout/LeftSidebar.tsx`
+- `frontend/src/App.tsx`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/vi.ts`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.20] - 2026-06-15
+
+### Changed
+
+- **Settings Account UI 5.1** - Redesigned the Account tab into clearer cards for account overview, editable profile details, security metadata, password change, and danger-zone actions.
+- **Account metadata display** - Reused the existing auth user payload instead of adding a backend endpoint. The tab now shows display name, username, email, role, active status, member-since date, last-login date when present, and password metadata without exposing sensitive credential data.
+- **Account loading/error states** - Added an account loading card and inline auth error state, plus English/Vietnamese labels for the new Account tab copy.
+
+### Tests
+
+- `npm run typecheck` passed.
+- `npm run build` passed after rerunning outside the sandbox because the sandboxed build hit `EPERM` copying `public/manifest.json` into `dist/manifest.json`.
+
+### Files
+
+- `frontend/src/features/settings/SettingsModal.tsx`
+- `frontend/src/i18n/locales/en.ts`
+- `frontend/src/i18n/locales/vi.ts`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.19] - 2026-06-15
+
+### Fixed
+
+- **Mobile/tablet responsive 4.4** - Audited mobile/tablet support for the app shell, header controls, chart toolbar, right panel overlay behavior, and collapsed drawing toolbar. The app shell now uses dynamic viewport height for mobile browser bars.
+- **Mobile header controls** - Header action controls now wrap onto their own row on narrow mobile widths so settings/login and panel controls remain reachable instead of being pushed off-screen.
+- **Mobile chart toolbar alignment** - Chart toolbar action groups now start from the left on mobile instead of being forced to the right by desktop `ml-auto` alignment.
+
+### Checked
+
+- Edge headless screenshots were generated and visually checked for `390x844`, `430x932`, `768x900`, and `900x900` responsive layouts.
+- The final `390x844` smoke confirmed header controls, chart selector/timeframe row, chart-type controls, chart canvas, and collapsed drawing toolbar remain visible and usable.
+
+### Tests
+
+- `npm run typecheck` passed.
+- `npm run build` passed after rerunning outside the sandbox because the sandboxed build hit `EPERM` copying `public/manifest.json` into `dist/manifest.json`.
+
+### Files
+
+- `frontend/src/App.tsx`
+- `frontend/src/components/layout/Header.tsx`
+- `frontend/src/features/chart/CandlestickChart.tsx`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.18] - 2026-06-15
+
+### Fixed
+
+- **Fullscreen viewport scaling 4.3** - Audited chart fullscreen sizing and left drawing toolbar bounds. Fullscreen chart root now uses dynamic viewport height, and the drawing toolbar uses dynamic viewport height for its scroll boundary so it remains usable at higher browser scale.
+- **Browser zoom smoke** - Verified the mock-mode chart shell with Edge headless screenshots at desktop, small laptop, 125% scale stress, and tablet-ish widths. Chart toolbar wrapping, right panel width, chart canvas visibility, and collapsed drawing toolbar stayed usable in the checked screenshots.
+
+### Checked
+
+- Edge headless screenshots were generated for `1366x768`, `1280x720 @ 125% scale`, `1024x768`, and `768x900`.
+- Additional scale smoke screenshots were generated at `80%`, `90%`, `100%`, `110%`, and `125%` scale on a `1366x768` viewport.
+
+### Tests
+
+- `npm run typecheck` passed.
+- `npm run build` passed after rerunning outside the sandbox because the sandboxed build hit `EPERM` copying `public/manifest.json` into `dist/manifest.json`.
+
+### Files
+
+- `frontend/src/features/chart/CandlestickChart.tsx`
+- `frontend/src/components/layout/LeftSidebar.tsx`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.17] - 2026-06-15
+
+### Fixed
+
+- **Responsive right panel 4.2** - Audited the right panel shell, drag handle, Overview, Watchlist, Order Book, Recent Trades, and AI Helper panel. Desktop panel resizing is now clamped by viewport width and a minimum chart area so the panel cannot consume too much space on small laptops or high browser zoom.
+- **Right panel content scaling** - Reduced rigid panel minimum width, allowed watchlist filters/tabs to wrap or shrink, and added truncation/min-width guards to Order Book and Recent Trades columns.
+- **AI Helper panel scaling** - AI message bodies and the composer footer now wrap more gracefully, keeping mode controls, send hint, and send button usable in narrower panels.
+
+### Checked
+
+- Static layout constraints checked for desktop panel widths near 1024px, small laptop widths, and browser zoom stress cases where panel width plus chart area compete.
+
+### Tests
+
+- `npm run typecheck` passed.
+- `npm run build` passed after rerunning outside the sandbox because the sandboxed build hit `EPERM` copying `public/manifest.json` into `dist/manifest.json`.
+
+### Files
+
+- `frontend/src/App.tsx`
+- `frontend/src/features/watchlist/components/RightPanel.tsx`
+- `frontend/src/features/ai/components/AiAssistantPanel.tsx`
+- `frontend/src/features/market/components/OrderBook.tsx`
+- `frontend/src/features/market/components/RecentTrades.tsx`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.24.16] - 2026-06-15
+
+### Fixed
+
+- **Responsive chart toolbar 4.1** - Audited the chart selector, timeframe dropdown, indicator/date/export group, chart-type selector, and zoom/fullscreen control row. The chart toolbar now wraps instead of forcing a `min-w-max` row, keeping controls inside the chart header on small laptop widths and browser zoom levels.
+- **Chart selector scaling** - Market selector now has explicit min/max responsive width so long symbols do not force the toolbar wider than the chart area.
+- **Chart type selector overflow** - Chart-type buttons now use a wider responsive overflow container with internal horizontal scrolling, preventing the selector from crushing nearby controls at 110-125% zoom.
+
+### Checked
+
+- Static layout constraints checked for the `1024px` desktop transition, small laptop widths, and browser zoom stress cases where toolbar controls need wrapping or internal overflow.
+
+### Tests
+
+- `npm run typecheck` passed.
+- `npm run build` passed after rerunning outside the sandbox. The first sandboxed build hit `EPERM` copying `public/manifest.json` into `dist/manifest.json`; one outside-sandbox rerun built the bundle but hit a transient Windows `UV_HANDLE_CLOSING` assertion after printing `built`, and the second outside-sandbox rerun passed cleanly.
+
+### Files
+
+- `frontend/src/features/chart/CandlestickChart.tsx`
+- `frontend/src/features/chart/MarketSelector.tsx`
+- `docs/CHANGELOG.md`
+
+---
+
 ## [0.24.15] - 2026-06-14
 
 ### Fixed

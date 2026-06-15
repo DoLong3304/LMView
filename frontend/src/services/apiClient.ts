@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "@/constants/env";
+import { createApiError } from "@/utils/errors";
 
 export function buildQuery(params: Record<string, string | number | undefined | null>): string {
   const query = new URLSearchParams();
@@ -15,7 +16,8 @@ export async function apiGet<T>(path: string): Promise<T> {
     headers: { "Content-Type": "application/json" },
   });
   if (!response.ok) {
-    throw new Error(`API error ${response.status}`);
+    const payload = await response.json().catch(() => ({}));
+    throw createApiError("market", response.status, payload, { endpoint: path });
   }
   return response.json() as Promise<T>;
 }

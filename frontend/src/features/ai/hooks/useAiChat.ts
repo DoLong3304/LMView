@@ -20,6 +20,7 @@ import {
   type AISessionResponse,
 } from "@/services/aiService";
 import { getMockDataAdapter } from "@/services/dataSourceAdapter";
+import { getRoleAwareErrorMessage, sanitizeTechnicalDetails } from "@/utils/errors";
 import type {
   AiChatState,
   AiMessage,
@@ -130,6 +131,7 @@ function localInteractToolCalls(message: string, mode: AiMode): AiToolCall[] | u
 
 export function useAiChat(): UseAiChatReturn {
   const { user, isAuthenticated } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [sessions, setSessions] = useState<LocalAiHelpSession[]>([]);
@@ -308,14 +310,16 @@ export function useAiChat(): UseAiChatReturn {
               setActiveAiSessionId(user.id, nextSessionId);
             }
           } catch (apiErr) {
-            console.warn("AI API failed, using local help:", apiErr);
+            if (isAdmin || import.meta.env.DEV) {
+              console.warn("[AI] API failed, using local help:", sanitizeTechnicalDetails(apiErr));
+            }
             assistantMsg = generateLmviewHelpResponse(trimmed, context);
             assistantMsg.tool_calls = localInteractToolCalls(trimmed, mode);
             assistantMsg.warnings = [
               ...(assistantMsg.warnings || []),
-              `API unavailable - using local help mode: ${
-                apiErr instanceof Error ? apiErr.message : "unknown error"
-              }`,
+              isAdmin
+                ? `API unavailable - using local help mode: ${getRoleAwareErrorMessage(apiErr, { isAdmin: true, area: "ai" })}`
+                : "AI service is unavailable, so local help mode answered instead.",
             ];
           }
         }
@@ -325,7 +329,11 @@ export function useAiChat(): UseAiChatReturn {
         persistSession(nextMessages, trimmed, nextSessionId);
         if (isApiAi(isAuthenticated)) void refreshApiSessions(false);
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : "AI request failed";
+        const errMsg = getRoleAwareErrorMessage(err, {
+          isAdmin,
+          area: "ai",
+          fallback: "AI Helper could not complete that request. Please try again.",
+        });
         setError(errMsg);
 
         const errorMsg: AiMessage = {
@@ -345,6 +353,7 @@ export function useAiChat(): UseAiChatReturn {
     },
     [
       isAuthenticated,
+      isAdmin,
       loading,
       messages,
       mode,
