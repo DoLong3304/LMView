@@ -193,7 +193,7 @@ This writes trade, ticker, candle, and orderbook data directly to Redis as a fal
 
 ## Version
 
-Current: **v0.24.3** (see [CHANGELOG.md](docs/CHANGELOG.md))
+Current: **v0.25.36** (see [CHANGELOG.md](docs/CHANGELOG.md))
 
 ---
 
@@ -207,11 +207,11 @@ All dev services are exposed on `localhost`. **For production, set every passwor
 | **Grafana** | http://localhost:3001 | `admin` | `admin` | Change via `GRAFANA_ADMIN_PASSWORD` env. Provisioned with 22 dashboards and 48 alert rules. Alert Center: http://localhost:3001/d/phase5-alert-center |
 | **Prometheus** | http://localhost:9090 | — | — | Metrics storage; 21 scrape jobs |
 | **Loki** | http://localhost:3100 | — | — | Logs (opt-in via `--profile logging`); 7-day retention |
-| **FastAPI** (Swagger) | http://localhost:8000/docs | — | — | OpenAPI 3.1, JWT auth |
-| **Flink Web UI** | http://localhost:8082 | — | — | JobManager; 3 streaming jobs |
-| **Kafka** (Redpanda Console) | http://localhost:8080 | — | — | Broker UI; SASL = none in dev |
+| **FastAPI** (Swagger) | http://localhost:8080/docs | — | — | OpenAPI 3.1, JWT auth |
+| **Flink Web UI** | http://localhost:8081 | — | — | JobManager; 3 streaming jobs |
+| **Spark Master UI** | http://localhost:8082 | — | — | Spark Master |
 | **MinIO Console** | http://localhost:9001 | `minioadmin` | `minioadmin` | S3-compatible lakehouse storage |
-| **Trino** | http://localhost:8081 | — | — | Lakehouse SQL; 5 catalogs |
+| **Trino** | http://localhost:8083 | — | — | Lakehouse SQL; 5 catalogs |
 | **Dagster** | http://localhost:3000/dagster | — | — | Orchestration UI |
 | **PostgreSQL** | localhost:5432 | `postgres` | `postgres` | Dev database; change via `POSTGRES_PASSWORD` |
 | **Redis Sentinel** | localhost:26379 | — | `lmview_redis` | Master at localhost:6379 |
@@ -241,4 +241,4 @@ Built and maintained by D22 Fintech, PTIT students:
 
 ---
 
-Status: Active development | Version: **0.24.0**
+Status: Active development | Version: **0.25.36**

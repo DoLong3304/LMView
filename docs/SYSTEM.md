@@ -2,7 +2,7 @@
 # LMView System Documentation
 
 > Current project map for humans and coding agents.
-> Last reviewed from code: **2026-06-12**.
+> Last reviewed from code: **2026-06-16**.
 
 ---
 
@@ -24,10 +24,10 @@ Repository facts from this audit:
 - FastAPI app metadata version: `0.25.0`.
 - Frontend package version: `0.3.0`.
 - Compose source of truth: one `docker-compose.yml` with profiles.
-- Core compose services from static YAML audit: 40 concrete services plus 2 template services.
+- Core compose services from static YAML audit: 41 concrete services plus 2 template services.
 - Core profile counts from static YAML audit: 29 dev services, 36 dev+monitoring+logging services, 38 prod+monitoring+logging services.
 - Optional AI compose overlay: 4 services; `ai-api` starts 2 services, `ai-local` starts 2 services, and `ai-nlp` starts 1 FinBERT worker.
-- Python tests in source: 341 test functions across 27 files.
+- Python tests in source: 911 test functions.
 - Frontend hook specs in source: 35 `it(...)` specs across 2 files; no frontend test script is currently declared.
 
 This document describes code as it exists now.
@@ -922,12 +922,12 @@ Test directories:
 
 | Directory | Role |
 |---|---|
-| `tests/unit/` | Constants, models, auth/AI, mappers, candle service; 211 source-scanned test functions |
-| `tests/integration/` | FastAPI endpoints with mocked dependencies; 61 source-scanned test functions |
+| `tests/unit/` | Constants, models, auth/AI, mappers, candle service; 675 source-scanned test functions |
+| `tests/integration/` | FastAPI endpoints with mocked dependencies; 69 source-scanned test functions |
 | `tests/e2e/` | App route registration and OpenAPI checks; 6 source-scanned test functions |
 | `tests/security/` | Injection, validation, CORS/path checks; 18 source-scanned test functions |
 | `tests/performance/` | Aggregation, merge, conversion benchmarks; 9 source-scanned test functions |
-| `tests/ai/` | Phase 1 AI provider/RAG/prompt/safety tests; 36 source-scanned test functions |
+| `tests/ai/` | Phase 1 AI provider/RAG/prompt/safety tests; 134 source-scanned test functions |
 
 Commands:
 
@@ -954,7 +954,7 @@ Current frontend hook specs exist under `frontend/src/hooks/__tests__`, but `fro
 
 Current source test inventory:
 
-- 341 pytest test functions across 27 Python test files.
+- 911 pytest test functions across Python test files.
 - 35 frontend hook `it(...)` specs across 2 TypeScript files.
 - Frontend hook specs are source-only under `frontend/src/hooks/__tests__`; `frontend/package.json` has no `test` script and no explicit Jest/Vitest dependency.
 
@@ -967,7 +967,7 @@ Local verification state:
 
 ## 15. AI Current State
 
-Current AI state is **0.24 centralized Ask/Interact orchestration**.
+Current AI state is **0.25 centralized Ask/Interact orchestration**.
 
 ### Backend AI Package
 
@@ -991,7 +991,7 @@ Current AI state is **0.24 centralized Ask/Interact orchestration**.
 | Agent state | `ai_service/agents/state.py` | `AgentState` TypedDict with ~30 typed fields for graph execution |
 | Agent types | `ai_service/agents/types.py` | `ExpertOutput`, `IntentClassification`, `IntentCategory`, `ExpertName`, `ValidationResult` |
 | Intent router | `ai_service/agents/intent_router.py` | Hybrid rule-based + LLM fallback intent classification with multi-intent detection |
-| Expert base | `ai_service/agents/experts/base.py` | `BaseExpert` ABC with `safe_execute()`, timeout, and structured output |
+| Expert base | `ai_service/agents/base_expert.py` | `BaseExpert` ABC with `safe_execute()`, timeout, and structured output |
 | TA expert | `ai_service/agents/experts/technical_analysis.py` | RSI/MACD/SMA/Bollinger signal extraction from chart context |
 | Market expert | `ai_service/agents/experts/market_data.py` | Ticker/orderbook/trades data extraction with provenance |
 | News expert | `ai_service/agents/experts/news_sentiment.py` | News/sentiment data assembly; reads FinBERT cache |
@@ -1116,13 +1116,13 @@ REDIS KEY FAMILIES
 | Binance → Producer | Binance WS | ~50-200ms | `src/producer/main.py` |
 | Producer → Kafka | `send_to_kafka()` | ~5-50ms | `src/producer/main.py` |
 | Kafka → Flink | Flink consumer (latest-offset) | ~100-500ms | `src/processing/pipeline.py` |
-| Flink → Redis | `KeyDBWriter._flush()` BATCH | **500ms** | `src/processing/writers/keydb_kline.py:27` |
+| Flink → Redis | `KeyDBWriter._flush()` BATCH | **100ms** | `src/processing/writers/keydb_kline.py:49` |
 | Producer → Redis (trade) | DirectRedisWriter | ~50ms | `src/exchanges/binance/redis_writer.py` |
 | Redis → WebSocket | 50ms poll | 50ms | `backend/api/websocket.py` |
 | WebSocket → Frontend | HTTP/WS | ~10-30ms | nginx proxy |
 | Frontend render | `series.update()` | ~16ms | browser 60fps |
 
-**Bottleneck**: Flink `FLUSH_INTERVAL = 0.5` (500ms batch delay before Redis write).
+**Bottleneck**: Flink `FLUSH_INTERVAL = 0.1` (100ms batch delay before Redis write).
 **Primary price source**: `trade:latest` Redis sorted set (updated per-trade by producer).
 
 ### Frontend Price Sources
@@ -1131,13 +1131,13 @@ The frontend has **5 potential price sources**:
 
 | Source | Redis Key | Update | Location | Used For |
 |---|---|---|---|---|
-| App.tsx ticker state | `ticker:latest:{ex}:{sym}` | 5s REST poll | `App.tsx:182-215` | Watchlist, toolbar |
+| App.tsx ticker state | `ticker:latest:{ex}:{sym}` | 30s REST poll | `App.tsx:182-215` | Watchlist, toolbar |
 | Chart WebSocket | `candle:1s:{ex}:{sym}` | 50ms WS poll | `CandlestickChart.tsx` | Chart candles |
 | Trade merge | `trade:latest:{ex}:{sym}` | 50ms WS poll | `websocket.py:151` | Real-time OHLCV |
 | Ticker REST API | `ticker:latest:{ex}:{sym}` | on-demand | `marketDataService.ts` | Direct calls |
 | Indicator stream | `indicator:latest:{ex}:{sym}:{iv}` | 50ms WS poll | `marketDataService.ts` | Indicators |
 
-**Critical issue**: App.tsx and Chart use **different price sources** with **different update rates**, causing toolbar-chart desync.
+**Critical issue**: App.tsx and Chart historically used **different price sources** with **different update rates**, causing toolbar-chart desync. (Mitigated in v0.25.0 using shared WS map).
 
 ### Known Price Desync Causes
 
@@ -1146,8 +1146,8 @@ The frontend has **5 potential price sources**:
 | 1 | Multiple independent price sources (ticker hash vs candle ZSET vs trade ZSET) | CRITICAL | `App.tsx:182`, `websocket.py:151` |
 | 2 | WebSocket trade merge uses stale base candle from Redis | CRITICAL | `websocket.py:174-197` |
 | 3 | Flink 1m aggregator forward-fills close price instead of actual | HIGH | `kline_aggregator.py:127` |
-| 4 | Flink flush interval 500ms (batch delay before Redis) | HIGH | `keydb_kline.py:27` |
-| 5 | App.tsx 5s ticker poll vs Chart 50ms WebSocket poll | HIGH | `App.tsx:215` |
+| 4 | Flink flush interval 100ms (batch delay before Redis) | MODERATE | `keydb_kline.py:49` |
+| 5 | App.tsx 30s ticker poll vs Chart 50ms WebSocket poll | MITIGATED | `App.tsx:215` |
 | 6 | Producer ticker throttle 30s (heartbeat interval) | MEDIUM | `main.py:125` |
 | 7 | Flink `latest-offset` = no historical data on restart | MEDIUM | `pipeline.py:122` |
 

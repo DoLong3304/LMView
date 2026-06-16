@@ -1,95 +1,6 @@
-# Knowledge Base Registry - LMView
-#
-# Production RAG may ingest/retrieve only entries with:
-# review_status: approved
-# allowed_for_rag: true
-#
-# Current bundled notes were AI-generated and have no verified human review
-# metadata, so they are demoted to pending and unavailable to production RAG.
-
 schema_version: "2.0.0"
 
 sources:
-  - source_id: lmview-platform
-    title: LMView Platform Documentation
-    description: How to use LMView features, capabilities, and limitations.
-    domain: project
-    language: en
-    source_type: system_doc
-    credibility_level: draft
-    review_status: pending
-    reviewer: null
-    reviewed_date: null
-    lmview_version_scope: "0.18.0-0.23.x"
-    source_urls: []
-    tags: [lmview, platform, features, tutorial]
-    allowed_for_rag: false
-    file_path: pending/lmview_platform_guide.md
-
-  - source_id: technical-analysis
-    title: Technical Analysis Fundamentals
-    description: Educational notes on technical indicators, chart patterns, and analysis methods.
-    domain: technical_analysis
-    language: en
-    source_type: technical_note
-    credibility_level: draft
-    review_status: pending
-    reviewer: null
-    reviewed_date: null
-    lmview_version_scope: "0.18.0-0.23.x"
-    source_urls: []
-    tags: [indicators, patterns, analysis, education]
-    allowed_for_rag: false
-    file_path: pending/technical_analysis_fundamentals.md
-
-  - source_id: crypto-market-structure
-    title: Cryptocurrency Market Structure
-    description: Notes on crypto market mechanics, order types, exchanges, and market dynamics.
-    domain: market_microstructure
-    language: en
-    source_type: market_structure
-    credibility_level: draft
-    review_status: pending
-    reviewer: null
-    reviewed_date: null
-    lmview_version_scope: "0.18.0-0.23.x"
-    source_urls: []
-    tags: [crypto, market, microstructure, exchanges]
-    allowed_for_rag: false
-    file_path: pending/crypto_market_structure.md
-
-  - source_id: risk-management
-    title: Risk Management and Position Sizing
-    description: Educational notes on risk management, position sizing, and portfolio concepts.
-    domain: finance_risk
-    language: en
-    source_type: risk_management
-    credibility_level: draft
-    review_status: pending
-    reviewer: null
-    reviewed_date: null
-    lmview_version_scope: "0.18.0-0.23.x"
-    source_urls: []
-    tags: [risk, management, position, sizing]
-    allowed_for_rag: false
-    file_path: pending/risk_management.md
-
-  - source_id: bilingual-glossary
-    title: Bilingual Crypto and Trading Glossary
-    description: English/Vietnamese glossary of crypto and trading terms.
-    domain: glossary
-    language: en
-    source_type: glossary
-    credibility_level: draft
-    review_status: pending
-    reviewer: null
-    reviewed_date: null
-    lmview_version_scope: "0.18.0-0.23.x"
-    source_urls: []
-    tags: [glossary, bilingual, vietnamese, english]
-    allowed_for_rag: false
-    file_path: pending/bilingual_glossary.md
-
   - source_id: lmview-ai-grounding
     title: LMView AI Grounding — Platform Architecture & Capabilities
     description: Approved canonical notes on LMView architecture, features, data freshness, and limitations for AI grounding.
@@ -99,8 +10,8 @@ sources:
     credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-12"
-    lmview_version_scope: "0.24.x"
+    reviewed_date: "2026-06-16"
+    lmview_version_scope: "0.25.x"
     source_urls: []
     tags: [lmview, architecture, capabilities, grounding, ai]
     allowed_for_rag: true
@@ -116,10 +27,146 @@ sources:
     credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-12"
-    lmview_version_scope: "0.24.x"
+    reviewed_date: "2026-06-16"
+    lmview_version_scope: "0.25.x"
     source_urls: []
     tags: [lmview, caveats, limitations, data, freshness, safety]
     allowed_for_rag: true
     file_path: approved/lmview_data_caveats.md
+    internal_only: false
+
+  - source_id: crypto-fundamentals
+    title: Cryptocurrency Fundamentals
+    description: Standardized basic knowledge about crypto assets, exchanges, and markets.
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-16"
+    lmview_version_scope: "0.25.x"
+    source_urls: []
+    tags: [crypto, fundamentals, education]
+    allowed_for_rag: true
+    file_path: approved/Crypto_Fundamentals.md
+    internal_only: false
+
+  - source_id: derivatives-leverage
+    title: Derivatives and Leverage in Crypto Trading
+    description: Explains the crypto derivatives market, perpetual futures, and leverage risks.
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-16"
+    lmview_version_scope: "0.25.x"
+    source_urls: []
+    tags: [derivatives, leverage, risks]
+    allowed_for_rag: true
+    file_path: approved/Derivatives_and_Leverage.md
+    internal_only: false
+
+  - source_id: financial-risk
+    title: General Financial Knowledge and Risk
+    description: Standardize concepts of risk/reward, position sizing, and risk exposure.
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-16"
+    lmview_version_scope: "0.25.x"
+    source_urls: []
+    tags: [finance, risk, sizing]
+    allowed_for_rag: true
+    file_path: approved/General_Financial_Knowledge_and_Risk.md
+    internal_only: false
+
+  - source_id: market-microstructure
+    title: Market Microstructure in Crypto Trading
+    description: Explains how orders are placed, matched, and how to read order book data.
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-16"
+    lmview_version_scope: "0.25.x"
+    source_urls: []
+    tags: [market, microstructure, orderbook]
+    allowed_for_rag: true
+    file_path: approved/Market_Microstructure.md
+    internal_only: false
+
+  - source_id: technical-analysis
+    title: Technical Analysis Crypto
+    description: Technical analysis fundamentals in crypto.
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-16"
+    lmview_version_scope: "0.25.x"
+    source_urls: []
+    tags: [ta, technical, analysis]
+    allowed_for_rag: true
+    file_path: approved/Technical_Analysis.md
+    internal_only: false
+
+  - source_id: lmview-drawing-tools
+    title: LMView Drawing Tools Usage
+    description: Instructions on using the available drawing tools on LMView.
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-16"
+    lmview_version_scope: "0.25.x"
+    source_urls: []
+    tags: [drawing, tools, usage]
+    allowed_for_rag: true
+    file_path: approved/LMView_Drawing_Tools_Usage.md
+    internal_only: false
+
+  - source_id: lmview-ai-usage
+    title: LMView AI Usage
+    description: Explanation of the LMView AI Assistant Ask Mode and Interact Mode.
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-16"
+    lmview_version_scope: "0.25.x"
+    source_urls: []
+    tags: [ai, assistant, interact, ask, usage]
+    allowed_for_rag: true
+    file_path: approved/LMView_AI_Usage.md
+    internal_only: false
+
+  - source_id: bilingual-glossary
+    title: Bilingual Crypto and Trading Glossary
+    description: English/Vietnamese glossary of crypto and trading terms.
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-16"
+    lmview_version_scope: "0.25.x"
+    source_urls: []
+    tags: [glossary, bilingual, vietnamese, english]
+    allowed_for_rag: true
+    file_path: approved/Bilingual_Glossary.md
     internal_only: false

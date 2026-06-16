@@ -1226,7 +1226,7 @@ services:
       KLINE_INTERVAL: "1s"
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
       ENABLE_OKX: "false"
-      ENABLE_DIRECT_REDIS: "true"
+      ENABLE_DIRECT_REDIS: "false"
     volumes:
       - ./:/app
     networks:

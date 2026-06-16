@@ -1,7 +1,7 @@
 # LMView AI Grounding — Platform Architecture & Capabilities
 
 > **Metadata**: `review_status: approved` | `allowed_for_rag: true` | `internal_only: false`
-> **Version scope**: 0.24.x | **Last reviewed**: 2026-06-12
+> **Version scope**: 0.25.x | **Last reviewed**: 2026-06-16
 
 ---
 
