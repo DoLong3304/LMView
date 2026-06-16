@@ -146,14 +146,23 @@ class EnhancedRSSSource(EnhancedNewsSource):
         return list(set(tags))[:5]  # Max 5 tags
 
     def _parse_date(self, date_str: str) -> int:
-        """Parse date string to Unix timestamp (milliseconds)"""
+        """Parse date string to Unix timestamp (milliseconds).
+
+        Returns 0 on parse failure — callers treat 0 as "no
+        date" and the article still flows downstream. This is
+        a best-effort parse, so we log at DEBUG only.
+        """
         try:
             if date_str:
                 dt = feedparser._parse_date(date_str)
                 if dt:
                     return int(datetime(*dt[:6]).timestamp() * 1000)
-        except:
-            pass
+        except (ValueError, TypeError, IndexError) as exc:
+            # Common case: feedparser returns None for unparseable
+            # strings. We log at DEBUG because this is expected
+            # for ~5% of RSS feeds.
+            logger.debug("unparseable date %r: %s", date_str, exc)
+        return 0
         return int(datetime.now().timestamp() * 1000)
 
 

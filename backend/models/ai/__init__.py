@@ -49,6 +49,11 @@ from backend.models.ai.evals import (
     EvalResult,
     EvalSuiteResult,
 )
+from backend.models.ai.agents import (
+    AgentExecutionSummary,
+    ExpertRunSummary,
+    AgentExecutionDetail,
+)
 
 __all__ = [
     # Chat / Session
@@ -90,4 +95,8 @@ __all__ = [
     "GoldenQuestion",
     "EvalResult",
     "EvalSuiteResult",
+    # Agents
+    "AgentExecutionSummary",
+    "ExpertRunSummary",
+    "AgentExecutionDetail",
 ]

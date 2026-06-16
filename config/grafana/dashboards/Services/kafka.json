@@ -1,0 +1,120 @@
+{
+  "annotations": {"list": []},
+  "description": "Kafka broker overview: brokers, topics, partitions, consumer lag",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {"title": "Application Logs", "url": "/d/phase5-logs-kafka", "type": "link", "asDropdown": false, "includeVars": false, "keepTime": true, "tags": ["logs"]}
+  ],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Brokers Up",
+      "id": 1,
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "none", "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "yellow", "value": 2}, {"color": "green", "value": 3}]}}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "kafka_brokers", "refId": "A"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Total Topics",
+      "id": 2,
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "none"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "count(count by (topic) (kafka_topic_partition_current_offset))", "refId": "A"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Total Partitions",
+      "id": 3,
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "none"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(kafka_topic_partitions)", "refId": "A"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Under-replicated Partitions",
+      "id": 4,
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "none", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 1}, {"color": "red", "value": 5}]}}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(kafka_topic_partition_under_replicated_partition)", "refId": "A"}
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Consumer Group Lag (top 10)",
+      "id": 5,
+      "gridPos": {"h": 10, "w": 12, "x": 0, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "lag", "desc": true}], "sortDesc": true},
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "lag"}, "properties": [
+            {"id": "displayName", "value": "Lag (msg)"},
+            {"id": "unit", "value": "none"},
+            {"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "yellow", "value": 100}, {"color": "red", "value": 10000}]}},
+            {"id": "custom.cellOptions", "value": {"type": "color-background"}}
+          ]}
+        ]
+      },
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "topk(10, sum by (consumergroup, topic) (kafka_consumergroup_lag))", "format": "table", "instant": true, "refId": "A"}
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Topic Offsets (top 15 by lag)",
+      "id": 6,
+      "gridPos": {"h": 10, "w": 12, "x": 12, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "partition_lag", "desc": true}], "sortDesc": true},
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}}}
+      },
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "topk(15, kafka_consumergroup_lag)", "format": "table", "instant": true, "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Total Consumer Lag (all groups)",
+      "id": 7,
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 15},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "sum(kafka_consumergroup_lag_sum)", "legendFormat": "total lag", "refId": "A"}
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["services", "kafka"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Service / Kafka",
+  "uid": "phase5-services-kafka",
+  "version": 1,
+  "weekStart": ""
+}

@@ -1,0 +1,117 @@
+{
+  "annotations": {"list": []},
+  "description": "Trino query engine (JVM-only metrics available; for query activity see fastapi dashboard)",
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [
+    {"title": "Application Logs", "url": "/d/phase5-logs-trino", "type": "link", "asDropdown": false, "includeVars": false, "keepTime": true, "tags": ["logs"]}
+  ],
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Trino Up",
+      "id": 1,
+      "gridPos": {"h": 5, "w": 6, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"mappings": [{"options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}, "type": "value"}]}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "up{job=\"trino\"}", "refId": "A"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Live Threads",
+      "id": 2,
+      "gridPos": {"h": 5, "w": 6, "x": 6, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "none"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "jvm_threads_live_threads{job=\"trino\"}", "refId": "A"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Scrape Duration",
+      "id": 3,
+      "gridPos": {"h": 5, "w": 6, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "scrape_duration_seconds{job=\"trino\"}", "refId": "A"}
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Scrape Series",
+      "id": 4,
+      "gridPos": {"h": 5, "w": 6, "x": 18, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "value", "colorMode": "value", "graphMode": "area"},
+      "fieldConfig": {"defaults": {"unit": "none"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "scrape_samples_scraped{job=\"trino\"}", "refId": "A"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "JVM Memory (Heap Used vs Max)",
+      "id": 5,
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "fieldConfig": {"defaults": {"unit": "bytes", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "jvm_memory_bytes_used{job=\"trino\",area=\"heap\"}", "legendFormat": "heap used", "refId": "A"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "jvm_memory_bytes_max{job=\"trino\",area=\"heap\"}", "legendFormat": "heap max", "refId": "B"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "JVM GC Collection Time",
+      "id": 6,
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 5},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi"}},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "rate(jvm_gc_collection_seconds_sum{job=\"trino\"}[1m])", "legendFormat": "gc time/s", "refId": "A"}
+      ]
+    },
+    {
+      "type": "table",
+      "title": "JVM Memory Pool Usage (top 8)",
+      "id": 7,
+      "gridPos": {"h": 10, "w": 24, "x": 0, "y": 13},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "options": {"showHeader": true, "sortBy": [{"displayName": "used_bytes", "desc": true}], "sortDesc": true},
+      "fieldConfig": {
+        "defaults": {"custom": {"align": "auto", "cellOptions": {"type": "auto"}}},
+        "overrides": [
+          {"matcher": {"id": "byName", "options": "used_bytes"}, "properties": [
+            {"id": "displayName", "value": "Used (bytes)"},
+            {"id": "unit", "value": "bytes"}
+          ]}
+        ]
+      },
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "expr": "topk(8, jvm_memory_pool_bytes_used{job=\"trino\"})", "format": "table", "instant": true, "refId": "A"}
+      ]
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 38,
+  "tags": ["services", "trino"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Service / Trino",
+  "uid": "phase5-services-trino",
+  "version": 1,
+  "weekStart": ""
+}

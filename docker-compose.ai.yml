@@ -4,11 +4,12 @@
 # Profiles:
 #   ai-api:   AI service using online APIs through LiteLLM (no GPU required)
 #   ai-local: AI service using local vLLM (GPU required)
+#   ai-nlp:   FinBERT sentiment analysis worker (GPU optional, CPU fallback)
 #
 # Core LMView runs without GPU. GPU is only required by ai-local profile.
 
 services:
-  # ── AI Service (API mode) ─────────────────────────────────────────────
+  # 🤖 AI Service (API mode) ─────────────────────────────────────────────
   # Connects to core FastAPI backend for AI inference using online APIs.
   # No GPU required.
   ai-service:
@@ -20,10 +21,9 @@ services:
       - .:/app:ro
     environment:
       - AI_MODE=${AI_MODE:-api}
-      - AI_ENABLE_REAL_LLM=${AI_ENABLE_REAL_LLM:-true}
+      - AI_ORCHESTRATION=${AI_ORCHESTRATION:-langgraph}
       - AI_ENABLE_RAG=${AI_ENABLE_RAG:-true}
-      - QWEN_API_KEY=${QWEN_API_KEY:-}
-      - LLAMA_API_KEY=${LLAMA_API_KEY:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
@@ -37,12 +37,12 @@ services:
       - POSTGRES_LMVIEW_DB=${POSTGRES_LMVIEW_DB:-iceberg_catalog}
     # TODO: Replace with actual service startup command when ai_service/app/main.py
     # is implemented as a standalone FastAPI server.
-    command: ["echo", "AI service scaffolded — Phase 1 runs embedded in core backend"]
+    command: ["echo", "AI service scaffolded — Phase 2 runs embedded in core backend"]
     mem_limit: 2g
     restart: "no"
 
-  # ── LiteLLM Proxy ────────────────────────────────────────────────────
-  # Unified LLM API proxy. Routes to configured providers.
+  # 🔗 LiteLLM Proxy ────────────────────────────────────────────────────
+  # Unified LLM API proxy. Routes to configured providers with fallback.
   litellm:
     image: ghcr.io/berriai/litellm:main-latest
     profiles: ["ai-api"]
@@ -51,8 +51,7 @@ services:
       - "4000:4000"
     environment:
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master}
-      - QWEN_API_KEY=${QWEN_API_KEY:-}
-      - LLAMA_API_KEY=${LLAMA_API_KEY:-}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
@@ -67,7 +66,7 @@ services:
       retries: 3
     restart: unless-stopped
 
-  # ── vLLM Local Inference ──────────────────────────────────────────────
+  # 🧠 vLLM Local Inference ─────────────────────────────────────────────
   # Local model inference server. Requires NVIDIA GPU.
   vllm:
     image: vllm/vllm-openai:latest
@@ -88,6 +87,12 @@ services:
       - "${VLLM_GPU_MEMORY_UTILIZATION:-0.85}"
       - "--max-model-len"
       - "16384"
+      - "--served-model-name"
+      - "qwen-local"
+      - "--trust-remote-code"
+      - "--enable-auto-tool-choice"
+      - "--tool-call-parser"
+      - "hermes"
     deploy:
       resources:
         reservations:
@@ -98,13 +103,54 @@ services:
     mem_limit: 16g
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
+      interval: 15s
+      timeout: 5s
       retries: 5
+      start_period: 120s
     restart: unless-stopped
     volumes:
       - vllm-cache:/root/.cache
 
+  # 📰 FinBERT NLP Worker ───────────────────────────────────────────────
+  # Background worker that processes news articles with FinBERT sentiment
+  # analysis. GPU optional — auto-detects and falls back to CPU.
+  finbert-worker:
+    image: python:3.11-slim
+    profiles: ["ai-nlp"]
+    container_name: lmview-finbert-worker
+    working_dir: /app
+    volumes:
+      - .:/app:ro
+      - finbert-cache:/root/.cache/huggingface
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-iceberg}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_LMVIEW_DB=${POSTGRES_LMVIEW_DB:-iceberg_catalog}
+      - FINBERT_DEVICE=${FINBERT_DEVICE:-auto}
+      - FINBERT_PROCESS_INTERVAL=${FINBERT_PROCESS_INTERVAL:-300}
+      - FINBERT_BATCH_SIZE=${FINBERT_BATCH_SIZE:-32}
+    command:
+      - "bash"
+      - "-c"
+      - |
+        pip install --quiet asyncpg transformers torch --extra-index-url https://download.pytorch.org/whl/cpu &&
+        python -m ai_service.nlp.news_processor
+    mem_limit: 4g
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/finbert_healthy || exit 1"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   vllm-cache:
+    driver: local
+  finbert-cache:
     driver: local

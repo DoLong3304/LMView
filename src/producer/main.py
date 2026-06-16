@@ -47,16 +47,39 @@ from common.config import (
 )
 from common.avro_serializer import AvroSerializer
 from common.kafka_client import flush_and_close, init_producer, send_to_kafka
-from common.logging import setup_logging
+from common.logging import setup_logging_from_env
 from exchanges.base import ExchangeClient
 from exchanges.binance.client import BinanceClient
 from exchanges.binance.redis_writer import get_direct_writer
 from exchanges.okx.client import OKXClient
 from producer.health_monitor import HealthMonitor
+from producer.metrics import (
+    DEDUP_DUPLICATES_SKIPPED,
+    DEDUP_MESSAGES_FORWARDED,
+    DEDUP_STATE_SIZE,
+    EXCHANGE_MESSAGES_RECEIVED,
+    EXCHANGE_WS_CONNECTED,
+    HEARTBEAT_TIMESTAMP,
+    HEARTBEAT_TIMESTAMP as PROD_HEARTBEAT,
+    RECONNECT_BACKOFF_SECONDS,
+    init_metrics,
+    record_dedup_decision,
+    record_exchange_message,
+    record_exchange_ws_state,
+    record_reconnect_backoff,
+)
 
 log = logging.getLogger(__name__)
 
 # ── Per-symbol dedup state for ticker throttling ─────────────────────────────
+# B1 fix (race condition): the dicts are read+written from multiple
+# WebSocket threads. The compound check-then-set in ``handle_ticker_message``
+# is not atomic under Python's GIL when more than one statement touches
+# the dict, so we wrap all access in a single ``threading.Lock``. The
+# critical section is short (a few dict reads and writes) so contention
+# is negligible compared to the network round-trip that follows.
+import threading
+_dedup_lock = threading.Lock()
 _last_close: dict[str, float] = {}
 _last_sent_ts: dict[str, float] = {}
 
@@ -78,11 +101,8 @@ KAFKA_SEND_ERRORS = Counter(
     "Total Kafka send errors",
     ["topic"],
 )
-HEARTBEAT_TIMESTAMP = Gauge(
-    "producer_heartbeat_timestamp_seconds",
-    "Unix timestamp of last heartbeat per thread",
-    ["thread"],
-)
+# HEARTBEAT_TIMESTAMP is defined in producer.metrics and re-exported from
+# there to keep all producer-level Prometheus metrics in a single place.
 WS_RECONNECT_COUNT = Counter(
     "producer_ws_reconnects_total",
     "Total WebSocket reconnection attempts",
@@ -122,6 +142,9 @@ def handle_ticker_message(message: str, client: ExchangeClient) -> None:
 
     now = time.monotonic()
     sent_change = sent_heartbeat = skipped = 0
+    exchange_name = getattr(client, "name", "unknown")
+
+    record_exchange_message(exchange=exchange_name, stream="ticker", n=len(batch))
 
     for raw in batch:
         symbol = raw.get("s", "")
@@ -129,15 +152,19 @@ def handle_ticker_message(message: str, client: ExchangeClient) -> None:
             continue
 
         cur = float(raw.get("c", 0))
-        price_changed = _last_close.get(symbol) != cur
-        heartbeat_due = (now - _last_sent_ts.get(symbol, 0)) >= TICKER_HEARTBEAT_SEC
+        # B1 fix: take the lock for the entire check-then-set so two
+        # threads cannot both decide to forward the same symbol's update
+        # when the price changed between their reads.
+        with _dedup_lock:
+            price_changed = _last_close.get(symbol) != cur
+            heartbeat_due = (now - _last_sent_ts.get(symbol, 0)) >= TICKER_HEARTBEAT_SEC
 
-        if not price_changed and not heartbeat_due:
-            skipped += 1
-            continue
+            if not price_changed and not heartbeat_due:
+                skipped += 1
+                continue
 
-        _last_close[symbol] = cur
-        _last_sent_ts[symbol] = now
+            _last_close[symbol] = cur
+            _last_sent_ts[symbol] = now
         try:
             send_to_kafka(KAFKA_TOPIC_TICKER, client.map_ticker(raw), avro_serializer)
             KAFKA_MESSAGES_SENT.labels(topic=KAFKA_TOPIC_TICKER).inc()
@@ -146,11 +173,13 @@ def handle_ticker_message(message: str, client: ExchangeClient) -> None:
             log.error("[TICKER] Kafka send error: %s", e)
 
         # Direct Redis bypass (auto-enabled when Kafka/Flink down)
+        destination = "kafka"
         if health_monitor.is_direct_redis_active():
             try:
                 direct_writer = get_direct_writer()
                 mapped = client.map_ticker(raw)
                 direct_writer.write_ticker("binance", mapped.get("symbol", ""), mapped)
+                destination = "direct_redis"
             except Exception as e:
                 log.error("[DirectRedis/ticker] write error: %s", e)
 
@@ -168,22 +197,36 @@ def handle_ticker_message(message: str, client: ExchangeClient) -> None:
     if skipped > 0:
         TICKER_THROTTLE_SKIPPED.inc(skipped)
 
+    # New extended metrics: track dedup decisions per exchange
+    record_dedup_decision(
+        exchange=exchange_name,
+        skipped=skipped,
+        forwarded=total_sent,
+        destination=destination,
+    )
+    DEDUP_STATE_SIZE.set(len(_last_close))
+
 
 def run_ticker_stream(client: ExchangeClient) -> None:
     """Connect to the all-ticker WebSocket and stream indefinitely."""
     url = client.build_ticker_stream_url()
     attempt = 0
     worker_name = threading.current_thread().name
+    exchange_name = getattr(client, "name", "unknown")
     while True:
         _heartbeat(worker_name)
         try:
             ws = websocket.WebSocketApp(
                 url,
-                on_open=lambda ws: log.info("[TICKER] WebSocket opened."),
+                on_open=lambda ws: (
+                    log.info("[TICKER] WebSocket opened."),
+                    record_exchange_ws_state(exchange=exchange_name, stream="ticker", connected=True),
+                ),
                 on_message=lambda ws, msg: handle_ticker_message(msg, client),
                 on_error=lambda ws, err: log.error("[TICKER] Error: %s", err),
-                on_close=lambda ws, code, msg: log.warning(
-                    "[TICKER] Closed. code=%s msg=%s", code, msg
+                on_close=lambda ws, code, msg: (
+                    log.warning("[TICKER] Closed. code=%s msg=%s", code, msg),
+                    record_exchange_ws_state(exchange=exchange_name, stream="ticker", connected=False),
                 ),
             )
             log.info("[TICKER] Connecting to %s", url)
@@ -192,6 +235,7 @@ def run_ticker_stream(client: ExchangeClient) -> None:
             delay = _compute_backoff(1.0, attempt)
             log.warning("[TICKER] Dropped. Reconnecting in %.1fs...", delay)
             WS_RECONNECT_COUNT.labels(stream="ticker").inc()
+            record_reconnect_backoff(exchange=exchange_name, stream="ticker", sleep_sec=delay)
             time.sleep(delay)
         except Exception as e:
             attempt += 1
@@ -558,7 +602,25 @@ def _register_thread(name: str, target, *args) -> None:
 def run_streams(client: ExchangeClient) -> None:
     """Spawn all WebSocket stream threads for a given exchange client."""
     is_subscription = hasattr(client, "uses_subscription_frames") and client.uses_subscription_frames
-    symbols = client.fetch_symbols()[:MAX_SYMBOLS]
+
+    # P0 fix: use top-by-volume selection when available (Binance). This
+    # replaces the previous alphabetical ``fetch_symbols()[:N]`` which was
+    # missing 116/200 high-volume symbols (SOL, XRP, PEPE, SUI, TON, etc.).
+    # Falls back to alphabetical only if the volume fetch is unavailable
+    # (e.g. OKX which doesn't expose the same 24h ticker endpoint).
+    if hasattr(client, "fetch_top_symbols_by_volume"):
+        symbols = client.fetch_top_symbols_by_volume("USDT", MAX_SYMBOLS)
+        log.info(
+            "Symbol universe: top %d by 24h volume (P0 fix active)",
+            len(symbols),
+        )
+    else:
+        symbols = client.fetch_symbols()[:MAX_SYMBOLS]
+        log.warning(
+            "Symbol universe: top %d by alphabetical sort (no volume API). "
+            "This misses high-volume symbols.",
+            len(symbols),
+        )
 
     # For OKX, filter to well-known pairs and adjust interval
     kline_interval = KLINE_INTERVAL_WS
@@ -678,7 +740,7 @@ def run_streams(client: ExchangeClient) -> None:
 
 def run() -> None:
     """Main entry point."""
-    setup_logging("producer")
+    setup_logging_from_env()
 
     log.info("=" * 60)
     log.info("Multi-Exchange Producer starting...")
@@ -693,6 +755,19 @@ def run() -> None:
     metrics_port = int(os.getenv("PRODUCER_METRICS_PORT", "9090"))
     start_http_server(metrics_port)
     log.info("Prometheus metrics server started on :%d", metrics_port)
+
+    # Start a second metrics endpoint on a dedicated port for the extended
+    # Prometheus job (config/prometheus.yml 'producer-extended' scrape job).
+    try:
+        extended_port = int(os.getenv("PRODUCER_EXT_METRICS_PORT", "9091"))
+        if extended_port != metrics_port:
+            start_http_server(extended_port)
+            log.info("Producer extended metrics on :%d", extended_port)
+    except OSError as e:
+        log.warning("Could not bind extended metrics port: %s", e)
+
+    # Initialise extended metrics gauges
+    init_metrics()
 
     init_producer()
 

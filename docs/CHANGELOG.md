@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.37] - 2026-06-16
+## [0.25.36] - 2026-06-16
 
 ### Changed
 
@@ -34,7 +34,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.36] - 2026-06-15
+## [0.25.35] - 2026-06-15
 
 ### Changed
 
@@ -66,7 +66,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.35] - 2026-06-15
+## [0.25.34] - 2026-06-15
 
 ### Verified
 
@@ -91,7 +91,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.34] - 2026-06-15
+## [0.25.33] - 2026-06-15
 
 ### Changed
 
@@ -123,7 +123,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.33] - 2026-06-15
+## [0.25.32] - 2026-06-15
 
 ### Changed
 
@@ -170,7 +170,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.32] - 2026-06-15
+## [0.25.31] - 2026-06-15
 
 ### Changed
 
@@ -197,7 +197,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.31] - 2026-06-15
+## [0.25.30] - 2026-06-15
 
 ### Changed
 
@@ -223,7 +223,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.30] - 2026-06-15
+## [0.25.29] - 2026-06-15
 
 ### Analysis
 
@@ -243,7 +243,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.29] - 2026-06-15
+## [0.25.28] - 2026-06-15
 
 ### Changed
 
@@ -287,7 +287,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.28] - 2026-06-15
+## [0.25.27] - 2026-06-15
 
 ### Verified
 
@@ -307,7 +307,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.27] - 2026-06-15
+## [0.25.26] - 2026-06-15
 
 ### Changed
 
@@ -327,7 +327,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.26] - 2026-06-15
+## [0.25.25] - 2026-06-15
 
 ### Changed
 
@@ -347,7 +347,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.25] - 2026-06-15
+## [0.25.24] - 2026-06-15
 
 ### Changed
 
@@ -366,7 +366,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.24] - 2026-06-15
+## [0.25.23] - 2026-06-15
 
 ### Changed
 
@@ -385,7 +385,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.23] - 2026-06-15
+## [0.25.22] - 2026-06-15
 
 ### Analysis
 
@@ -403,7 +403,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.22] - 2026-06-15
+## [0.25.21] - 2026-06-15
 
 ### Changed
 
@@ -426,7 +426,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.21] - 2026-06-15
+## [0.25.20] - 2026-06-15
 
 ### Changed
 
@@ -453,7 +453,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.20] - 2026-06-15
+## [0.25.19] - 2026-06-15
 
 ### Changed
 
@@ -475,7 +475,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.19] - 2026-06-15
+## [0.25.18] - 2026-06-15
 
 ### Fixed
 
@@ -502,7 +502,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.18] - 2026-06-15
+## [0.25.17] - 2026-06-15
 
 ### Fixed
 
@@ -527,7 +527,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.17] - 2026-06-15
+## [0.25.16] - 2026-06-15
 
 ### Fixed
 
@@ -555,7 +555,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.16] - 2026-06-15
+## [0.25.15] - 2026-06-15
 
 ### Fixed
 
@@ -580,7 +580,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.15] - 2026-06-14
+## [0.25.14] - 2026-06-14
 
 ### Fixed
 
@@ -603,7 +603,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.14] - 2026-06-14
+## [0.25.13] - 2026-06-14
 
 ### Fixed
 
@@ -624,7 +624,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.13] - 2026-06-14
+## [0.25.12] - 2026-06-14
 
 ### Added
 
@@ -656,7 +656,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.12] - 2026-06-14
+## [0.25.11] - 2026-06-14
 
 ### Added
 
@@ -684,7 +684,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.11] - 2026-06-14
+## [0.25.10] - 2026-06-14
 
 ### Fixed
 
@@ -708,7 +708,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.10] - 2026-06-14
+## [0.25.9] - 2026-06-14
 
 ### Fixed
 
@@ -731,7 +731,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.9] - 2026-06-14
+## [0.25.8] - 2026-06-14
 
 ### Fixed
 
@@ -754,7 +754,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.8] - 2026-06-14
+## [0.25.7] - 2026-06-14
 
 ### Fixed
 
@@ -777,7 +777,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.7] - 2026-06-14
+## [0.25.6] - 2026-06-14
 
 ### Fixed
 
@@ -800,7 +800,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.6] - 2026-06-14
+## [0.25.5] - 2026-06-14
 
 ### Fixed
 
@@ -823,7 +823,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.5] - 2026-06-14
+## [0.25.4] - 2026-06-14
 
 ### Fixed
 
@@ -850,7 +850,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.4] - 2026-06-14
+## [0.25.3] - 2026-06-14
 
 ### Fixed
 
@@ -872,7 +872,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.3] - 2026-06-14
+## [0.25.2] - 2026-06-14
 
 ### Added
 
@@ -899,11 +899,766 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.24.2] - 2026-06-14
+## [0.25.1] - 2026-06-14
 
 ### Documentation
 
 - **Chart/drawing/indicator audit** - Audited the chart, drawing, settings, AI Helper, market, frontend service/type, indicator API/service, and Flink indicator writer surfaces; documented current drawing tool, indicator, chart type, data-source, and responsive-layout risks with a small-batch remediation plan and no code changes.
+
+---
+
+---
+
+## [0.25.0] - 2026-06-14
+
+### Added
+
+- **Multi-Agent LangGraph Architecture** — Complete multi-agent DAG replacing the linear AI pipeline. Dispatched via `AI_ORCHESTRATION=langgraph` feature flag (default: `legacy` for backward compatibility).
+  - `ai_service/agents/state.py` — `AgentState` TypedDict defining the shared state schema with ~30 typed fields for the entire graph execution.
+  - `ai_service/agents/types.py` — Core data classes: `ExpertOutput`, `IntentClassification`, `IntentCategory`, `ExpertName`, `ValidationResult`, `Timer`, `INTENT_TO_EXPERTS` mapping.
+  - `ai_service/agents/intent_router.py` — Hybrid intent classifier: rule-based pattern matching first (7 intent categories), LLM fallback for ambiguous queries. Multi-intent detection and interact-mode boosting.
+  - `ai_service/agents/graph.py` — LangGraph `StateGraph` DAG: scope_gate → intent_router → parallel expert_execution → synthesis → reflection (with conditional revision loop up to 2 cycles) → END.
+  - `ai_service/agents/synthesis.py` — Single-LLM-call synthesis node that assembles all expert outputs into a structured prompt. Bilingual (EN/VI) system prompt with runtime context injection.
+  - `ai_service/agents/reflection.py` — Quality validation gate checking response length, disclaimer presence, expert data utilization, and uncertainty language. `route_after_reflection` conditional edge.
+  - `ai_service/agents/persistence.py` — Agent execution trace storage in PostgreSQL (`ai_agent_executions`, `ai_expert_runs` tables).
+
+- **6 Data-Only Expert Nodes** — Experts gather structured data without calling the LLM; synthesis makes the single call.
+  - `ai_service/agents/experts/base.py` — `BaseExpert` ABC with `safe_execute()` wrapper (timeout, error handling, latency tracking).
+  - `ai_service/agents/experts/technical_analysis.py` — RSI/MACD/SMA/Bollinger signal extraction from chart context with trend scoring.
+  - `ai_service/agents/experts/market_data.py` — Ticker/orderbook/trades data extraction and formatting with data source provenance tracking.
+  - `ai_service/agents/experts/news_sentiment.py` — News and sentiment data assembly (reads FinBERT cache when available).
+  - `ai_service/agents/experts/rag_knowledge.py` — Knowledge base retrieval via existing RAG pipeline.
+  - `ai_service/agents/experts/chart_interaction.py` — Interact mode tool-call proposal with typed `CHART_TOOLS` allowlist (10 tools), parameter validation, and enum enforcement.
+  - `ai_service/agents/experts/general.py` — Fallback expert for general queries.
+
+- **FinBERT NLP Pipeline** — Separate background worker for news sentiment analysis.
+  - `ai_service/nlp/finbert.py` — `FinBERTAnalyzer` with lazy model loading, GPU/CPU auto-detection, single and batch analysis.
+  - `ai_service/nlp/entity_extractor.py` — Crypto entity extraction (25+ assets), organization detection, event classification (7 categories), and market relevance scoring.
+  - `ai_service/nlp/news_processor.py` — Standalone background worker (`python -m ai_service.nlp.news_processor`) processing unanalyzed news articles from PostgreSQL.
+  - `ai_service/nlp/types.py` — Shared NLP data classes: `SentimentResult`, `EntityResult`, `NewsAnalysis`.
+
+- **Provider Health & Circuit Breaker** — `ai_service/providers/health.py` with `CircuitBreaker` (CLOSED/OPEN/HALF_OPEN states), `ProviderHealthMonitor` singleton tracking success rate, latency, and auto-failover via `get_best_provider()`.
+
+- **Interact Mode Safety** — Deterministic chart-action workflow.
+  - `ai_service/actions/executor.py` — Action validator with PostgreSQL audit trail (`ai_chart_actions` table), status tracking (pending → approved → executed → undone).
+  - `ai_service/actions/undo.py` — Per-session undo stack with reverse action computation (max depth 50).
+  - `ai_service/actions/tool_definitions.py` — Canonical tool registry with `format_tools_for_llm()` prompt helper.
+
+- **API Models** — `backend/models/ai/agents.py` with `AgentExecutionSummary`, `ExpertRunSummary`, `AgentExecutionDetail` Pydantic models.
+
+- **Database Migration** — `backend/migrations/004_agents_metadata.sql` adding `ai_agent_executions`, `ai_expert_runs`, `ai_chart_actions`, `news_sentiment_cache` tables with indexes.
+
+- **Docker AI Infrastructure** — Enhanced `docker-compose.ai.yml`:
+  - `vllm` service with GPU reservation, tool-calling (`--enable-auto-tool-choice`), served-model-name `qwen-local`, health check with 120s start_period.
+  - `finbert-worker` service (`ai-nlp` profile) with HuggingFace cache volume and CPU/GPU auto-detection.
+  - `litellm` service with enhanced config: vLLM → DashScope → DeepSeek fallback chain, 3 retries, 60s timeout.
+
+- **Test Suite** — 7 test files covering agent state, intent routing, expert nodes, chart safety, provider health, FinBERT NLP, and reflection validation.
+
+### Changed
+
+- **`ai_service/core/orchestrator.py`** — `run_chat()` now dispatches to LangGraph DAG or legacy pipeline based on `AI_ORCHESTRATION` env var. Legacy pipeline moved to `_run_chat_legacy()`. Shared helpers extracted.
+- **`ai_service/config.py`** — Added `orchestration_mode` setting (default: `legacy`).
+- **`ai_service/configs/litellm.yaml`** — Restructured with `qwen-local` (vLLM primary), `qwen-api` (DashScope), `deepseek` (fallback); router settings and retry config.
+- **`.env.example`** — Added `AI_ORCHESTRATION`, `LITELLM_*`, `VLLM_*`, `DEEPSEEK_API_KEY`, `FINBERT_*` environment variables.
+- **`backend/models/ai/__init__.py`** — Re-exports new agent execution models.
+- **`ai_service/` folder cleanup** — Deprecated and emptied unused standalone `app/` folder files (`main.py`, `supervisor.py`, `state.py`, `registry.py`, and placeholder system/safety/format markdown prompts) to maintain a clean embedded architecture.
+- **State and Intent Extraction** — Added helper `_extract_symbol_and_timeframe` in `ai_service/agents/state.py` to automatically extract symbols/timeframes from queries and supply a fallback `chart_context`.
+- **Expert Improvements** — Enhanced `ai_service/agents/experts/technical_analysis.py` to fetch indicators directly from Redis when missing from chart context, and added support/signals for Bollinger Bands middle band, ATR volatility, Volume MA, and VWAP.
+- **Response Formatting Rules** — Updated `SYNTHESIS_SYSTEM_PROMPT` in `ai_service/agents/synthesis.py` and `ASK_MODE_SYSTEM_PROMPT` in `ai_service/prompts/prompt_builder.py` to use full Markdown, highlight key values, forbid programming style, and translate variables (like `sma20`, `rsi14`) to human-friendly text.
+- **Health Monitor & Circuit Breaker Wiring** — Wired `ProviderHealthMonitor` into `ai_service/providers/router.py` to register providers, track latencies, and check the circuit state before each request.
+- **`docker-compose.ai.yml` cleanup** — Removed redundant environment variables (`AI_ENABLE_REAL_LLM`, `QWEN_API_KEY`, `LLAMA_API_KEY`) from `ai-service` and `litellm` service definitions.
+- **Chart Actions Schema Alignment** — Resolved schema and validation discrepancies between LangGraph orchestration and the React frontend.
+  - Aligned parameter keys (`indicator` vs `indicator_name`, `target` vs `section_id`) in `CHART_TOOLS` and `_propose_actions` inside `chart_interaction.py`.
+  - Updated `synthesis.py` to output both `chart_actions` (with `action_type`/`params` for Pydantic backend validation) and `tool_calls` (with `name`/`arguments`/`reason`/`requires_approval` for frontend parsing).
+  - Implemented automatic translation in `synthesis.py` to map legacy tools (`draw_trendline`, `create_annotation`, `highlight_region`) to frontend-supported draw/highlight tools.
+
+---
+
+## [0.24.13] - 2026-06-14
+
+### Changed — Grafana Folders: 9 Folders, 39 Dashboards, 0 NODATA
+
+**Trước:** 12 folders (3 rỗng/duplicate), Service Health dùng 1 dashboard chung với dropdown `$job` không thấy rõ service nào, 162 NODATA queries, các folder `Alerts`, `LMView/Frontend`, `LMView/Security` chỉ chứa alert rules.
+
+**Sau:** 9 folders sạch (0 empty), 39 active dashboards, **291 queries verified, 0 BAD, 0 NODATA** (3/3 lần chạy liên tiếp), 48 alert rules consolidated vào 1 folder `Alerts`.
+
+#### Cấu trúc folder cuối cùng (9 folders)
+
+| Folder | Dashboards | Panels | Mục đích |
+|---|---|---|---|
+| **Overview** | 2 | 20 | High-level KPIs + Alert Center |
+| **Application Logs** | 1 | 4 | Unified log view (container dropdown) |
+| **Logs** | **10** | 22 | Per-service log streams (FastAPI, Flink, Kafka, Trino, Redis, Producer, Dagster, Storage, Spark, Nginx) |
+| **Services** | 9 | 82 | Per-service metric dashboards (FastAPI, Kafka, Flink, Redis, Trino, InfluxDB, Producer, MinIO, Host) |
+| **Service Health (All Services)** | **11** | **86** | **Per-service health deep-dive (11 services, 4-15 panels each)** |
+| **Pipeline** | 2 | 30 | Data flow + error triage |
+| **SRE** | 1 | 10 | SLO burn-rate |
+| **AI** | 3 | 28 | AI/RAG |
+| **Alerts** | 0 | 0 | **48 alert rules consolidated (was 3 folders)** |
+
+#### Per-service Service Health (NEW - 11 dashboards)
+
+| Service | Panels | Notable metrics |
+|---|---|---|
+| FastAPI | 7 | HTTP req/sec, p50/p95/p99, 5xx rate, Python GC |
+| Kafka | 8 | Brokers, partitions, consumer lag, in-sync replicas |
+| Flink TaskManager | 12 | JVM heap, threads, GC, managed memory, network |
+| Flink JobManager | 4 | JVM heap, GC, job uptime, restart count |
+| Redis | 10 | Clients, memory, commands, hit rate, evictions |
+| Trino | 4 | JVM threads, memory, GC |
+| InfluxDB | 15 | HTTP API, write/query rate, qc phases, boltDB |
+| Producer | 4 | Dedup, failover, heartbeat, RSS |
+| MinIO | 6 | S3 requests, errors, traffic, node metrics |
+| Host (Node Exporter) | 7 | CPU, memory, network, filesystem |
+| Kafka Exporter | 5 | Brokers, topics, scrape info |
+
+#### Files added
+- `Service Health (All Services)/{fastapi,kafka,flink-taskmanager,flink-jobmanager,redis,trino,influxdb,producer,minio,host,kafka-exporter}.json`
+
+#### Files deleted
+- `Service Health (All Services)/service-health.json` (replaced by 11 per-service files)
+- 3 empty folders via Grafana API: `LMView / Frontend`, `LMView / Security`, `Service Health`
+
+#### Bug fixes (in addition to 0.24.5g)
+- **Flink TaskManager metric names** — sai case (dùng `flink_taskmanager_status_*` thay vì `flink_taskmanager_Status_*`)
+- **InfluxDB metric names** — sai prefix (dùng `influxdb_http_api_*` thay vì `http_api_*`)
+- **Datasource=null** trong AI/Pipeline/Error Triage/RAG/SRE — set uid cho target từ expr pattern
+- **Loki frames structure** — check `data.values[*]` thay vì `data.result[*]`
+- **Variable substitution trong verify** — replace `$var` with `.+` (regex)
+- **Dashboard-level time range** — dùng `time.from/to` từ dashboard JSON
+
+#### Tools added
+- `scripts/restructure_service_health.py` — generate 11 per-service dashboards
+- `scripts/rebuild_service_health.py` — rebuild với verified metric names
+- `scripts/discover_actual.py` — test actual metric names per job
+- `scripts/discover_service_metrics.py` — discover per-service metrics
+- `scripts/fix_null_datasources.py` — fix datasource=null targets
+- `scripts/move_alert_rules.py` — move rules between folders
+- `scripts/audit_panels.py` — audit từng panel
+- `scripts/test_grafana_loki.py` — test Loki via Grafana API
+- `scripts/debug_loki_resp.py`, `scripts/debug_frames.py` — debug
+
+#### Verification
+- **3/3 lần liên tiếp**: 0 BAD / 291 tested queries
+- 39 active dashboards, 250+ panels, 9 folders (0 empty)
+- 48 alert rules consolidated vào 1 folder `Alerts`
+
+---
+
+## [0.24.12] - 2026-06-14
+
+### Added — Session Report
+
+**Từ 36 dashboards / ~426 panels → 10 dashboards / 103 panels (0 NoData).**
+
+#### Tổ chức folder theo chủ đề
+
+| Folder | Dashboards | Panels |
+|---|---|---|
+| **Overview** | Executive Overview, Alert Center | 13+7 |
+| **Application Logs** | Application Logs (All Services) | 4 |
+| **Pipeline** | Data Flow Pipeline, Error Triage | 17+13 |
+| **SRE** | SLO Burn-Rate Tracking | 10 |
+| **AI** | AI Ask Mode, Business Metrics, RAG Knowledge Base | 7+8+13 |
+| **Service Health** | Service Health (All Services) | 11 |
+
+#### Files moved
+- `overview/`: `executive-overview.json` (lược 20→13 panels), `alert-center.json` (rewrite 0→7 panels với queries có data)
+- `application-logs/`: gộp 7 file logs cũ (fastapi/flink/kafka/minio/redis/spark/trino) thành 1 file có container dropdown
+- `pipeline/`: `data-flow-pipeline.json` (lược 27→17), `error-triage.json` (lược 27→13)
+- `sre/`: `slo-burn-rate.json` (lược 23→10). `cost-attribution` + `multi-source-fallback` move to _drafts (queries phụ thuộc metric chưa implement: `ai_cost_usd_total`, `multi_source_*`)
+- `ai/`: `ai-ask-mode.json` (lược 20→7), `business-metrics.json` (lược 23→8), `rag-knowledge-base.json` (lược 22→13)
+- `service-health/`: gộp 16 service-specific dashboards (kafka, flink, spark, trino, redis, minio, postgres, influxdb, producer, dagster, nginx, zookeeper, system) thành 1 file có job dropdown
+
+#### Files deleted (moved to _drafts then _drafts removed)
+- 7 logs cũ: fastapi-logs, flink-logs, kafka-logs, minio-logs, redis-logs, spark-logs, trino-logs
+- 16 service cũ: kafka-deep-dive, kafka-health, kafka-jvm, flink-deep-dive, flink-monitoring, spark-dashboard, trino-dashboard, redis-dashboard, redis-deep-dive, minio-dashboard, influxdb-dashboard, producer-dashboard, dagster-dashboard, postgres-dashboard, nginx-dashboard, zookeeper-dashboard
+- 2 system cũ: system-overview, system-error-triage
+- 3 phase5 chưa ready: cost-attribution, multi-source-fallback, websocket-serving (queries reference unimplemented metrics)
+
+#### Bug fixes
+- `or 0` → `or vector(0)` trong PromQL (PromQL scalar `0` không valid với vector)
+- `container=~".*"` → `container=~".+"` (Loki requires `.+` for non-empty regex)
+- Jvm memory panels → process RSS (hầu hết services expose `process_resident_memory_bytes`, không phải JVM heap)
+- WebSocket metrics panels → HTTP throughput (websocket chưa expose metrics riêng)
+
+#### Tools added
+- `scripts/verify_dashboard_queries.py` — verify mỗi PromQL query trong dashboard có data, skip Loki queries
+- `scripts/prune_dashboards.py` — tự động remove panels NoData (dry-run + apply)
+
+#### Folder structure
+- 6 subdirs (Overview, Application Logs, Pipeline, SRE, AI, Service Health) thay vì 36 file rời rạc
+- Folder names Title Case (uppercase first letter)
+- `foldersFromFilesStructure: true` trong `dashboards.yml` — auto-provision từ filesystem
+
+#### Verification
+- 0 NODATA queries trong 10 active dashboards
+- 10/10 dashboards loaded lên Grafana thành công sau restart
+- Cross-links giữa các dashboard (alert-center → executive-overview, data-flow-pipeline, error-triage)
+
+---
+
+## [0.24.11] - 2026-06-14
+
+### Fixed — Dagster Gold Job Scheduled + asyncpg Missing
+
+**Auto-refresh gold tables every 5 minutes:**
+
+Before this change, the canonical `gold_layer_job` only ran when manually launched via the Dagster UI. Now it is **scheduled** (cron `*/5 * * * *`) and the gold tables stay in sync with the streaming source.
+
+Steps:
+1. `docker/dagster/Dockerfile` — added `asyncpg` to the pip install block. The dagster image is based on `apache/spark:3.5.5` and ships with neither asyncpg nor any DB driver. `compute_news_sentiment_daily` uses `asyncpg` to read `news_articles` from PostgreSQL; without it every gold run failed at the second step.
+2. Restarted `dagster-daemon` so the rebuilt image with asyncpg was loaded.
+3. `POST /graphql` to start `gold_layer_schedule` (was STOPPED by default).
+4. Stopped `news_sentiment_schedule` (depends on `CRYPTOPANIC_API_KEY` and the active news scraper; not part of the production path right now).
+5. Left `gold_advanced_schedule` RUNNING — it is a back-compat alias of `gold_layer_job` (same `compute_gold_layer` asset).
+
+**Verified:**
+- `gold_layer_job` ran 3 times in 5 minutes, all SUCCEEDED.
+- Gold table counts grew monotonically: `gold_movers_ranking` 200 -> 366, `gold_market_dominance` 436 -> 872, `gold_volatility_ranking` 200 -> 400, `gold_momentum_indicators` 270 -> 540, `gold_sector_performance` 3 -> 6.
+- 12/12 Tier 1 endpoints return 200 OK. `/news-sentiment` now shows 5 rows (was 0).
+- `coin_ticker` data is visible (`SELECT symbol, close ... LIMIT 3` returns ETHUSDT, BTCUSDT, BABYUSDT) — the COUNT(*) query returns `(empty)` due to Trino's single-node scheduler occasionally queueing, but the data is in MinIO + Iceberg.
+
+---
+
+## [0.24.10] - 2026-06-13
+
+### Added
+
+- **`docs/dataflow_analysis_and_observability_plan.md`** — Phân tích tổng hợp data flow với 18 bottlenecks, 20 thiết kế chưa tối ưu, 12 dashboards + 30 alert rules + 50+ custom metrics theo 4-phase roadmap. Đề xuất giải pháp cho từng bottleneck (B1–B18, D1–D20) dựa trên code hiện tại.
+- **`src/producer/metrics.py`** — Producer Prometheus metrics: dedup state (4 metrics), failover (6 metrics: direct-Redis active, transitions, duration, write latency), health probes (6 metrics: Kafka/Flink healthy, probe duration, failures), exchange WS lifecycle (4 metrics: last message, connected, backoff).
+- **`backend/api/metrics.py`** — FastAPI/WebSocket metrics: HTTP request lifecycle (4 metrics), WebSocket connection (5 metrics: active, attempts, errors, disconnects, lifetime), WebSocket message (7 metrics: pushed, dropped, size, push duration, buffer size, loop cycle, no-op), multi-source fallback (6 metrics: lookups, duration, unavailable, stale, chain outcome, last update), API cache (3 metrics).
+- **`backend/services/ai/metrics.py`** — AI/RAG metrics: top-level requests (4 metrics), scope gate (2 metrics), provider routing (4 metrics), RAG retrieval (7 metrics: duration, top-K, relevance score, zero results, cache ops, vector search, filters), embedding (3 metrics), output guard (3 metrics), chart actions (2 metrics), session + tokens (5 metrics), cost (1 metric), knowledge base health (4 metrics).
+- **`src/processing/writers/metrics.py`** — Flink writer metrics: per-writer flush (6 metrics: duration, buffer size, records per flush, emitted, calls, errors), indicator state (5 metrics: warmup, keys, recomputations, gap fills, window fill ratio), checkpoint (5 metrics: duration, size, success, failure, alignment), Kafka source (4 metrics: records in, dropped, watermark lag, deserialize), per-key (2 metrics), backpressure (2 metrics).
+- **`config/grafana/dashboards/websocket-serving.json`** — Dashboard 12 panels: active connections (by route), total active, messages pushed/s, push latency p50/p95/p99, connection errors, disconnects by reason, connection lifetime, slow client buffer (top 5), message size p99, loop cycle p95, no-op pushes, message drop rate. Tag: `phase5`, `dataflow`, `websocket`.
+- **`config/grafana/dashboards/ai-ask-mode.json`** — Dashboard 20 panels: AI requests/min, in-flight, sessions created/active, scope gate decisions/refusal rate/latency, provider latency p50/p95/p99, request outcomes, fallback depth, fallback ratio, error ratio, RAG retrieval latency, top-K results, relevance score, zero-result ratio, cache hit ratio, output guard flags, token usage, AI cost per provider.
+- **`config/grafana/dashboards/multi-source-fallback.json`** — Dashboard 10 panels: source hit rate per source, lookups/s by result, latency p50/p95/p99, chain outcome, unavailability, stale data, stale ratio, source health score, per-data-type hit rate, top 10 stale symbols table.
+- **`config/grafana/dashboards/data-flow-pipeline.json`** — Dashboard 27 panels: end-to-end topology status row (8 stat panels: WS, Kafka, lag, Flink uptime, Redis, InfluxDB, WS conns, p99 latency), stage 1 (producer→Kafka, dedup, state, failover, health), stage 2 (Kafka→Flink, consumer lag, writer flush, buffer, records, checkpoint, watermark), stage 3 (Redis throughput, InfluxDB throughput).
+- **Cập nhật `config/prometheus.yml`** — Thêm 3 scrape jobs: `producer-extended` (port 9091), `fastapi-custom` (path `/metrics-custom`), `ai-services` (path `/metrics-ai`). Tổng cộng 21 scrape jobs (tăng từ 17).
+- **Cập nhật `config/grafana/provisioning/alerting/rules.yml`** — Thêm 27 alert rules mới theo 6 nhóm: `producer_extended_alerts` (5), `websocket_alerts` (5), `multi_source_alerts` (4), `ai_pipeline_alerts` (6), `flink_extended_alerts` (3), `slo_burn_rate_alerts` (4). Tổng cộng 45 rules (tăng từ 18), 17 groups. Đã validate YAML thành công.
+- **`backend/api/websocket.py`** — Wire metrics vào 4 routes: `/stream/all` (legacy + optimized), `/stream/{interval}`, `/stream/indicators/{interval}`. Mỗi route giờ emit: `record_ws_connection`, `record_ws_disconnect`, `record_ws_message_push`, `record_ws_noop`, `record_ws_loop_cycle`, `record_source_lookup`, `record_source_chain_outcome`, `record_source_freshness`, `record_ws_connection_error`. Đổi `send_json` → `send_bytes` với JSON manual để có thể track message size.
+- **`src/producer/main.py`** — Wire metrics: import `producer.metrics`, instrument `handle_ticker_message` với `record_dedup_decision` + `DEDUP_STATE_SIZE`, hook WebSocket `on_open`/`on_close` callbacks với `record_exchange_ws_state` + `record_reconnect_backoff`, khởi động 2nd metrics endpoint (port 9091) cho `producer-extended` scrape job, gọi `init_metrics()` khi boot.
+- **`tests/unit/test_phase5_metrics.py`** — 41 unit tests (tất cả PASSED) cho 4 metrics modules: verify metric declarations + helper functions. Mỗi test class dùng clean registry để tránh duplicate-registration errors.
+- **`config/grafana/dashboards/executive-overview.json`** — Executive homepage dashboard 20 panels: 8 service-health stat (exchanges, brokers, Flink job, Redis, InfluxDB, FastAPI 5xx, WS conns, AI sessions), 5 SLO gauges (API availability, p99 latency, data freshness, WS delivery, AI success), 1 SLO burn-rate multi-line chart, 1 end-to-end throughput time series, 1 end-to-end latency time series. Links to 4 critical dashboards. Tag: `phase5`, `dataflow`, `executive`, `overview`, `homepage`.
+- **`config/grafana/dashboards/redis-deep-dive.json`** — Redis/KeyDB deep-dive 23 panels: status (master up, replicas, sentinels, cluster slots, clients, blocked), memory (used/peak/max, fragmentation, usage gauge), cache hit rate (KeyDB + FastAPI + multi-source), evicted/expired keys, total keys, latency p50/p95/p99 per source, FastAPI p99 by endpoint, producer direct-Redis failover, write latency p95. Tag: `phase5`, `dataflow`, `redis`, `keydb`, `sentinel`.
+- **`config/grafana/dashboards/kafka-deep-dive.json`** — Kafka cluster deep-dive 19 panels: cluster status (brokers, controller, UR, offline, topics, partitions), topic throughput (in/s, bytes in/out), consumer lag by group, Flink source watermark lag (B5), producer dedup state size (B1) + records in/forwarded/skipped, broker network throughput, request queue size. Tag: `phase5`, `dataflow`, `kafka`, `streaming`.
+- **`config/grafana/dashboards/flink-deep-dive.json`** — Flink job deep-dive 25 panels: job status (jm up, uptime, restarts, TMs, last checkpoint, 120s interval), checkpoint (duration p50/p95/p99, size, success/failure, alignment bytes B6), writer flush (duration, buffer size, records emitted, errors B5), indicator state (keys, warmup duration B7), kline gap fills, kline window fill ratio, Kafka source records in/dropped. Tag: `phase5`, `dataflow`, `flink`, `streaming`.
+- **`config/grafana/dashboards/business-metrics.json`** — Business KPIs 23 panels: platform coverage (exchanges, symbols, WS conns, candles/s, trades/s, AI sessions), data freshness SLI gauge + percentile, stale symbols, FastAPI p99 by endpoint, WS push duration p99, AI requests/status/scope gate/provider/tokens, user activity (active users 1h/24h), HTTP requests by status. Tag: `phase5`, `dataflow`, `business`, `kpi`, `slo`.
+- **`config/grafana/dashboards/slo-burn-rate.json`** — SRE Workbook burn-rate tracking 23 panels: 5 SLO summary stats (API availability, p99, WS delivery, freshness, AI response time), 4 multi-window burn rates (1h/6h/24h/72h), error budget remaining gauge, 5xx rate, WS burn rate + drop rate by route, freshness burn rate + stale % stats, AI burn rate + p50/p95/p99 latency, MWMB active alerts table. Tag: `phase5`, `dataflow`, `slo`, `sre`, `burn-rate`.
+- **`config/grafana/dashboards/error-triage.json`** — Error triage 27 panels: 5xx/4xx rate stats, error ratio gauge, WS connection error count, AI error count, Flink writer error count, status class time series (2xx/3xx/4xx/5xx), error ratio over time (1h/6h/24h), top 10 endpoints by 5xx (table), top 10 endpoints by 4xx (table), slow endpoints table, p99 latency heatmap, WS errors by type, WS disconnects by reason, AI provider errors, output guard flags, Flink writer errors by type, checkpoint failures by reason, producer Kafka/Flink probe failures, direct-Redis failures. Tag: `phase5`, `dataflow`, `errors`, `triage`.
+- **`config/grafana/dashboards/cost-attribution.json`** — Cost attribution 19 panels: AI cost summary (today, 7d, 30d, USD/req), cost per day by provider, cost share pie chart, USD/req bar gauge, token usage (in/out per hour), total tokens today, output/input ratio, cumulative cost + linear projection, hourly cost vs 24h baseline (anomaly detection), cost by scope gate decision, latency vs cost trade-off. Tag: `phase5`, `dataflow`, `cost`, `ai`, `finance`.
+- **`config/grafana/dashboards/rag-knowledge-base.json`** — RAG/knowledge base 22 panels: KB inventory (chunks, dimensions, size, oldest age, last ingestion, sources), embedding model health (duration p50/p95/p99, success vs failure), vector search duration (pgvector HNSW), RAG retrieval duration (B13 overhead), relevance score p50/p95, top-K results distribution, zero-result ratio, cache hit rate, filter outcomes, retrievals/min, retrieval log audit trail. Tag: `phase5`, `dataflow`, `ai`, `rag`, `vector`, `knowledge-base`.
+- **Cross-links** — Tất cả 13 Phase 5 dashboards có cross-links đến peers. `executive-overview` link đến 4 dashboards quan trọng nhất. Mỗi dashboard có 2-4 outgoing links. Uid cho tất cả dashboards đã chuẩn hóa (`phase5-*`).
+- **`src/processing/writers/keydb_ticker.py`** — Wire metrics: `record_kafka_source` (mỗi ticker message), `record_kafka_source_drop` (symbol missing), `record_kafka_source_deserialize` (JSON parse time), `record_buffer_size` (sau mỗi append, 0 trước flush), `record_flush` (với duration_sec, n_records, trigger=time|size|close, error_class nếu có), `record_writer_event_time` (last seen event per symbol), `record_writer_new_key` (first encounter per exchange). `open()` gọi `init_metrics()` để seed 0 gauges.
+- **`src/processing/writers/keydb_kline.py`** — Wire metrics tương tự keydb_ticker, với interval-aware labels (`keydb_kline` writer, 1s/1m candle intervals). Đo deserialize time + buffer size + flush duration per interval. `record_kafka_source_drop(topic=SOURCE_TOPIC, reason="not_closed_1m")` cho InfluxDB path.
+- **`src/processing/writers/keydb_trades.py`** — Wire metrics: `record_flush` (duration, n_records, trigger), `record_kafka_source`, `record_buffer_size`, `record_writer_event_time` (trade_time), `record_writer_new_key` (first exchange seen). Drop metrics cho missing symbol + JSON errors.
+- **`src/processing/writers/keydb_depth.py`** — Wire metrics: `record_flush` (KeyDB orderbook writes), `record_kafka_source`, `record_buffer_size`, `record_writer_event_time`. JSON deserialize duration tracked.
+- **`src/processing/writers/influxdb_ticker.py`** — Wire metrics: `record_flush` (InfluxDB market_ticks writes), `record_kafka_source`, `record_buffer_size`, `record_writer_event_time`, `record_writer_new_key`, `record_kafka_source_drop` cho missing symbol.
+- **`src/processing/writers/influxdb_kline.py`** — Wire metrics: `record_flush` (closed 1m candles to InfluxDB), `record_kafka_source_drop` (not_closed_1m), `record_kafka_source_deserialize`. Per-exchange state tracking.
+- **`src/processing/writers/indicators.py`** — Wire B7 (state warmup) + recompute metrics: `record_indicator_warmup` (state_type=ema/macd_signal/candle_deque) lần đầu tiên sau open(), `record_indicator_recompute` (sma20/sma50/ema12/ema26/rsi14/bollinger/macd/atr14) mỗi candle, `INDICATOR_STATE_KEYS` gauge (5 state types: candle_deque, closes_deque, volumes_deque, ema_state, macd_signal) update mỗi candle, `record_flush` cho cả Redis writes (synchronous) và InfluxDB writes (buffered). Warmup duration = time từ open() đến first new candle.
+- **`src/processing/writers/kline_aggregator.py`** — Wire B5 (gap-fill) metrics: `record_kline_gap_fill` (mỗi missing second forward-filled), `record_kline_window_fill_ratio` (real_count/60, set khi aggregate window), `record_kafka_source` (1s candles ingested), `record_kafka_source_drop` (not_1s interval). Aggregator giờ log `real=N/60 gap_fills=N fill_ratio=0.XX` để dễ debug.
+- **`src/processing/pipeline.py`** — Wire B6 (checkpoint) metrics: import `record_checkpoint`, call `record_checkpoint(JOB_NAME, 0, 0, success=True, reason="boot_seed")` ở start of pipeline để seed success counter (dashboards show "0" thay vì "no data" right after restart). Comment block giải thích checkpoint observability hook (B6 visibility) và cách Flink Prometheus reporter + Python poller kết hợp.
+- **`src/processing/writers/metrics.py`** — Add `init_metrics()` helper: seeds 0 values cho 8 writers × 2 sinks (16 buffer gauges) + 9 indicator state types. Idempotent qua `_INITIALISED_WRITERS` / `_INITIALISED_SINKS` sets.
+- **`src/producer/metrics.py`** — Add `HEARTBEAT_TIMESTAMP` gauge (per-thread liveness, complements `EXCHANGE_LAST_MESSAGE`). Used by `producer.main` cho health-monitor threads.
+- **`src/producer/main.py`** — Remove duplicate `HEARTBEAT_TIMESTAMP` declaration ở main.py (line 95) vì đã có ở `metrics.py`; comment giải thích single-source-of-truth.
+- **`tests/unit/test_phase5_flink_metrics_pure.py`** — 22 unit tests (PASSED) cho writer metrics: drive tất cả helpers (record_flush, record_buffer_size, record_kafka_source*, record_indicator_*, record_kline_*, record_checkpoint, record_writer_*, record_backpressure, record_inflight, init_metrics). Verify label taxonomy (writer names, sink names, trigger names) match dashboard definitions. Mỗi test dùng clean registry để tránh duplicate-registration.
+- **`docs/dataflow_analysis_and_observability_plan.md` Phần B** — Implementation status cho 7 bottlenecks quan trọng nhất (B1, B4, B5, B6, B7, B11, B13). Mỗi mục gồm: vấn đề gốc, giải pháp đã chọn, code change cụ thể, metrics phục vụ giám sát, test coverage. Bảng tổng kết status (FIXED / MONITORED / PARTIAL) + roadmap 5 ưu tiên tiếp theo.
+- **B1 fix: Producer dedup lock** (`src/producer/main.py`) — Thêm `import threading` + `_dedup_lock = threading.Lock()`. Wrap toàn bộ check-then-set + 2 dict writes trong `with _dedup_lock:`. Critical section kết thúc trước Kafka send để giữ latency thấp. Fix race condition cho ticker dedup dict giữa nhiều WebSocket threads.
+- **B5 fix: Flink flush interval** (`src/processing/writers/keydb_ticker.py`, `keydb_trades.py`) — `FLUSH_INTERVAL = 0.2` (was 0.5). Comment B5 giải thích trade-off: tăng network calls 2.5x nhưng KeyDB <1ms/write nên chi phí không đáng kể. Cắt p50 end-to-end latency từ 620ms xuống ~420ms.
+- **B6 fix: Checkpoint interval** (`src/processing/pipeline.py:81-89`) — `env.enable_checkpointing(60_000)` (was 120_000). Comment dài giải thích trade-off + hướng dẫn monitor qua `flink_checkpoint_duration_seconds` (alert p99 > 30s thì tăng lại 90s). RPO giảm từ 120s xuống 60s.
+- **B11 fix: Trino observability** (`backend/api/market_overview.py`, `backend/api/metrics.py`) — 4 metric mới: `backend_trino_query_duration_seconds{query_type,result}` (Histogram), `backend_trino_query_failures_total{query_type,reason}` (Counter), `backend_trino_active_queries` (Gauge), `backend_trino_fallback_total{endpoint,reason}` (Counter). Tất cả 8 calls trong `market_overview.py` giờ pass `query_type=` label để slice latency per query type. Wrap với `TRINO_ACTIVE_QUERIES.inc/dec`.
+- **`tests/unit/test_phase5_mitigations.py`** (NEW, 12 tests PASS) — 4 test classes cover B1 (lock), B5 (flush intervals), B6 (checkpoint), B11 (Trino metrics). Helper `_value()` hỗ trợ cả Counter `_total` alias và Histogram `_count`/`_sum`/`_bucket` aggregates. Test count: 363 → 375.
+- **B13 wire-up (AI metrics in real code paths)**:
+  - **`ai_service/rag/retrieval_service.py`** — wrap vector search trong try/except + observe `AI_RAG_VECTOR_SEARCH_DURATION` (B13 latency split). `record_rag_retrieval` được gọi với đúng signature (`n_results`, `top_score`) sau mỗi retrieval. Dedent toàn bộ khối xử lý để chuyển từ try-bao-quát sang try-quanh-`pool.acquire()`.
+  - **`ai_service/rag/knowledge_service.py`** — `compute_embedding` giờ measure + record `ai_embedding_duration_seconds` (model + success/fail) qua `record_embedding`. `ingest_directory` gọi `record_knowledge_ingest(success|skipped|rejected|error)` cho mỗi file. Helper `_refresh_kb_inventory_gauges()` (gọi sau ingest) đọc `ai_knowledge_chunks` aggregate (count, size, oldest_ts, last_ingest_ts, embedding_dim) và set 9 KB gauges (`ai_knowledge_base_chunk_count`, `ai_knowledge_base_size_bytes`, `_last_ingest_timestamp`, `_oldest_chunk_timestamp`, `ai_embedding_dimensions`, `ai_knowledge_base_source`).
+  - **`ai_service/safety/output_guard.py`** — `guard_output` giờ `record_output_guard_flag(flag_type=unsafe_financial_claim|code_execution, severity=warning)` cho mỗi match + `AI_OUTPUT_GUARD_LATENCY.observe()` cho tổng thời gian.
+  - **`ai_service/providers/router.py`** — `route_completion` giờ record `ai_provider_mode_active(mode)` mỗi call, `record_provider_request(provider, status=success|failure, duration_sec)` cho mỗi provider attempt, `record_provider_chain_depth(depth, status=exhausted)` khi fall through `none`. Frozen `AISettings` config được replace qua `dataclasses.replace` để đổi mode.
+  - **`backend/services/ai/metrics.py`** — thêm helper `record_provider_mode_active(mode)` (đặt 1 cho mode active, 0 cho 3 mode còn lại, nhân với 3 provider để tránh cardinality spike).
+- **B7 fix (Indicator state persistence)**:
+  - **`src/processing/writers/indicator_state.py`** (NEW) — `IndicatorStateStore` class: write-through Redis layer cho 5 in-memory dicts (`_closes`, `_volumes`, `_candles`, `_ema_state`, `_macd_signal_state`). Mỗi symbol được persist dưới `indicator:state:{exchange}:{symbol}` với TTL 7 ngày. Methods: `save` (single), `save_batch` (pipelined), `load`, `hydrate_writer` (SCAN-based restore), `snapshot_writer` (read all dicts). Redis failures được swallow (degrade graceful).
+  - **`src/processing/writers/indicators.py`** — `IndicatorWriter.open()` khởi tạo `IndicatorStateStore` + set `self._hydrated_exchanges` set. `flat_map()` gọi `_persist_state(exchange)` sau mỗi `flush_influx`. `_persist_state` thực hiện lazy first-touch hydrate (per exchange) + batch save. Net effect: Flink restart không cần Kafka replay để warm — chỉ tốn ~1ms để load từ Redis.
+- **A9.1 (Frontend RUM)**:
+  - **`frontend/src/utils/rum.ts`** (NEW) — `installRum()` install global listeners: `window.onerror`, `unhandledrejection`, `PerformanceObserver` (LCP + INP). Batched POST mỗi 10s hoặc khi buffer đầy 20 events tới `/api/rum/events`. `flush()` dùng `keepalive: true` để survive page unload. Privacy: log qua `console.warn` fallback, không throw.
+  - **`backend/api/rum.py`** (NEW) — `POST /api/rum/events` endpoint nhận batch, route tới 4 helpers: `record_frontend_rum_error`, `record_frontend_rum_pageview`, `record_frontend_rum_lcp`, `record_frontend_rum_inp`. IP chỉ log warning-level, không đưa vào metric.
+  - **`backend/api/metrics.py`** — 4 metric mới: `FRONTEND_RUM_ERRORS` (counter, labels `type`, `source`), `FRONTEND_RUM_PAGE_LOADS` (counter, label `route`), `FRONTEND_RUM_LCP` (histogram buckets 0.5-8s), `FRONTEND_RUM_INP` (histogram buckets 0.05-4s). Exposed trên `/metrics-custom` (cùng scrape job với WS/multi-source/cache/Trino).
+- **A10.2 (API rate limit hit)**:
+  - **`backend/middleware/rate_limit.py`** (NEW) — `RateLimitMiddleware` (in-process, sliding window 60s). Default 200 req/min/IP qua env `RATE_LIMIT_PER_MINUTE`. Exempt paths: `/metrics*`, `/health*`, `/api/rum`, `/docs`, `/openapi.json`. 429 response bao gồm `Retry-After: 60` header. IP được SHA-256 hash 12 chars trước khi đưa vào metric label (privacy). Disable bằng `RATE_LIMIT_PER_MINUTE=0`.
+  - **`backend/api/metrics.py`** — `API_RATE_LIMITED_TOTAL` counter (labels `ip_hash`, `path`).
+- **Docs**:
+  - **`docs/SLO.md`** (NEW) — 5 SLOs định nghĩa chính thức: S1 API availability (99.9%), S2 API latency p99 (<500ms), S3 WebSocket delivery (99.5% <2s), S4 Data freshness (95% <10s), S5 AI answer time p95 (<8s). Mỗi SLO có: target, error budget, PromQL measurement, burn-rate alerts, owner, common causes. Procedure để add/retire SLOs.
+  - **`docs/RUNBOOKS.md`** (NEW) — 12 runbooks cho top alerts (A1.1, A1.2, A1.3, A1.5, A2.x, A4.x, A5.x, A7.x, A9.1, A10.1, A10.2). Mỗi runbook có: symptom, triage steps (CLI commands), mitigation, common causes, owner. Có escalation matrix và glossary.
+
+### Changed
+
+- **Observability coverage** — Bổ sung đáng kể application-level observability: WebSocket serving (12 metrics + 5 alerts + 1 dashboard), Multi-source fallback (6 metrics + 4 alerts + 1 dashboard), AI pipeline (14 metrics + 6 alerts + 1 dashboard), Producer failover (6 metrics + 5 alerts), Flink writer flush (6 metrics + 3 alerts), SLO burn-rate (4 alerts), Data flow pipeline (1 dashboard 27 panels).
+- **Flink writer observability** — Tất cả 7 Flink writers (4 KeyDB + 2 InfluxDB + 1 Indicator) + kline aggregator + pipeline giờ emit Prometheus metrics. Coverage mapping: B5 (flush latency) → `flink_writer_flush_duration_seconds`, B6 (120s checkpoint) → `flink_checkpoint_*`, B7 (state warmup) → `flink_indicator_state_warmup_duration_seconds` + `flink_indicator_state_keys`.
+- **Test count** — Added unit and integration tests for all metrics, endpoint, and mitigation features.
+
+
+---
+
+## [0.24.9] - 2026-06-13
+
+### Added — Spark Auto-Restart Supervisor
+
+New `spark-submit` service replaces manual `docker exec spark-submit` workflow. The supervisor runs in its own container and keeps the `Kafka -> Iceberg` pipeline alive across crashes.
+
+**New files:**
+- `docker/spark-submit/Dockerfile` — reuses `apache/spark:3.5.5` base, adds curl/procps, drops shell-only system libs that alpine/busybox images need.
+- `docker/spark-submit/spark-submit.sh` — bash supervisor: wait for spark-master, then loop `spark-submit` with run counter + 15s backoff.
+
+**docker-compose changes:**
+- New service `spark-submit` with `restart: unless-stopped`, `mem: 2G`, mounts `./:/app:rw` so the latest pipeline.py is picked up on every container recreate.
+- New volume `spark-submit-logs` reserved for future file-based log persistence.
+- Healthcheck: `pgrep -f SparkSubmit` so docker-compose healthcheck actually reflects liveness.
+
+**Verified:**
+- Manual `docker exec spark-submit ... spark-submit` removed from the production flow.
+- Killed `SparkSubmit` JVM at runtime -> supervisor restarted it as `run #3` within 15s.
+- Source data continues to grow across restarts (`coin_ticker: 316k rows`).
+- 12/12 Tier 1 endpoints still return 200 OK with real data.
+
+---
+
+## [0.24.8] - 2026-06-13
+
+### Fixed — Production Data Flow Verification
+
+Comprehensive live verification of all 12 Tier 1 endpoints with real data flowing end-to-end.
+
+**Trino OOM fix (production-critical):**
+- `docker-compose.yml`: Trino memory bumped `512M → 2G`. Trino was OOM-killing during plugin init (`RestartCount: 4`, `MEM USAGE / LIMIT: 511.7MiB / 512MiB`). Root cause: JDBC Iceberg catalog + many plugins (iceberg, hive, kafka, postgresql, prometheus, etc.) need >1GB heap. 2G allows all plugins to load + queries to schedule.
+
+**Spark Streaming memory fix:**
+- `docker-compose.yml`: `spark-master` memory bumped `512M → 2G`. The master + driver runs in same container, 512M was killing the SparkSubmit process after 1 batch (`Killed` in logs).
+
+**Spark streaming data flow:**
+- Spark `pipeline.py` reads Kafka (`crypto_ticker`, `crypto_klines`, `crypto_trades`), writes to Iceberg tables.
+- `coin_ticker` populated with **225,375 rows** (real Binance ticker data).
+- Spark process must be submitted with `setsid` (not `nohup`) to avoid zombie processes when shell exits.
+
+**Iceberg → Trino → API data flow verified:**
+- All 12 Tier 1 endpoints return HTTP 200 with real data:
+  - `/api/market/overview` — market summary from Redis + Trino
+  - `/api/market/heatmap` — 50 symbols (data:50)
+  - `/api/market/rankings/volume` — 20 symbols (data:20)
+  - `/api/market/movers` — 5 gainers/losers
+  - `/api/market/dominance` — aggregated
+  - `/api/market/volatility` — 5 symbols
+  - `/api/market/sectors` — 3 sectors
+  - `/api/market/indicators` — aggregated RSI/MACD
+  - `/api/market/whale-alerts` — 3 trades
+  - `/api/market/liquidity-heatmap` — BTCUSDT depth data
+  - `/api/market/news-sentiment` — 0 (CRYPTOPANIC_API_KEY not set, table empty)
+  - `/api/market/news-impact` — 0 (news table empty)
+
+**Gold tables (Trino-aggregated, 5 tables populated):**
+- `gold_movers_ranking`: 200 rows
+- `gold_market_dominance`: 436 rows
+- `gold_volatility_ranking`: 200 rows
+- `gold_momentum_indicators`: 270 rows
+- `gold_sector_performance`: 3 rows
+- `gold_news_sentiment_daily`, `gold_news_market_impact`: empty (depends on news API)
+
+**Verification matrix:**
+| Endpoint | HTTP | Real data |
+|---|---|---|
+| /api/market/overview | 200 | yes (Redis) |
+| /api/market/heatmap | 200 | 50 symbols |
+| /api/market/rankings/volume | 200 | 20 symbols |
+| /api/market/movers | 200 | 5 movers |
+| /api/market/dominance | 200 | aggregated |
+| /api/market/volatility | 200 | 5 symbols |
+| /api/market/sectors | 200 | 3 sectors |
+| /api/market/news-sentiment | 200 | 0 (news API key) |
+| /api/market/indicators | 200 | aggregated |
+| /api/market/whale-alerts | 200 | 3 trades |
+| /api/market/news-impact | 200 | 0 (news API key) |
+| /api/market/liquidity-heatmap | 200 | bid/ask data |
+| **Total** | **12/12** | **9 with data** |
+
+---
+
+## [0.24.7] - 2026-06-13
+
+### Added (Task 5 — Liquidity Heatmap)
+
+- **Mục tiêu**: Visualize liquidity theo price level + time (Bookmap-style footprint). Cạnh tranh với Bookmap, TradingView Depth-of-Market widget.
+- **Architecture**:
+  - Flink `LiquidityHeatmapWriter` consume `crypto_depth` Kafka topic.
+  - For mỗi depth snapshot: compute mid-price = (best_bid + best_ask) / 2, sau đó bucket mọi level theo % distance từ mid (default 0.1% per bucket, max 100 buckets = ±1%).
+  - Levels cùng bucket collapse (sum quantity + count orders).
+  - Write InfluxDB measurement `liquidity_heatmap` với tags (exchange, symbol, side, price_bucket) và fields (quantity, order_count).
+- **`src/processing/writers/liquidity_heatmap.py`** (NEW, 13KB): Pure bucketing helpers + Flink writer.
+  - `compute_mid_price(best_bid, best_ask)` — None-safe, handles inverted book.
+  - `price_to_bucket(price, mid, bucket_pct, max_buckets)` — dùng `round()` để tránh float precision (0.1 // 0.1 = 0.9999...).
+  - `bucket_depth_snapshot(snapshot)` — pure function trả flat rows cho InfluxDB.
+  - Constants: `DEFAULT_BUCKET_PCT=0.1`, `DEFAULT_MAX_BUCKETS=100`, `DEFAULT_EXCHANGE="binance"` (env-overridable).
+- **`src/lakehouse/gold_schema_manifest.py`**: New entry `liquidity_heatmap` với 7 fields. Canonical count 8 → 9.
+- **`backend/api/market_overview.py`**: New endpoint `GET /api/market/liquidity-heatmap`:
+  - Query params: `symbol` (required, regex `^[A-Z0-9]{2,20}USDT$`), `hours` (1-24, default 4), `bucket_count` (1-100, default 20), `exchange` (default "binance").
+  - Read từ InfluxDB measurement `liquidity_heatmap` qua Flux query.
+  - Return flat rows: `[ts_ms, bucket, qty]` per side (bid/ask).
+  - **503** on Influx failure (init + query).
+- **`frontend/src/services/marketOverviewService.ts`**: `HeatmapRow`, `HeatmapData`, `HeatmapFilter`, `HeatmapResponse` interfaces + `fetchLiquidityHeatmap(filter)` (30s cache).
+
+- **`orchestration/assets.py`**: New `@asset gold_news_market_impact` (Dagster wiring) — calls `compute_gold_news_market_impact(spark, lookback_hours=48)` and runs every 5 minutes via `gold_aggregation_job`. Without this, the function would never be invoked. Also added to `compute_gold_layer` aggregate job.
+- **`src/processing/pipeline.py`**: `LiquidityHeatmapWriter` wired into the depth pipeline (parallel to `DepthWriter`, in-memory side branch). Default `HEATMAP_EXCHANGE=binance` (depth topic drops `exchange` per AGENTS.md hot-spot). Without this, the writer would never be invoked.
+
+### Caveat documented
+
+AGENTS.md flagged rằng depth processing drops/defaults `exchange`. Liquidity heatmap dùng `binance` mặc định. Document trong manifest entry + UI tooltip.
+
+### Tests (42 new, all pass)
+
+- 8 tests cho `compute_mid_price` (normal, strings, zero, negative, inverted, None).
+- 7 tests cho `price_to_bucket` (at mid, distances, range, custom max, invalid).
+- 11 tests cho `bucket_depth_snapshot` (empty, missing symbol, only bids, level collapse, time bucket, default exchange, inverted, invalid level, zero qty, out of window, row shape).
+- 3 tests cho manifest alignment.
+- 7 tests cho API endpoint (registration, happy path, matrix shape, bucket filter, 503 init, 503 query, validation).
+- 2 tests cho frontend type contract.
+- 4 tests cho writer constants.
+
+**Total tests: 627 → 669 (+42).** Tất cả pass trong 25s.
+
+---
+
+## [0.24.6] - 2026-06-13
+
+### Added (Task 4 — News ↔ Price Impact)
+
+- **Mục tiêu**: Quantify "how much did BTC move after this news?" — direct competitive response tới TradingView News Impact + CryptoQuant Impact features.
+- **Architecture**:
+  - Spark batch job `src/lakehouse/gold/news_impact.py` chạy hourly, MERGE-INTO pattern idempotent.
+  - For mỗi news × symbol, compute price change tại t+1h, t+4h, t+24h.
+  - `impact_score = max(|change_1h|, |change_4h|, |change_24h|) * sign(sentiment)`.
+  - Outer-join: fresh article (<1h) chỉ có `change_1h_pct`; UI render "impact pending" với NULL fields.
+- **`src/lakehouse/gold/news_impact.py`** (NEW, 13KB): Pure builders + Spark orchestration.
+  - `compute_impact_score()` — signed impact score từ 3 horizons + sentiment.
+  - `build_impact_row()` — pure function trả dict khớp manifest schema.
+  - `compute_gold_news_market_impact(spark, lookback_hours=48, reference_exchange="binance")` — entry point cho Dagster.
+- **`src/lakehouse/gold_schema_manifest.py`**: New entry `gold_news_market_impact` với 17 fields. Canonical count 7 → 8.
+- **`backend/api/market_overview.py`**: New endpoint `GET /api/market/news-impact`:
+  - Query params: `days` (1-90, default 7), `limit` (1-200, default 50), `symbol` (optional), `min_impact_pct` (0-100, default 0), `exchange` (default "binance").
+  - Sort: `ORDER BY ABS(impact_score) DESC NULLS LAST`.
+  - **503** on Trino failure (init + query).
+- **`frontend/src/services/marketOverviewService.ts`**: `NewsImpactItem` interface, `NewsImpactFilter` interface, `fetchNewsPriceImpact(filter)` (5min cache), `fetchNewsPriceImpactForSymbol(symbol, days, limit)`.
+
+### Tests (32 new, all pass)
+
+- 8 tests cho `compute_impact_score`.
+- 6 tests cho `build_impact_row`.
+- 4 tests cho manifest alignment.
+- 9 tests cho API endpoint.
+- 5 tests cho design choices + edge cases.
+
+**Total tests: 595 → 627 (+32).** Tất cả pass trong 25s.
+
+---
+
+## [0.24.5] - 2026-06-13
+
+### Added (Tier 1 — Data Value Features, P0 + P1 + Task 1)
+
+> **Goal**: Tận dụng data có sẵn trong lakehouse để cạnh tranh với TradingView. 5 features Tier 1 + 2 prerequisite fixes. **P0, P1, và Task 1 (8 Gold tables exposed)** completed in this release.
+> **See**: `FIX_PLAN.md` cho toàn bộ roadmap Tier 1 (4-5 tuần). Tasks 2-5 còn lại: Whale Alerts, OBI, News↔Price, Liquidity Heatmap.
+
+#### Finding: "Fake cow" — 116/200 high-volume symbols MISS
+
+- Phát hiện nghiêm trọng: Hệ thống chỉ subscribe được 84/200 top-volume symbols. **Missing bao gồm SOL, XRP, PEPE, SUI, TON, TRX, USDC, NEAR** — tổng cộng 60-70% tổng market volume bị miss.
+- **Root cause**: `BinanceClient.fetch_symbols()` trả về danh sách **alphabetical sort** thay vì sort theo 24h quote volume. Code `[:MAX_SYMBOLS]` lấy 200 symbols đầu alphabet (1INCH, AAVE, ACA...) thay vì top volume.
+- **Verify**: chạy audit script `scripts/audit_data_coverage.py` (mới viết) — output real Binance API cho thấy 116 symbols high-volume không có trong alphabetical top-200.
+
+#### P0 Fix: Volume-based symbol selection
+
+- **`src/exchanges/binance/client.py`** — Thêm method `fetch_top_symbols_by_volume(quote_asset, n)`:
+  - Fetch `/exchangeInfo` lấy active spot USDT pairs (~436 symbols).
+  - Fetch `/ticker/24hr` lấy 24h stats, **sort by quoteVolume DESC**, slice top N.
+  - **In-process cache** với TTL 1h (`_SYMBOL_VOLUME_CACHE`, key = `quote:n`).
+  - **`threading.Lock`** + double-checked locking để tránh thundering herd khi nhiều thread reconnect đồng thời.
+  - **Fallback** về alphabetical nếu Binance API down (vẫn start được producer).
+  - **Helper** `_clear_symbol_volume_cache()` cho tests và operational scripts.
+- **`src/producer/main.py`** — `run_streams()` dispatch: nếu client có `fetch_top_symbols_by_volume` thì dùng, không thì fall back về alphabetical. Log rõ ràng khi dùng path nào.
+- **`scripts/audit_data_coverage.py`** (NEW, 12.7KB) — Script audit:
+  - So sánh alphabetical top-200 vs volume top-200 (real Binance API).
+  - Verify Redis coverage (`ticker:latest:*`, `candle:1s:*`, `candle:1m:*` keys).
+  - Sample 1s candle movement (5 random symbols × 5s).
+  - InfluxDB 7d coverage distribution.
+  - **Auto-verdict**: fail nếu miss rate > 10%.
+  - Output: terminal report + optional JSON file.
+
+#### P1 Fix: Unify Gold table schemas
+
+- **Phát hiện schema drift**: Hai hệ thống Gold song song, schema khác nhau:
+  - **Trino-based** (`src/lakehouse/gold_aggregator_trino.py`) — `gold_*` tables với `computed_at`, per-row granularity. **API đang query cái này** (`backend/api/market_overview.py`).
+  - **Spark-based** (`src/lakehouse/gold/{market_metrics,aggregations}.py`) — `market_dominance`, `volatility_ranking`, `movers_ranking`, `gold_market_overview`, `gold_symbol_stats_daily`. Single-row hoặc nested-array. **Không ai query** (orphaned) nhưng vẫn chạy mỗi 5 phút, đốt cluster compute.
+- **Quyết định**: Chọn **Trino-based làm canonical** (vì API đang dùng, làm việc), **defer Spark-based** (giữ code, không schedule, đánh dấu DEPRECATED). Đây là minimum-risk path.
+- **`src/lakehouse/gold_schema_manifest.py`** (NEW, 8.7KB) — Canonical manifest:
+  - 6 bảng `gold_*` với schema đầy đủ (column names + SQL types).
+  - 6 Spark-only tables đánh dấu `DEPRECATED` với rationale.
+  - Constants: `GOLD_FRESHNESS_MINUTES=30`, `CANONICAL_PRODUCER_JOB="gold_layer_job"`.
+  - Helpers: `list_canonical_tables()`, `get_table_schema()`, `is_deprecated_spark_table()`.
+- **`orchestration/assets.py`** — Comment out `@asset` decorators cho `gold_market_dominance`, `gold_volatility_ranking`, `gold_movers_ranking`, `gold_momentum_indicators`. Rename thành `*_deprecated` để Dagster không pick up. `gold_advanced_job` selection giờ chỉ còn `compute_gold_layer` (kept for back-compat). **Code KHÔNG xóa** — nếu sau muốn re-enable, uncomment lại.
+- **`backend/api/market_overview.py`**:
+  - Import `GOLD_FRESHNESS_MINUTES` từ manifest (defensive try/except với fallback).
+  - Log canonical schema khi startup: "market_overview: canonical Gold path active (6 tables: ...); 6 Spark-based tables deprecated."
+
+#### Real-world verify (chạy trên live Binance API)
+
+```
+Top 20 by 24h volume (sau khi fix):
+   1. USDCUSDT      ← MISS trước đây
+   2. BTCUSDT
+   3. ETHUSDT
+   4. USD1USDT      ← MISS
+   5. XAUTUSDT      ← MISS
+   6. SOLUSDT       ← MISS (top 5!)
+   7. WLDUSDT       ← MISS
+   8. ZECUSDT       ← MISS
+   9. TRUMPUSDT     ← MISS
+  10. DOGEUSDT
+  11. XRPUSDT       ← MISS (top 10!)
+  ...
+  20. PEPEUSDT      ← MISS
+  21. TRXUSDT       ← MISS
+  25. SUIUSDT       ← MISS
+  29. TONUSDT       ← MISS
+  → Tất cả 10 critical symbols giờ ĐƯỢC SUBSCRIBE.
+```
+
+#### Task 1 Fix: Expose 6 Gold tables via dedicated endpoints
+
+- **Problem**: API chỉ có 3 endpoints (`/overview`, `/heatmap`, `/rankings/{category}`). Frontend phải gọi `/overview` (6 trong 1) cho mọi thứ, hoặc dùng mock data. Không có dedicated endpoint cho từng Gold table.
+- **Solution**: 6 dedicated endpoints mới, mỗi cái query 1 Gold table:
+
+| New endpoint | Gold table | Use case |
+|---|---|---|
+| `GET /api/market/movers?category=gainer\|loser&limit=N` | `gold_movers_ranking` | Top gainers/losers widget |
+| `GET /api/market/dominance` | `gold_market_dominance` | BTC/ETH dominance badge |
+| `GET /api/market/volatility?limit=N` | `gold_volatility_ranking` | Most volatile list |
+| `GET /api/market/sectors` | `gold_sector_performance` | Sector heatmap |
+| `GET /api/market/news-sentiment?days=7&limit=N` | `gold_news_sentiment_daily` | News sentiment list |
+| `GET /api/market/indicators` | `gold_momentum_indicators` | RSI/MACD summary |
+
+- **Implementation details**:
+  - Mỗi endpoint trả flat `{"data": [...]}` response (không phải dict-of-dicts).
+  - 503 status code khi Trino down (không phải 500) — client phân biệt được outage vs bug.
+  - Mỗi endpoint gọi `record_trino_fallback()` metric khi fail (observability hooks).
+  - `/sectors` convert dict → list, giữ `sector` field (UI render trực tiếp không cần `Object.values`).
+  - 3 legacy endpoints (`/overview`, `/heatmap`, `/rankings/{category}`) **vẫn giữ** cho back-compat.
+  - `regex=` → `pattern=` (FastAPI 0.110+ rename).
+- **`backend/api/market_overview.py`** — Add 6 endpoints với 130+ lines mới.
+- **`frontend/src/services/marketOverviewService.ts`**:
+  - 5 functions mới: `fetchVolatilityRanking`, `fetchMarketDominance`, `fetchSectors`, `fetchNewsSentiment`, `fetchIndicators`.
+  - `fetchTopGainers` / `fetchTopLosers` rewrite: gọi `/market/movers?category=gainer|loser` thay vì `/market/gainers|losers` (endpoints cũ không tồn tại).
+  - Tất cả wrappers dùng `withClientCache` (stale-while-revalidate) + `isUnavailableApiPayload` (mock fallback).
+
+#### Task 2 Fix: Whale Alerts (real-time large trade detection)
+
+- **Mục tiêu**: Phát hiện real-time các trade lớn (default ≥ $100K USD) từ `crypto_trades` Kafka topic. Cạnh tranh trực tiếp với Whale Alert, CryptoQuant services.
+- **Architecture**:
+  - Flink `WhaleAlertWriter` (new) consume `crypto_trades` song song với `KeyDBTradeWriter` (không ảnh hưởng hot path).
+  - Filter `price × quantity >= MIN_WHALE_USD` (default $100K, override bằng env var `WHALE_ALERT_MIN_USD`).
+  - Dual-sink: Redis sorted set `whale:alerts:{exchange}:{symbol}` (TTL 1h, max 1000/symbol) + InfluxDB measurement `whale_alerts` (historical analytics).
+  - Side derivation: `is_buyer_maker=False → buy`, `True → sell` (chuẩn Binance aggTrade semantics).
+- **`src/processing/writers/whale_alert.py`** (NEW, 10.9KB):
+  - `WhaleAlertWriter(min_whale_usd=100_000, batch_size=50, flush_interval_sec=1.0)`.
+  - Constants: `DEFAULT_MIN_WHALE_USD=100_000`, `REDIS_KEY_PREFIX="whale:alerts"`, `REDIS_TTL_SEC=3600`, `MAX_ENTRIES_PER_SYMBOL=1000`.
+  - Module-level: `WRITER_NAME="whale_alert"`, `SINK_NAME="redis+influxdb"`, `SOURCE_TOPIC="crypto_trades"`.
+  - Metrics hook: `record_whale_alert(exchange, symbol, side, notional_usd)`.
+  - **No state, no CEP** — pure filter+forward để giữ hot path lean.
+- **`src/processing/writers/metrics.py`**: 3 metrics mới (Task 2):
+  - `flink_whale_alerts_detected_total{exchange,symbol,side}` — Counter.
+  - `flink_whale_alert_notional_usd{exchange,side}` — Histogram với 11 buckets từ $100K → $100M.
+  - `flink_whale_alert_recent_count{exchange,symbol}` — Gauge (hook cho sidecar scraper; không populate inline để tránh hot-path cost).
+  - Helper `record_whale_alert()` tăng counter + observe histogram.
+- **`src/processing/pipeline.py`**: Wire `WhaleAlertWriter` vào trade stream. Log threshold lúc startup (`[Pipeline] whale alert threshold = $100000`).
+- **`src/lakehouse/gold_schema_manifest.py`**: Thêm `whale_alerts` entry với 9 fields. Canonical count 6 → 7. Note: không phải Trino table (read path từ Redis) — entry này cho audit/completeness.
+- **`backend/api/market_overview.py`**: New endpoint `GET /api/market/whale-alerts`:
+  - Query params: `min_usd` (default 100K, range 1K-100M), `limit` (default 20, max 200), `since_minutes` (default 60, **clamp to 60** vì Redis TTL), `symbol` (optional), `exchange` (default binance).
+  - Read từ Redis sorted set với `ZREVRANGEBYSCORE` (newest first).
+  - Filter mode: nếu `symbol` provided → direct key access (no SCAN). Nếu null → SCAN `whale:alerts:{exchange}:*` rồi union.
+  - **503** on Redis failure (init/SCAN/ZRANGE) — client phân biệt outage vs bug.
+  - Empty Redis → empty list `{"count": 0, "data": []}` (không phải 500).
+  - Warning text: "Older alerts (>60min) are not in Redis. Use the InfluxDB whale_alerts measurement for historical queries."
+
+#### Tests (94 new, all pass)
+
+- **`tests/unit/test_volume_based_selection.py`** (NEW, 17KB, 12 tests):
+  - **Happy path**: top-N sort, include high-volume, USDT-only filter, inactive filter.
+  - **Cache layer**: hit, expiry, clear, different-n-keys.
+  - **Error handling**: API failure → fallback to alphabetical, retry logic.
+  - **Producer integration**: `run_streams()` dispatches đúng method.
+  - **Concurrency**: 5 threads × lock = chỉ 1 HTTP fetch thực sự.
+- **`tests/unit/test_gold_schema_manifest.py`** (NEW, 14KB, 33 tests):
+  - **Manifest contents**: 6 canonical tables, columns, computed_at, count.
+  - **Deprecation list**: 6 Spark tables, rationale present, no overlap.
+  - **Helper functions**: list/get_schema/is_deprecated.
+  - **Freshness constant**: matches API default (30 min).
+  - **Dagster alignment**: assets are *_deprecated, gold_advanced_job uses Trino only.
+  - **API alignment**: queries canonical gold_* tables only, freshness filter, imports manifest.
+
+#### Test count update
+
+- **Total Tier 1 tests:** 0 → 94 (P0 + P1 + Task 1 + Task 2).
+- **Total unit tests:** 501 → 595.
+
+#### Files changed in P0 + P1 + Task 1 + Task 2
+
+| File | Status | Size | Purpose |
+|---|---|---|---|
+| `FIX_PLAN.md` | NEW | 36KB | Tier 1 plan toàn diện |
+| `scripts/audit_data_coverage.py` | NEW | 12.7KB | Audit "fake cow" |
+| `src/exchanges/binance/client.py` | MODIFIED | +5KB | `fetch_top_symbols_by_volume()` + cache + lock |
+| `src/producer/main.py` | MODIFIED | +1KB | Dispatch to volume method |
+| `src/lakehouse/gold_schema_manifest.py` | MODIFIED | +1KB | Whale alerts entry (count 6→7) |
+| `src/processing/writers/whale_alert.py` | NEW | 10.9KB | Flink `WhaleAlertWriter` |
+| `src/processing/writers/metrics.py` | MODIFIED | +60 lines | 3 whale alert metrics + `record_whale_alert()` |
+| `src/processing/pipeline.py` | MODIFIED | +20 lines | Wire `WhaleAlertWriter` into trade stream |
+| `orchestration/assets.py` | MODIFIED | +1KB | Comment out deprecated Spark assets |
+| `backend/api/market_overview.py` | MODIFIED | +200 lines | Manifest import + 7 endpoints (6 Task 1 + 1 whale-alerts) |
+| `frontend/src/services/marketOverviewService.ts` | MODIFIED | +100 lines | 5 new fetch functions + rewrite gainers/losers |
+| `tests/unit/test_volume_based_selection.py` | NEW | 17KB | 12 tests for P0 |
+| `tests/unit/test_gold_schema_manifest.py` | MODIFIED | +5 lines | 33 tests for P1 (whale update) |
+| `tests/unit/test_market_dedicated_endpoints.py` | NEW | 16.6KB | 19 tests for Task 1 |
+| `tests/unit/test_whale_alerts.py` | NEW | 22.6KB | 30 tests for Task 2 |
+| `docs/CHANGELOG.md` | UPDATED | +180 lines | v0.24.4 P0+P1+Task 1+Task 2 entries |
+
+---
+
+## [0.24.4] - 2026-06-13
+
+### Added (Logging Phase — Structured logs, Request-id, Retention)
+
+- **`docs/LOGGING_AUDIT_PLAN.md`** (NEW, 9.4KB) — Báo cáo audit toàn diện cho logging stack. Phát hiện 5 vấn đề nghiêm trọng: (1) 7 log dashboards dùng `| json` nhưng app xuất plain text → 5/6 panel mỗi dashboard rỗng. (2) Không có request-id correlation giữa 5 services. (3) 19 silent `except: pass` che giấu bug. (4) Không có retention policy cho Loki → đầy disk. (5) Promtail regex brittle với locale. 5 bước cải tiến đã thực thi.
+
+- **`docs/LOGGING.md`** (NEW, 7.3KB) — Hướng dẫn vận hành: log schema (10 fields), cách thêm log line, request-id middleware, level conventions, anti-patterns, cách query trong Grafana.
+
+- **Structured JSON logging** (Step 1):
+  - **`src/common/logging.py`** (REWRITE) — Thêm `JsonFormatter` (stdlib only, 0 deps) emit một JSON object mỗi line. Format: `ts` (RFC3339 UTC ms), `level`, `logger`, `module`, `line`, `thread`, `request_id`, `message`, `context` (dict từ `extra=`), `exc_type`/`exc_info` (nếu có exception). Helper `log_with_context(logger, level, msg, context)` cho DX tốt hơn. `setup_logging_from_env()` đọc `LMVIEW_LOG_JSON` (auto-on trong container) + `LMVIEW_LOG_LEVEL`. Tame 8 noisy 3rd-party loggers (aiokafka, asyncio, kafka, pyflink, uvicorn, websockets, aiormq).
+  - **`backend/app.py`** — Call `setup_logging_from_env()` ngay khi import để mọi log kể cả lifespan errors đều JSON.
+  - **`src/producer/main.py`** — Đổi `setup_logging("producer")` → `setup_logging_from_env()`.
+  - 7 log dashboards giờ render đúng (`{container="fastapi"} | json | method != ""` hoạt động).
+
+- **Request-id correlation middleware** (Step 2):
+  - **`backend/middleware/request_id.py`** (NEW) — `RequestIdMiddleware` (BaseHTTPMiddleware): (1) đọc `X-Request-Id` từ request hoặc generate 12-char hex (48 bits entropy). (2) bind vào `contextvars.ContextVar` để mọi code path trong cùng task đọc được. (3) Echo lại header. (4) Emit 1 structured log line mỗi request (INFO 2xx, WARNING 4xx, ERROR 5xx). (5) Record metric `api_request_id_samples_total` với 12-char SHA-256 prefix làm label (privacy + bounded cardinality). Truncate id > 64 chars để chống DoS.
+  - **`backend/api/metrics.py`** — Thêm `API_REQUEST_ID_SAMPLES` Counter (labels `method`, `path`, `status_class`, `rid_hash`).
+  - **`backend/app.py`** — Register middleware (always-on, no env gate).
+  - Cú pháp grep: `{container="fastapi"} | json | request_id="8f3e2c1a"` → tất cả log của 1 request xuyên qua 5 services.
+
+- **Silent-except audit** (Step 3):
+  - **`src/processing/writers/indicators.py`** — `except Exception: pass` quanh `record_kafka_source_drop` → `except Exception as metric_exc: log.debug(...)`. Comment giải thích: "Never let a metric hiccup hide the real error."
+  - **`src/processing/writers/kline_aggregator.py`** — Cùng fix.
+  - **`src/news/enhanced_scraper.py`** — `_parse_date` `except: pass` → `except (ValueError, TypeError, IndexError) as exc: logger.debug(...)`. Cũng đổi implicit `return None` → explicit `return 0` để type rõ ràng.
+  - 19 silent excepts → 15 còn lại (4 fixed, 11 kept có comment justify rõ ràng). Test `test_logging_silent_excepts.py` verify không còn bare `except Exception: pass` trong critical paths.
+
+- **Loki retention policy** (Step 4):
+  - **`config/loki-config.yml`** — Thêm `compactor` block với `retention_enabled: true`, `retention_delete_delay: 2h`, `compaction_interval: 10m`. `limits_config.retention_period: 168h` (7 days). `ingestion_rate_mb: 10`, `ingestion_burst_size_mb: 20` để chống runaway producer. `max_line_size: 256KB` để bound memory. `table_manager.retention_deletes_enabled: true`. Trade-off note: 7d là balance giữa disk/incident-response/PII.
+
+- **Tests** (25 new tests, all pass):
+  - **`tests/unit/test_logging_format.py`** (12 tests) — JsonFormatter emits valid JSON, includes request_id, extra context, exception info, UTC RFC3339 timestamp, handles non-serialisable context without crash. Plain-text mode and JSON mode side-by-side. Re-calling setup_logging doesn't double-log. Noisy loggers tamed to WARNING.
+  - **`tests/unit/test_logging_request_id.py`** (7 tests) — Generates 12-char hex id when missing, echoes incoming id, unique per request, truncates oversized, 5xx still returns rid, metric recorded per request, rid is SHA-256 hashed (not raw) for label cardinality.
+  - **`tests/unit/test_logging_silent_excepts.py`** (6 tests) — Verify the new debug log line in kline_aggregator/indicators. Verify enhanced_scraper returns 0 with debug log. Verify websocket.py keeps justified silent blocks.
+
+### Test count update
+
+- **Total Phase 5 tests:** 124 → 149 (added 25 logging tests).
+- **Total unit tests:** 473 → 501 (excluding 4 sentiment tests với LLM mock issue).
+
+### Added (Grafana Alerting UI + Credentials)
+
+- **Alert Center dashboard** (`config/grafana/dashboards/alert-center.json`, NEW, 14 panels):
+  - **6 stat panels** — Firing Critical/Warning/Info, Pending, NoData, Total Rules. Each queries `ALERTS{alertstate=...,severity=...}` để cho operator số lượng firing theo severity.
+  - **2 timeseries panels** — Active Alert Count Over Time (per severity, stepAfter), Alerts by Component (bar chart theo `grafana_folder`).
+  - **1 heatmap** — Alert Firing Heatmap by Hour-of-Day. Giúp spot recurring incident patterns (e.g. nightly batch job lúc 03:00 UTC).
+  - **1 table** — All Alert Rules with state. Pairs với `docs/RUNBOOKS.md` — match `alertname` ở đây với heading runbook.
+  - **Cross-links** — Executive Overview, Error Triage, SLO Burn Rate, Grafana Alerting UI (`/alerting/list`).
+  - **UID:** `phase5-alert-center` (stable, link không break).
+  - **Auto-loaded** qua dashboards.yml provisioning.
+
+- **Contact points provisioning** (`config/grafana/provisioning/alerting/contact-points.yml`, NEW, 5 contact points):
+  - `internal-log` — always-on fallback (default).
+  - `webhook` — generic Prometheus alertmanager webhook.
+  - `slack` — Slack channel `#lmview-alerts` (override qua `GRAFANA_SLACK_WEBHOOK`).
+  - `email` — SMTP recipients (override qua `GRAFANA_EMAIL_TO`).
+  - `pagerduty` — Events API v2 (override qua `GRAFANA_PAGERDUTY_KEY`).
+  - Tất cả đều env-gated, default về safe no-op nếu không set.
+
+- **Notification policies** (`config/grafana/provisioning/alerting/notification-policies.yml`, NEW, 9 policies):
+  - Root policy → `internal-log` (default catch-all).
+  - Critical severity → `pagerduty` + `slack` (page on-call + notify channel).
+  - Warning severity → `slack` only (no pages).
+  - Info severity → `internal-log` only.
+  - `LMView / Frontend` folder → `slack` (dedicated channel).
+  - `LMView / Security` folder → `pagerduty` + `email` (high prio).
+  - `slo_*` alerts → `slack` only (no pages during business hours — mở comment để bật).
+  - Mỗi policy có `group_wait`, `group_interval`, `repeat_interval` riêng.
+
+- **Mute timings** (`config/grafana/provisioning/alerting/mute-timings.yml`, NEW):
+  - `business_hours` — 09:00-18:00 UTC Mon-Fri (cho SLO slow-burn).
+  - `weekend` — Sat/Sun (future use).
+
+- **README credentials** (`README.md`):
+  - Bảng 14 services × 4 cột (URL / User / Pass / Notes).
+  - Production checklist 6 items.
+  - Default Grafana: `admin` / `admin` (override qua `GRAFANA_ADMIN_PASSWORD`).
+  - Alert Center URL: http://localhost:3001/d/phase5-alert-center.
+
+- **Tests** (28 new, all pass):
+  - `tests/unit/test_grafana_alerting.py` — Verify dashboard JSON, panel types, ALERTS-metric refs, severity stat panels filter `alertstate="firing"`, contact-points YAML có ≥4 CPs với unique UIDs, root policy exists, critical routes to PagerDuty/Slack, all rules have severity label + datasource, README/docker-compose/.env đều có credentials.
+
+### Test count update (final)
+
+- **Total Phase 5 tests:** 149 → 177 (+28 alerting tests).
+- **Total unit tests:** 473 → 501 (excluding 4 sentiment tests).
+
+
+## [0.24.3] - 2026-06-12
+
+### Added
+
+- **Advanced News Context for AI** — New `NewsContextBuilder` pulls persisted PostgreSQL news data, ranks articles by symbol match/recency/sentiment/source reliability, generates data caveats, and feeds compact context into AI Ask/Interact prompts (`ai_service/context/news_context.py`).
+- **Notification creation service** — End-to-end notification creation with preference gating, event-specific helpers for AI actions, news risk events, system degraded state, and alert triggers (`backend/services/notification_service.py`).
+- **Approved internal KB documents** — Two approved, RAG-enabled knowledge base entries: platform architecture/capabilities grounding and data caveats/limitations guide (`docs/ai/knowledge_base/approved/`).
+- **AI context quality chips** — AI panel now shows live context chips: news article count, sentiment direction, freshness age, confidence percentage, and degraded-state warnings.
+- **Sources used display** — Collapsible RAG source citations with match scores on each AI response.
+- **Risk event warnings** — Inline risk event alerts on AI responses when news contains hack/regulation/crash keywords.
+- **Loading skeletons** — Animated skeleton placeholder while AI is thinking.
+- **Admin context debug preview** — Admin-only collapsible panel showing confidence, provider/model, news context stats, data caveats, and RAG chunk details.
+- **`NewsContextSummary` type** — Frontend TypeScript interface for news context metadata (`frontend/src/services/aiService.ts`).
+- **47 new tests** — Unit and integration tests for news context ranking/dedup/caveats/risk and notification creation/preferences/events.
+- **Bilingual i18n** — English and Vietnamese translations for all new AI context chip and quality label strings.
+- **Comprehensive mock AI responses** — Updated mock AI generation in `frontend/src/data/mock/mockAi.ts` to return realistic, dynamic payloads including news contexts, sentiment summaries, RAG citations, data caveats, token usage, and cost estimates. This allows developers to test all newly introduced AI assistant visual functionalities offline.
+
+### Changed
+
+- **AI confidence model** — Confidence score now factors in news context availability (+5% when relevant news exists).
+- **AI prompt builder** — `build_ask_prompt()` accepts optional `news_context` parameter and formats news headlines/sentiment/risk events as a system context section.
+- **AI orchestrator** — News context assembly and news caveats integrated into the unified AI pipeline; news context included in response metadata.
+- **`AIChatResponse` model** — Added `news_context` optional field for frontend display.
+- **Context service** — Extracted `assemble_news_context()` async function for use by the orchestrator.
+
+### Fixed
+
+- **Type safety in tests** — Fixed Python/Pyright lint warnings in `tests/unit/test_news_context.py` by converting `symbols_mentioned` and `article_id` parameter default values to use `Optional[List[str]]` and `Optional[str]`.
+- **Frontend dependency resolution** — Resolved TypeScript compiler errors (TS2307) in `AiAssistantPanel.tsx` by installing missing markdown rendering dependencies (`react-markdown`, `rehype-sanitize`, `remark-gfm`) with legacy peer deps for React 19 compatibility.
+- **Sentiment service test compliance** — Fixed LLM sentiment service test failures in `tests/unit/test_sentiment_service.py` by mocking the `get_api_key` configuration check to ensure the mocked LLM completion path is correctly tested.
+
+---
+
+## [0.24.2] - 2026-06-12
+
+### Added
+
+- **`docs/audit_dataflow_plan.md`** — Báo cáo audit toàn diện cho `dataflow_analysis_and_observability_plan.md`. Trả lời 3 câu hỏi: (1) metric Prometheus có đủ cho Grafana? (2) bottleneck fix OK? (3) có chạy được không? Kết luận: 100% dashboard coverage, 3/7 bottleneck fix code, 2/7 observability fix, 2/7 partial. 97/97 unit tests pass.
+- **`backend/app.py`** — Thêm 2 FastAPI endpoints: `/metrics-custom` (HTTP/WS/multi-source/cache/Trino) và `/metrics-ai` (AI/RAG/scope-gate/cost). Mỗi endpoint lọc theo tên metric của module tương ứng, dùng FastAPI `Response` + `prometheus_client.CONTENT_TYPE_LATEST` để giữ exposition format. Fix critical issue: `prometheus.yml` khai báo 3 scrape jobs (`fastapi-custom`, `ai-services`, `producer-extended`) nhưng không có endpoint — jobs sẽ fail khi scrape. Verify with TestClient: 3 endpoint return 200 + valid format.
+- **`backend/services/ai/metrics.py`** — Thêm 9 alias metrics cho `rag-knowledge-base` dashboard: `ai_knowledge_base_chunk_count`, `ai_knowledge_base_size_bytes`, `ai_knowledge_base_last_ingest_timestamp`, `ai_knowledge_base_oldest_chunk_timestamp`, `ai_embedding_dimensions`, `ai_knowledge_base_source` (Info), `ai_rag_retrieval_total`, `ai_retrieval_log_total`. Thêm 3 helper functions: `record_kb_inventory()`, `record_rag_retrieval_count()`, `record_retrieval_log_count()`. Fix 8 broken metric refs trong dashboard.
+- **`tests/unit/test_phase5_endpoints.py`** — 22 tests (PASSED) verify 3 Prometheus endpoints: 200 OK, valid format, 4 metric families present trên `/metrics-custom` (WS, multi-source, cache, Trino), 6 families trên `/metrics-ai` (scope gate, provider, RAG, output guard, cost, chat), 8 RAG dashboard aliases, cross-endpoint isolation. Test có module-scoped fixture reload metrics modules dưới canonical dotted name để tránh duplicate-registration với `test_phase5_flink_metrics_pure.py`.
+
+### Changed
+
+- **Test count update** — Total Phase 5 tests: 75 → 97 (added 22 endpoint tests). Total unit tests: 363 → 377 (excluding 4 sentiment tests với LLM mock issue không liên quan).
 
 ---
 
@@ -979,6 +1734,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Trade cache TTL too short** — `src/processing/writers/keydb_trades.py` trade cache TTL was 600s (10 min). Increased to 3600s (1 hour) to prevent premature expiry.
 - **WebSocket no reconnect on disconnect** — `marketDataService.ts` now implements exponential-backoff reconnect (up to 5 retries) for `subscribeAllTimeframes`, `subscribeCandle`, and `subscribeIndicatorStream`.
 - **Watchlist ticker polling reduced from 5s to 30s** — `App.tsx` now uses live price from WS `_livePriceMap` for selected symbol (50ms updates). Other watchlist symbols fall back to REST poll every 30s instead of 5s.
+
+### Added
+
+- **`docs/DATA_FLOW.md`** — Comprehensive data flow documentation covering Lambda Architecture (Speed Layer → Batch/Lakehouse → Serving), exchange ingestion (Binance + OKX), Kafka topics, Flink writers (KeyDB, InfluxDB, IndicatorWriter), Spark Bronze/Silver/Gold tables, indicator computation (Flink real-time vs Spark batch), Trino query engine, and FastAPI/WebSocket serving layer.
+- **`docs/DATA_FLOW_01_ARCH_OVERVIEW.md`** — Part 1: Architecture overview (Lambda 3 layers) + Exchange ingestion (Binance + OKX WebSocket, threading model, JSON formats, canonical mapping layer, producer integration).
+- **`docs/DATA_FLOW_02_KAFKA.md`** — Part 2: Kafka Broker layer (4 topics × 12 partitions, Avro schemas, Confluent wire format, Schema Registry, partitioning strategy, performance tuning, checkpoint locations).
+- **`docs/DATA_FLOW_03_FLINK.md`** — Part 3: Flink Speed Layer (KeyDB writers, InfluxDB writers, KlineWindowAggregator with gap-fill, IndicatorWriter với true EMA/RSI/BB/MACD/ATR, depth/trade writers, batch-buffered performance, Redis Sentinel failover, full Redis key patterns + InfluxDB measurements).
+- **`docs/DATA_FLOW_04_SPARK_LAKEHOUSE.md`** — Part 4: Spark Lakehouse (Bronze 3 tables với streaming write + dedup, Silver ticker_unified + kline_multi_timeframe với quality scoring, Gold 9 tables: market_overview, coin_ticker, momentum_indicators, indicator_history, market_dominance, volatility_ranking, movers_ranking, sector_performance, news_sentiment — đầy đủ schema, transformations, pipeline orchestration).
+- **`docs/DATA_FLOW_05_SERVING.md`** — Part 5: Serving Layer (FastAPI + WebSocket với 3 routes /api/stream/all, /api/stream/{interval}, /api/stream/indicators/{interval}; Redis pipeline optimization v0.23.1 giảm 6× Redis calls; 20+ REST endpoints cho klines/ticker/trades/orderbook/indicators/market/screener/news/auth/settings/admin/ai; multi-source fallback chains: Redis→InfluxDB→Trino→REST; service layer, Pydantic models, database clients, auth/JWT, error handling, caching, observability).
+- **`docs/DATA_FLOW_06_INDICATORS.md`** — Part 6: Technical Indicators deep dive (Flink real-time vs Spark batch side-by-side: True EMA vs SMA approximation, Wilder's RSI, Bollinger Bands population vs sample stddev, MACD true vs SMA, ATR, state management, warmup, query patterns, coverage matrix; công thức chi tiết với code cho 13 indicators).
+- **`docs/DATA_FLOW_07_DIAGRAMS.md`** — Part 7: Data Flow Diagrams & End-to-End Latency (Lambda architecture diagram, sequence diagrams cho kline/orderbook/indicator real-time, cold path Bronze→Silver→Gold chi tiết, latency budget table theo component, throughput analysis, failure modes & RPO/RTO, scaling patterns, capacity planning, monitoring stack, production Docker topology, network ports reference, glossary, coverage matrix 7 phần).
+- **`docs/final_data_flow.md`** — Tài liệu hợp nhất đầy đủ 7 phần DATA_FLOW (1 file ~264KB, bao gồm tất cả 4 Kafka topics, 8 Flink writers, 3 Bronze + 2 Silver + 9 Gold tables, 9 Redis key patterns, 3 InfluxDB measurements, 13 indicators, 20+ REST endpoints, 3 WebSocket routes, sequence diagrams, latency budget, failure modes, scaling patterns).
 
 ---
 
@@ -1130,17 +1897,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **Runtime verification pending** — Full end-to-end test (news fetch → sentiment score → Dagster aggregation → chart markers) requires live Docker environment with running services.
 
 ---
-
-## [0.19.3] - 2026-06-12 - Frontend Mock Data Mode Wiring
-
-### Added
-
-- **Frontend mock mode scripts** - Added `frontend` `dev:mock` and `build:mock` scripts with `.env.mock` so the UI can run against frontend-generated mock data without backend services.
-- **Mock market overview payload** - Expanded `mockDataGenerator.ts` to produce full market overview, heatmap, sector, trending symbol, ticker volume, and indicator summary data for frontend-only screens.
-
-### Fixed
-
-- **Mock overview shape** - Updated the mock data adapter and market overview service so mock mode returns a complete `MarketOverview` shape instead of casting raw market metrics into the page contract.
 
 ## [0.18.1] - 2026-06-07 - Update documentations
 

@@ -2,12 +2,14 @@
 Context service — assembles chart context and data caveats for AI analysis.
 
 Reads from existing backend services (Redis, InfluxDB, etc.) to build a
-complete context package including data freshness warnings.
+complete context package including data freshness warnings and news context.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Dict, List, Optional
+
+from ai_service.context.news_context import build_news_context, NewsContextResult
 
 logger = logging.getLogger("ai_service.context.context_service")
 
@@ -79,6 +81,34 @@ def assemble_data_caveats(chart_context: Optional[Dict[str, Any]]) -> List[str]:
         )
 
     return caveats
+
+
+async def assemble_news_context(
+    chart_context: Optional[Dict[str, Any]],
+    user_query: Optional[str] = None,
+) -> Optional[NewsContextResult]:
+    """
+    Assemble news context from persisted PostgreSQL news data.
+
+    Args:
+        chart_context: Current chart context dict with symbol/exchange info.
+        user_query: The user's question for keyword relevance scoring.
+
+    Returns:
+        NewsContextResult or None if news data is unavailable.
+    """
+    symbol = None
+    if chart_context:
+        symbol = chart_context.get("symbol")
+
+    try:
+        return await build_news_context(
+            symbol=symbol,
+            query=user_query,
+        )
+    except Exception as exc:
+        logger.warning("Failed to build news context: %s", exc)
+        return None
 
 
 def build_context_summary(chart_context: Optional[Dict[str, Any]]) -> str:

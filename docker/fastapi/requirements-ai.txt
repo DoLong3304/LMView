@@ -1,0 +1,12 @@
+# AI/ML heavy dependencies — OPTIONAL.
+# These together pull in ~5GB (torch 1.2GB, triton 700MB, nvidia
+# 2.7GB, transformers 119MB, scikit-learn 50MB, scipy 113MB).
+#
+# Only install when AI_ENABLE_REAL_LLM=true is set (production
+# deployments with a real LLM provider, e.g. OpenAI, Qwen, etc.).
+# Default deployments use the mock provider and do NOT need these.
+#
+# To install in the running container:
+#   docker exec fastapi-prod pip install -r /app/docker/fastapi/requirements-ai.txt
+# Or rebuild the image with the env var set so the layer is cached.
+sentence-transformers==3.3.1

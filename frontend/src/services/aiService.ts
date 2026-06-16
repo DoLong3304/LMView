@@ -63,6 +63,45 @@ export interface AIChatResponse {
   token_input?: number | null;
   token_output?: number | null;
   estimated_cost_usd?: number | null;
+  /** News context summary for display chips */
+  news_context?: NewsContextSummary | null;
+}
+
+/** Compact news context returned by AI chat */
+export interface NewsContextSummary {
+  symbol?: string | null;
+  article_count: number;
+  source_count: number;
+  top_headlines: Array<{
+    title: string;
+    source: string;
+    sentiment: string;
+    sentiment_score: number;
+    published_at?: string | null;
+    symbols: string[];
+  }>;
+  sentiment_summary: {
+    direction: string;
+    avg_score: number;
+    positive_count: number;
+    neutral_count: number;
+    negative_count: number;
+    confidence: string;
+    symbol_specific?: boolean;
+  };
+  freshness: {
+    newest_age_hours?: number | null;
+    oldest_age_hours?: number | null;
+    newest_at?: string | null;
+    is_stale: boolean;
+  };
+  risk_events: string[];
+  caveats: string[];
+  trending_symbols: Array<{
+    symbol: string;
+    mention_count: number;
+    avg_sentiment: number;
+  }>;
 }
 
 export interface AISessionResponse {

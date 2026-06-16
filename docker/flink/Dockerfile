@@ -10,7 +10,8 @@ RUN apt-get update -o Acquire::Retries=3 && apt-get install -y --no-install-reco
 RUN pip3 install --no-cache-dir \
     apache-flink==1.18.1 \
     influxdb-client==1.44.0 \
-    redis==5.0.3
+    redis==5.0.3 \
+    prometheus_client==0.20.0
 
 # â”€â”€ Kafka SQL connector JAR (Flink 1.18) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 # Avro Confluent Registry format JAR (for avro-confluent deserialization)

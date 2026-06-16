@@ -57,6 +57,11 @@ def mock_litellm_provider():
 class TestScoreArticleSentimentLLM:
     """Test LLM-based sentiment scoring."""
 
+    @pytest.fixture(autouse=True)
+    def mock_dashscope_key(self):
+        with patch("backend.services.sentiment_service.get_api_key", return_value="fake-api-key"):
+            yield
+
     @pytest.mark.asyncio
     @pytest.mark.unit
     async def test_llm_returns_valid_bullish(self, mock_litellm_provider):

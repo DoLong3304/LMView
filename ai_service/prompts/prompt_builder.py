@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ai_service.context.news_context import NewsContextResult
 
 from backend.models.ai.providers import LLMMessage
 from backend.models.ai.rag import RAGChunkResult
@@ -24,6 +27,28 @@ ASK_MODE_SYSTEM_PROMPT = """You are LMView AI, a bilingual (English/Vietnamese) 
 - Explain indicators, chart patterns, market structure, and risk management concepts.
 - Use the provided chart context, market data, and knowledge base to ground your analysis.
 - Always be honest about data limitations and uncertainties.
+
+## Response Formatting & Language Rules
+1. **Full Markdown Support**: Use headers (`###`), lists (`-`), bolding (`**`), and styled tables to organize information cleanly.
+2. **Highlight Key Values**: Highlight important prices, percentages, indicators, and trends with clear markdown styling (e.g. **$65,420**, **+5.23%**, **RSI: 28.5 (Oversold)**, **Bullish Crossover**).
+3. **No Coding Style**: Do NOT use technical variable names, JSON keys, dictionary formats, or database strings (e.g., `sma20`, `rsi14`, `btc_dominance`, `total_market_cap`, `imbalance`) in your output.
+4. **Convert Variables to Human-Readable Equivalents**: Always translate raw variable/key names into natural, human-readable equivalents in your text:
+   - `sma20` -> **20-day Simple Moving Average (SMA)**
+   - `sma50` -> **50-day Simple Moving Average (SMA)**
+   - `ema12` -> **12-period Exponential Moving Average (EMA)**
+   - `ema26` -> **26-period Exponential Moving Average (EMA)**
+   - `rsi` / `rsi14` -> **Relative Strength Index (RSI)**
+   - `macd` -> **MACD Line**
+   - `macd_signal` -> **MACD Signal Line**
+   - `macd_histogram` -> **MACD Histogram**
+   - `bb_upper` / `bollinger_upper` -> **Bollinger Upper Band**
+   - `bb_lower` / `bollinger_lower` -> **Bollinger Lower Band**
+   - `bb_width` -> **Bollinger Band Width**
+   - `btc_dominance` -> **Bitcoin Dominance**
+   - `total_market_cap` -> **Total Market Capitalization**
+   - `imbalance` -> **Order Book Imbalance**
+   - `volume_sma20` -> **20-period Volume Moving Average**
+   - `atr14` -> **Average True Range (ATR)**
 
 ## Important Rules
 1. You are NOT a financial advisor. Never give direct buy/sell recommendations.
@@ -71,6 +96,7 @@ def build_ask_prompt(
     conversation_history: Optional[List[Dict[str, str]]] = None,
     language: Optional[str] = None,
     data_caveats: Optional[List[str]] = None,
+    news_context: Optional["NewsContextResult"] = None,
 ) -> List[LLMMessage]:
     """
     Build the full prompt for Ask Mode.
@@ -103,6 +129,15 @@ def build_ask_prompt(
             role="system",
             content=f"## Current Chart Context\n{context_text}",
             name="chart_context",
+        ))
+
+    # News context as system context
+    if news_context and news_context.article_count > 0:
+        news_text = _format_news_context(news_context)
+        messages.append(LLMMessage(
+            role="system",
+            content=f"## News Context\n{news_text}",
+            name="news_context",
         ))
 
     # RAG knowledge chunks as system context
@@ -220,6 +255,55 @@ def _format_rag_chunks(chunks: List[RAGChunkResult]) -> str:
         "Use these knowledge base entries to ground your response where relevant. "
         "Cite sources by number when referencing specific information."
     )
+
+    return "\n".join(parts)
+
+
+def _format_news_context(news_ctx: "NewsContextResult") -> str:
+    """Format news context into a readable string for the LLM."""
+    parts = []
+
+    parts.append(f"- Articles found: {news_ctx.article_count}")
+    parts.append(f"- Sources: {news_ctx.source_count}")
+
+    # Sentiment summary
+    sent = news_ctx.sentiment_summary
+    if sent:
+        parts.append(f"- Sentiment direction: {sent.get('direction', 'neutral')}")
+        parts.append(f"  - Avg score: {sent.get('avg_score', 0)}")
+        parts.append(f"  - Distribution: +{sent.get('positive_count', 0)} / ={sent.get('neutral_count', 0)} / -{sent.get('negative_count', 0)}")
+        parts.append(f"  - Confidence: {sent.get('confidence', 'low')}")
+
+    # Freshness
+    fresh = news_ctx.freshness
+    if fresh and fresh.get('newest_age_hours') is not None:
+        parts.append(f"- Newest article: {fresh['newest_age_hours']:.1f}h ago")
+        if fresh.get('is_stale'):
+            parts.append("  ⚠️ News is STALE — may not reflect current events")
+
+    # Top headlines
+    if news_ctx.top_headlines:
+        parts.append("- Top headlines:")
+        for i, h in enumerate(news_ctx.top_headlines[:6], 1):
+            sent_label = h.get('sentiment', 'neutral')
+            parts.append(f"  [{i}] {h.get('title', '?')} [{h.get('source', '?')}, {sent_label}]")
+
+    # Risk events
+    if news_ctx.risk_events:
+        parts.append("- ⚠️ Possible risk events:")
+        for event in news_ctx.risk_events[:3]:
+            parts.append(f"  - {event}")
+
+    # Trending symbols
+    if news_ctx.trending_symbols:
+        trending = [f"{s['symbol']}({s['mention_count']}x)" for s in news_ctx.trending_symbols[:5]]
+        parts.append(f"- Trending symbols: {', '.join(trending)}")
+
+    # Caveats
+    if news_ctx.caveats:
+        parts.append("\n⚠️ NEWS CAVEATS:")
+        for caveat in news_ctx.caveats:
+            parts.append(f"  - {caveat}")
 
     return "\n".join(parts)
 

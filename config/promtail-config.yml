@@ -40,7 +40,7 @@ scrape_configs:
           selector: '{log_level=""}'
           stages:
             - regex:
-                expression: '(?i)(?P<log_level>ERROR|WARN|INFO|DEBUG|TRACE)'
+                expression: '(?i)(?P<log_level>ERROR|WARN|INFO|DEBUG|TRACE)'
             - labels:
                 log_level:
       - output:

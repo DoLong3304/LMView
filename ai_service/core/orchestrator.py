@@ -14,7 +14,7 @@ from backend.models.ai.rag import RAGRetrievalRequest
 from ai_service.actions.registry import propose_tool_calls, tool_calls_to_chart_actions
 from ai_service.actions.validator import validate_actions
 from ai_service.config import load_settings
-from ai_service.context.context_service import assemble_data_caveats
+from ai_service.context.context_service import assemble_data_caveats, assemble_news_context
 from ai_service.persistence import chat_store
 from ai_service.prompts.prompt_builder import build_ask_prompt
 from ai_service.providers.router import get_provider_router
@@ -33,7 +33,186 @@ def _title_from_message(message: str) -> str:
 
 
 async def run_chat(body: AIChatRequest, user_id: str) -> AIChatResponse:
-    """Run the unified AI pipeline for Ask or Interact mode."""
+    """Run the unified AI pipeline for Ask or Interact mode.
+
+    Dispatches to LangGraph DAG or legacy linear pipeline based on
+    the ``AI_ORCHESTRATION`` environment variable.
+    """
+    settings = load_settings()
+
+    if settings.orchestration_mode == "langgraph":
+        return await run_chat_langgraph(body, user_id)
+
+    return await _run_chat_legacy(body, user_id)
+
+
+# ── LangGraph orchestration path ─────────────────────────────────────────────
+
+async def run_chat_langgraph(body: AIChatRequest, user_id: str) -> AIChatResponse:
+    """Run the LangGraph multi-agent DAG pipeline."""
+    start_ms = time.monotonic_ns() // 1_000_000
+
+    session_id = await _ensure_session(body=body, user_id=user_id)
+    await chat_store.store_message(
+        session_id=session_id,
+        user_id=user_id,
+        role="user",
+        content=body.message,
+        metadata={
+            "language": body.language,
+            "mode": body.mode.value,
+            "orchestration": "langgraph",
+        },
+    )
+
+    # Load conversation history
+    history = await _load_history(session_id=session_id, user_id=user_id)
+
+    # Build initial graph state
+    from ai_service.agents.state import initial_state
+    from ai_service.agents.graph import run_graph
+
+    graph_state = initial_state(
+        user_query=body.message,
+        session_id=session_id,
+        user_id=user_id,
+        mode=body.mode.value,
+        language=body.language,
+        chart_context=body.chart_context,
+        chat_history=history,
+    )
+
+    # Execute the graph
+    final_state = await run_graph(graph_state)
+
+    elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
+
+    # Handle out-of-scope early exit
+    scope_response = final_state.get("scope_response")
+    if scope_response is not None:
+        return AIChatResponse(
+            session_id=session_id,
+            message_id="",
+            role="assistant",
+            content=scope_response,
+            provider="none",
+            model_name="scope_gate",
+            is_mock=False,
+            warnings=[f"Message classified as out-of-scope: {final_state.get('scope_category', 'unknown')}"],
+        )
+
+    # Extract results from final state
+    final_content = final_state.get("final_content", "")
+    if not final_content:
+        final_content = final_state.get("synthesized_response", "Analysis could not be completed.")
+
+    warnings = list(final_state.get("warnings", []))
+    token_usage = final_state.get("token_usage", {"input": 0, "output": 0})
+    routing = final_state.get("provider_routing", {})
+    tool_calls = final_state.get("tool_calls")
+    chart_actions_raw = final_state.get("chart_actions")
+    confidence = final_state.get("confidence", 0.5)
+    data_caveats = final_state.get("data_caveats", [])
+    news_context = final_state.get("news_context")
+    rag_sources = final_state.get("rag_sources", [])
+    intent = final_state.get("intent")
+    activated_experts = final_state.get("activated_experts", [])
+
+    # Parse chart actions through the existing validator
+    chart_actions = []
+    if chart_actions_raw:
+        from backend.models.ai.chart_actions import AIChartAction
+        for raw_action in chart_actions_raw:
+            try:
+                chart_actions.append(AIChartAction(**raw_action))
+            except Exception:
+                pass
+
+    # Estimate cost
+    estimated_cost_usd = _estimate_cost(
+        token_usage.get("input"),
+        token_usage.get("output"),
+        routing.get("selected_provider"),
+    )
+
+    # Store execution trace
+    from ai_service.agents.persistence import store_execution
+    execution_id = await store_execution(final_state)
+
+    # Store assistant message
+    assistant_msg = await chat_store.store_message(
+        session_id=session_id,
+        user_id=user_id,
+        role="assistant",
+        content=final_content,
+        model_provider=routing.get("selected_provider"),
+        model_name=routing.get("selected_model"),
+        token_input=token_usage.get("input"),
+        token_output=token_usage.get("output"),
+        latency_ms=elapsed_ms,
+        metadata={
+            "is_mock": False,
+            "mode": body.mode.value,
+            "orchestration": "langgraph",
+            "agent_execution_id": execution_id,
+            "intent": intent.to_dict() if intent else None,
+            "activated_experts": activated_experts,
+            "expert_timing": final_state.get("timing", {}),
+            "confidence": confidence,
+            "token_input": token_usage.get("input"),
+            "token_output": token_usage.get("output"),
+            "estimated_cost_usd": estimated_cost_usd,
+            "data_caveats": data_caveats,
+            "news_context": news_context,
+            "revision_count": final_state.get("revision_count", 0),
+        },
+    )
+
+    return AIChatResponse(
+        session_id=session_id,
+        message_id=assistant_msg["id"] if assistant_msg else "",
+        role="assistant",
+        content=final_content,
+        provider=routing.get("selected_provider", "none"),
+        model_name=routing.get("selected_model"),
+        is_mock=False,
+        created_at=datetime.now(timezone.utc),
+        warnings=warnings,
+        suggested_actions=_suggested_prompts(body),
+        tool_calls=tool_calls,
+        chart_actions=chart_actions or None,
+        grounded_context_used=body.chart_context is not None,
+        confidence=confidence,
+        sources=rag_sources or None,
+        data_caveats=data_caveats or None,
+        provider_metadata={
+            "provider_mode": routing.get("provider_mode"),
+            "effective_provider": routing.get("selected_provider"),
+            "model": routing.get("selected_model"),
+            "is_local": routing.get("is_local", False),
+            "fallback_used": routing.get("fallback_used", False),
+            "latency_ms": elapsed_ms,
+            "token_input": token_usage.get("input"),
+            "token_output": token_usage.get("output"),
+            "orchestration": "langgraph",
+            "activated_experts": activated_experts,
+            "agent_execution_id": execution_id,
+        },
+        token_input=token_usage.get("input"),
+        token_output=token_usage.get("output"),
+        estimated_cost_usd=estimated_cost_usd,
+        news_context=news_context,
+    )
+
+
+# ── Legacy linear pipeline (unchanged) ───────────────────────────────────────
+
+async def _run_chat_legacy(body: AIChatRequest, user_id: str) -> AIChatResponse:
+    """Run the original linear AI pipeline (pre-LangGraph).
+
+    This is the existing ``run_chat`` implementation, kept intact for
+    backward compatibility when ``AI_ORCHESTRATION=legacy``.
+    """
     start_ms = time.monotonic_ns() // 1_000_000
     settings = load_settings()
     scope_result = check_scope(body.message)
@@ -68,6 +247,14 @@ async def run_chat(body: AIChatRequest, user_id: str) -> AIChatResponse:
     )
 
     data_caveats = assemble_data_caveats(body.chart_context)
+    news_context = await assemble_news_context(
+        chart_context=body.chart_context,
+        user_query=body.message,
+    )
+    # Add news caveats to data caveats
+    if news_context and news_context.caveats:
+        data_caveats.extend(news_context.caveats)
+
     rag_chunks, sources, rag_warnings = await _retrieve_context(
         body=body,
         user_id=user_id,
@@ -82,6 +269,7 @@ async def run_chat(body: AIChatRequest, user_id: str) -> AIChatResponse:
         conversation_history=history,
         language=body.language,
         data_caveats=data_caveats,
+        news_context=news_context,
     )
     if body.mode.value == "interact":
         prompt_messages.insert(
@@ -133,6 +321,7 @@ async def run_chat(body: AIChatRequest, user_id: str) -> AIChatResponse:
         rag_chunk_count=len(rag_chunks),
         data_caveat_count=len(data_caveats),
         provider=routing.selected_provider,
+        has_news_context=news_context is not None and news_context.article_count > 0,
     )
     estimated_cost_usd = _estimate_cost(
         llm_response.token_input,
@@ -163,6 +352,7 @@ async def run_chat(body: AIChatRequest, user_id: str) -> AIChatResponse:
             "estimated_cost_usd": estimated_cost_usd,
             "tool_calls": tool_calls,
             "chart_actions": [a.model_dump(mode="json") for a in chart_actions],
+            "news_context": news_context.to_dict() if news_context else None,
         },
     )
 
@@ -197,8 +387,11 @@ async def run_chat(body: AIChatRequest, user_id: str) -> AIChatResponse:
         token_input=llm_response.token_input,
         token_output=llm_response.token_output,
         estimated_cost_usd=estimated_cost_usd,
+        news_context=news_context.to_dict() if news_context else None,
     )
 
+
+# ── Shared helpers ────────────────────────────────────────────────────────────
 
 async def _ensure_session(body: AIChatRequest, user_id: str) -> str:
     if body.session_id:
@@ -273,6 +466,7 @@ def _estimate_confidence(
     rag_chunk_count: int,
     data_caveat_count: int,
     provider: Optional[str],
+    has_news_context: bool = False,
 ) -> float:
     if provider == "none":
         return 0.2
@@ -283,6 +477,8 @@ def _estimate_confidence(
         confidence += 0.15
     elif rag_chunk_count >= 1:
         confidence += 0.08
+    if has_news_context:
+        confidence += 0.05
     confidence -= min(0.2, data_caveat_count * 0.04)
     return round(max(0.1, min(0.95, confidence)), 2)
 
@@ -312,3 +508,4 @@ def _suggested_prompts(body: AIChatRequest) -> List[str]:
         f"Explain momentum signals on {timeframe}.",
         "Show me a guided tour of this workspace.",
     ]
+

@@ -27,7 +27,7 @@ Real-time cryptocurrency technical-analysis platform built on Lambda Architectur
 - **Lakehouse analytics**: Spark, Iceberg on MinIO, PostgreSQL catalog, Trino.
 - **High availability**: 3 Kafka brokers, Redis Sentinel (1 master, 2 replicas, 3 sentinels).
 - **AI Ask/Interact Helper**: centralized `ai_service` orchestration, local/API/none provider routing, approved-only pgvector RAG, Markdown chat, and reusable function actions.
-- **Observability**: Prometheus, Grafana, Loki, 22 dashboards, 18 alert rules.
+- **Observability**: Prometheus, Grafana, Loki, 22 dashboards, 48 alert rules. Dedicated **Alert Center** dashboard at `/d/phase5-alert-center` shows firing alerts by severity, component, and hour-of-day.
 
 ---
 
@@ -193,7 +193,41 @@ This writes trade, ticker, candle, and orderbook data directly to Redis as a fal
 
 ## Version
 
-Current: **v0.24.0** (see [CHANGELOG.md](docs/CHANGELOG.md))
+Current: **v0.24.3** (see [CHANGELOG.md](docs/CHANGELOG.md))
+
+---
+
+## Service URLs & Default Credentials
+
+All dev services are exposed on `localhost`. **For production, set every password in `.env` before first run.**
+
+| Service | URL | Default User | Default Password | Notes |
+|---|---|---|---|---|
+| **Frontend** (React) | http://localhost | — | — | Main app |
+| **Grafana** | http://localhost:3001 | `admin` | `admin` | Change via `GRAFANA_ADMIN_PASSWORD` env. Provisioned with 22 dashboards and 48 alert rules. Alert Center: http://localhost:3001/d/phase5-alert-center |
+| **Prometheus** | http://localhost:9090 | — | — | Metrics storage; 21 scrape jobs |
+| **Loki** | http://localhost:3100 | — | — | Logs (opt-in via `--profile logging`); 7-day retention |
+| **FastAPI** (Swagger) | http://localhost:8000/docs | — | — | OpenAPI 3.1, JWT auth |
+| **Flink Web UI** | http://localhost:8082 | — | — | JobManager; 3 streaming jobs |
+| **Kafka** (Redpanda Console) | http://localhost:8080 | — | — | Broker UI; SASL = none in dev |
+| **MinIO Console** | http://localhost:9001 | `minioadmin` | `minioadmin` | S3-compatible lakehouse storage |
+| **Trino** | http://localhost:8081 | — | — | Lakehouse SQL; 5 catalogs |
+| **Dagster** | http://localhost:3000/dagster | — | — | Orchestration UI |
+| **PostgreSQL** | localhost:5432 | `postgres` | `postgres` | Dev database; change via `POSTGRES_PASSWORD` |
+| **Redis Sentinel** | localhost:26379 | — | `lmview_redis` | Master at localhost:6379 |
+| **InfluxDB** | http://localhost:8086 | — | `lmview_influx` | Buckets + tokens in `.env` |
+| **Promtail** | http://localhost:9080 | — | — | Log shipper; tails Docker logs → Loki |
+
+### Production checklist
+
+Before deploying to a public host:
+
+- [ ] Set `GRAFANA_ADMIN_PASSWORD` to a strong random value (default `admin` is dev-only).
+- [ ] Set `POSTGRES_PASSWORD`, `INFLUX_TOKEN`, `JWT_SECRET`, and all API keys.
+- [ ] Disable `GF_USERS_ALLOW_SIGN_UP` (already `false` in compose).
+- [ ] Configure TLS via `make prod` (uses Let's Encrypt + certbot).
+- [ ] Set `LMVIEW_LOG_LEVEL=WARNING` in production to reduce log volume.
+- [ ] Add a real contact point in `config/grafana/provisioning/alerting/contact-points.yml` (Slack webhook, PagerDuty key, or SMTP) — by default alerts go to Grafana's internal log only.
 
 ---
 

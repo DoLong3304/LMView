@@ -3,18 +3,57 @@ Market Overview API - Comprehensive market metrics for Overview tab.
 Reads current gold-style tables from `iceberg.crypto_lakehouse.*` and keeps Redis fallback.
 """
 from fastapi import APIRouter, HTTPException, Query
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import logging
+import json
 from datetime import datetime
+import time
 
 import asyncio
 from backend.core.database import get_trino_connection
+from backend.core.config import INFLUX_BUCKET
+from backend.api.metrics import (
+    TRINO_ACTIVE_QUERIES,
+    record_trino_query,
+    record_trino_fallback,
+)
 
 router = APIRouter(prefix="/api/market", tags=["market-overview"])
 logger = logging.getLogger(__name__)
 
+# P1 fix (v0.24.4): Log canonical gold schema at import time so operators
+# can verify in container logs which tables the API will query.
+try:
+    from src.lakehouse.gold_schema_manifest import (
+        list_canonical_tables,
+        DEPRECATED_SPARK_TABLES,
+    )
+    _canonical = list_canonical_tables()
+    _deprecated_count = len(DEPRECATED_SPARK_TABLES)
+    logger.info(
+        "market_overview: canonical Gold path active (%d tables: %s); "
+        "%d Spark-based tables deprecated.",
+        len(_canonical), ", ".join(_canonical), _deprecated_count,
+    )
+except Exception as _e:  # pragma: no cover - manifest is best-effort
+    logger.debug("market_overview: gold_schema_manifest not loaded: %s", _e)
+
 DB = "iceberg.crypto_lakehouse"
-GOLD_FRESHNESS_MINUTES = 30
+# P1 fix (v0.24.4): GOLD_FRESHNESS_MINUTES is now defined in the canonical
+# schema manifest (src/lakehouse/gold_schema_manifest.py) as the single
+# source of truth. The value here is kept as a fallback for the import
+# path that does not load the manifest.
+try:
+    from src.lakehouse.gold_schema_manifest import (  # type: ignore
+        GOLD_FRESHNESS_MINUTES as MANIFEST_FRESHNESS_MINUTES,
+    )
+    if MANIFEST_FRESHNESS_MINUTES is not None:
+        GOLD_FRESHNESS_MINUTES = MANIFEST_FRESHNESS_MINUTES
+    else:
+        GOLD_FRESHNESS_MINUTES = 30
+except Exception:
+    # Manifest not importable in some test contexts.
+    GOLD_FRESHNESS_MINUTES = 30
 ENABLE_GOLD_PATH = True
 
 
@@ -22,19 +61,41 @@ class AsyncTrinoClient:
     def __init__(self):
         self.conn = get_trino_connection()
 
-    async def fetch_one(self, query: str):
+    async def fetch_one(self, query: str, query_type: str = "unknown"):
         def _fetch():
             cursor = self.conn.cursor()
             cursor.execute(query)
             return cursor.fetchone()
-        return await asyncio.to_thread(_fetch)
+        TRINO_ACTIVE_QUERIES.inc()
+        t0 = time.perf_counter()
+        try:
+            result = await asyncio.to_thread(_fetch)
+            record_trino_query(query_type, time.perf_counter() - t0, success=True)
+            return result
+        except Exception as e:
+            record_trino_query(query_type, time.perf_counter() - t0, success=False,
+                               reason=type(e).__name__)
+            raise
+        finally:
+            TRINO_ACTIVE_QUERIES.dec()
 
-    async def fetch_all(self, query: str):
+    async def fetch_all(self, query: str, query_type: str = "unknown"):
         def _fetch():
             cursor = self.conn.cursor()
             cursor.execute(query)
             return cursor.fetchall()
-        return await asyncio.to_thread(_fetch)
+        TRINO_ACTIVE_QUERIES.inc()
+        t0 = time.perf_counter()
+        try:
+            result = await asyncio.to_thread(_fetch)
+            record_trino_query(query_type, time.perf_counter() - t0, success=True)
+            return result
+        except Exception as e:
+            record_trino_query(query_type, time.perf_counter() - t0, success=False,
+                               reason=type(e).__name__)
+            raise
+        finally:
+            TRINO_ACTIVE_QUERIES.dec()
 
 
 async def get_trino():
@@ -74,6 +135,7 @@ async def get_market_overview(
             data_sources.append("trino_gold")
         else:
             logger.info("Gold tables empty or stale, deriving market overview from Redis fallback")
+            record_trino_fallback("market_overview", "gold_empty_or_stale")
             market_summary, top_gainers, top_losers, most_volatile, highest_volume = await _derive_market_from_redis(timeframe, limit)
             trending_news = []
             sector_performance = {}
@@ -89,6 +151,7 @@ async def get_market_overview(
             data_sources.append("redis_fallback")
     except Exception as e:
         logger.warning("Trino gold query failed (%s), falling back to Redis/ticker", e)
+        record_trino_fallback("market_overview", type(e).__name__)
         market_summary, top_gainers, top_losers, most_volatile, highest_volume = await _derive_market_from_redis(timeframe, limit)
         trending_news = []
         sector_performance = {}
@@ -136,7 +199,7 @@ async def _get_market_summary(trino) -> Dict[str, Any]:
     FROM {DB}.gold_market_dominance
     WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
     """
-    result = await trino.fetch_one(query)
+    result = await trino.fetch_one(query, query_type="market_summary")
     if not result:
         return {
             "total_market_cap": 0,
@@ -168,7 +231,7 @@ async def _get_top_movers(trino, category: str, timeframe: str, limit: int) -> L
     ORDER BY {order_col} ASC
     LIMIT {limit}
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type=f"top_movers_{category}")
     return [
         {
             "symbol": row[0],
@@ -190,7 +253,7 @@ async def _get_most_volatile(trino, limit: int) -> List[Dict[str, Any]]:
     ORDER BY rank ASC
     LIMIT {limit}
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type="most_volatile")
     return [
         {
             "symbol": row[0],
@@ -212,7 +275,7 @@ async def _get_highest_volume(trino, limit: int) -> List[Dict[str, Any]]:
     ORDER BY volume_24h DESC
     LIMIT {limit}
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type="highest_volume")
     return [
         {
             "symbol": row[0],
@@ -233,7 +296,7 @@ async def _get_trending_news(trino, limit: int) -> List[Dict[str, Any]]:
     ORDER BY article_count DESC
     LIMIT {limit}
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type="trending_news")
     return [
         {
             "symbol": row[0],
@@ -254,7 +317,7 @@ async def _get_sector_performance(trino) -> Dict[str, Any]:
     ORDER BY total_volume DESC
     LIMIT 10
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type="sector_performance")
     sectors = {}
     for row in results:
         sectors[str(row[0]).lower().replace(" ", "_")] = {
@@ -281,7 +344,7 @@ async def _get_heatmap_data(trino, limit: int) -> List[Dict[str, Any]]:
     ORDER BY market_cap DESC
     LIMIT {limit}
     """
-    results = await trino.fetch_all(query)
+    results = await trino.fetch_all(query, query_type="heatmap")
     return [
         {
             "symbol": row[0],
@@ -307,7 +370,7 @@ async def _get_indicators_summary(trino) -> Dict[str, Any]:
     FROM {DB}.gold_momentum_indicators
     WHERE computed_at >= current_timestamp - INTERVAL '{GOLD_FRESHNESS_MINUTES}' MINUTE
     """
-    result = await trino.fetch_one(query)
+    result = await trino.fetch_one(query, query_type="indicators_summary")
     if not result:
         return {
             "total_symbols": 0,
@@ -410,8 +473,12 @@ async def get_heatmap(
             "data": heatmap_data
         }
     except Exception as e:
-        logger.error(f"Failed to get heatmap: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.warning("heatmap endpoint failed: %s", e)
+        record_trino_fallback("heatmap", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Heatmap data unavailable: {type(e).__name__}",
+        )
 
 
 @router.get("/rankings/{category}")
@@ -447,5 +514,569 @@ async def get_rankings(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to get rankings: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.warning("rankings endpoint failed: %s", e)
+        record_trino_fallback(f"rankings_{category}", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Rankings data unavailable: {type(e).__name__}",
+        )
+
+
+# ============================================================================
+# DEDICATED ENDPOINTS (Task 1, v0.24.4)
+# ----------------------------------------------------------------------------
+# These endpoints expose ONE gold table per call. They are designed for
+# Frontend features that need a single slice of data without paying the
+# cost of /overview (which queries 6 tables in one round trip).
+#
+# All endpoints:
+# - Share ``GOLD_FRESHNESS_MINUTES`` window and Trino fallback semantics.
+# - Return 503 (not 500) when Trino is unreachable and Redis fallback
+#   cannot provide the slice, so clients can distinguish "down" from
+#   "broken".
+# - Are excluded from the heatmap/rankings/overview aggregation.
+# ============================================================================
+
+
+@router.get("/movers")
+async def get_movers(
+    category: str = Query("gainer",
+                          pattern="^(gainer|loser)$",
+                          description="gainer or loser"),
+    limit: int = Query(20, ge=5, le=100),
+):
+    """Top gainers/losers from ``gold_movers_ranking``.
+
+    Replaces the path used by the previous /rankings/{category} endpoint
+    with a cleaner flat response: ``{"category", "data": [...]}``.
+    """
+    try:
+        trino = await get_trino()
+        data = await _get_top_movers(trino, category, "24h", limit)
+    except Exception as e:
+        logger.warning("movers endpoint failed: %s", e)
+        record_trino_fallback(f"movers_{category}", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Gold data unavailable: {type(e).__name__}",
+        )
+    return {
+        "category": category,
+        "timeframe": "24h",
+        "limit": limit,
+        "count": len(data),
+        "data": data,
+        "computed_at": datetime.now().isoformat(),
+    }
+
+
+@router.get("/dominance")
+async def get_dominance():
+    """BTC/ETH dominance and market summary from ``gold_market_dominance``."""
+    try:
+        trino = await get_trino()
+        data = await _get_market_summary(trino)
+    except Exception as e:
+        logger.warning("dominance endpoint failed: %s", e)
+        record_trino_fallback("dominance", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Gold data unavailable: {type(e).__name__}",
+        )
+    return {
+        "data": data,
+        "computed_at": datetime.now().isoformat(),
+    }
+
+
+@router.get("/volatility")
+async def get_volatility(
+    limit: int = Query(20, ge=5, le=100),
+):
+    """Top volatile symbols from ``gold_volatility_ranking``."""
+    try:
+        trino = await get_trino()
+        data = await _get_most_volatile(trino, limit)
+    except Exception as e:
+        logger.warning("volatility endpoint failed: %s", e)
+        record_trino_fallback("volatility", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Gold data unavailable: {type(e).__name__}",
+        )
+    return {
+        "limit": limit,
+        "count": len(data),
+        "data": data,
+        "computed_at": datetime.now().isoformat(),
+    }
+
+
+@router.get("/sectors")
+async def get_sectors():
+    """Sector performance from ``gold_sector_performance``.
+
+    Returns a list (not dict) so the Frontend can render directly without
+    an Object.values() step.
+    """
+    try:
+        trino = await get_trino()
+        sectors_dict = await _get_sector_performance(trino)
+    except Exception as e:
+        logger.warning("sectors endpoint failed: %s", e)
+        record_trino_fallback("sectors", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Gold data unavailable: {type(e).__name__}",
+        )
+    # Convert dict → list, with key preserved as 'sector' field
+    data = [
+        {"sector": key.replace("_", " ").title(), **value}
+        for key, value in sectors_dict.items()
+    ]
+    return {
+        "count": len(data),
+        "data": data,
+        "computed_at": datetime.now().isoformat(),
+    }
+
+
+@router.get("/news-sentiment")
+async def get_news_sentiment(
+    days: int = Query(7, ge=1, le=30, description="Lookback window in days"),
+    limit: int = Query(20, ge=5, le=100),
+):
+    """News sentiment from ``gold_news_sentiment_daily``.
+
+    Filters by ``date >= current_timestamp - INTERVAL '{days}' DAY`` and
+    orders by article count DESC.
+    """
+    try:
+        trino = await get_trino()
+        query = f"""
+        SELECT symbol, article_count, avg_sentiment, bullish_count, bearish_count
+        FROM {DB}.gold_news_sentiment_daily
+        WHERE date >= current_timestamp - INTERVAL '{days}' DAY
+        ORDER BY article_count DESC
+        LIMIT {limit}
+        """
+        results = await trino.fetch_all(query, query_type="news_sentiment")
+    except Exception as e:
+        logger.warning("news-sentiment endpoint failed: %s", e)
+        record_trino_fallback("news_sentiment", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Gold data unavailable: {type(e).__name__}",
+        )
+    data = [
+        {
+            "symbol": row[0],
+            "article_count": row[1],
+            "avg_sentiment": round(float(row[2]), 3) if row[2] else 0,
+            "bullish_count": row[3],
+            "bearish_count": row[4],
+        }
+        for row in results
+    ]
+    return {
+        "days": days,
+        "limit": limit,
+        "count": len(data),
+        "data": data,
+        "computed_at": datetime.now().isoformat(),
+    }
+
+
+@router.get("/indicators")
+async def get_indicators():
+    """Momentum / RSI / MACD summary from ``gold_momentum_indicators``."""
+    try:
+        trino = await get_trino()
+        data = await _get_indicators_summary(trino)
+    except Exception as e:
+        logger.warning("indicators endpoint failed: %s", e)
+        record_trino_fallback("indicators", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Gold data unavailable: {type(e).__name__}",
+        )
+    return {
+        "data": data,
+        "computed_at": datetime.now().isoformat(),
+    }
+
+
+# ============================================================================
+# WHALE ALERTS (Task 2, v0.24.4)
+# ----------------------------------------------------------------------------
+# Real-time large-trade detection. The Flink writer
+# (src/processing/writers/whale_alert.py) filters crypto_trades for
+# notional USD >= threshold and writes to Redis sorted set
+# ``whale:alerts:{exchange}:{symbol}``. This endpoint reads from Redis
+# directly — no Trino, no aggregation, no falling back to a query.
+# Redis 503 is the only failure mode; the response surfaces a clear
+# ``redis_unavailable`` reason in that case.
+#
+# Query params:
+#   min_usd         — minimum notional USD (default 100_000)
+#   limit           — max alerts returned, sorted by trade_time DESC
+#   since_minutes   — lookback window (default 60). Alerts older than
+#                     this are filtered out (Redis TTL is 1h, so values
+#                     above 60 are clamped down).
+#   symbol          — optional filter, e.g. "BTCUSDT". Multi-symbol is
+#                     not supported in v0.24.4 (use the unfiltered call
+#                     and filter client-side if needed).
+# ============================================================================
+
+
+def _whale_alert_key(exchange: str, symbol: str) -> str:
+    return f"whale:alerts:{exchange}:{symbol}"
+
+
+# ============================================================================
+# LIQUIDITY HEATMAP (Task 5, v0.24.5)
+# ----------------------------------------------------------------------------
+# Reads aggregated order-book depth buckets from the InfluxDB
+# ``liquidity_heatmap`` measurement (written by
+# src/processing/writers/liquidity_heatmap.py). Returns a 2-D matrix
+# (time × price-bucket) per side (bid/ask) for the requested window.
+#
+# Query params:
+#   symbol          — required, e.g. "BTCUSDT". Regex: ^[A-Z0-9]{2,20}USDT$
+#   hours           — lookback window, 1..24 (default 4)
+#   bucket_count    — number of price-bucket columns to return per side
+#                     (default 20, max 100). Always centered on mid (=0).
+#   exchange        — reference exchange (default 'binance')
+#
+# Response shape:
+#   {
+#     "data": {
+#       "bid": [ [t0, b0, qty], [t0, b1, qty], ..., [tN, bM, qty] ],
+#       "ask": [ ... ]
+#     },
+#     "matrix_shape": { "time_buckets": N, "price_buckets_per_side": M },
+#     "meta": { "mid_price": X, "bucket_pct": 0.1, "exchange": "binance" }
+#   }
+#
+# The frontend renders this as a CSS-grid heatmap. We do NOT do the
+# pivoting on the server — the client pivots a flat list of
+# (time, bucket, quantity) tuples into a grid.
+# ============================================================================
+
+
+@router.get("/liquidity-heatmap")
+async def get_liquidity_heatmap(
+    symbol: str = Query(
+        ..., pattern=r"^[A-Z0-9]{2,20}USDT$",
+        description="Symbol (canonical form, e.g. BTCUSDT)",
+    ),
+    hours: int = Query(4, ge=1, le=24),
+    bucket_count: int = Query(20, ge=1, le=100),
+    exchange: str = Query("binance", min_length=1, max_length=32),
+):
+    """Liquidity heatmap: quantity at each (time, price-bucket, side)."""
+    from backend.core.database import get_influx
+    try:
+        influx = get_influx()
+        query_api = influx.query_api()
+    except Exception as e:
+        logger.warning("liquidity-heatmap Influx init failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"InfluxDB unavailable: {type(e).__name__}",
+        )
+
+    flux = f'''
+from(bucket: "{INFLUX_BUCKET}")
+  |> range(start: -{int(hours)}h, stop: now())
+  |> filter(fn: (r) => r._measurement == "liquidity_heatmap")
+  |> filter(fn: (r) => r.symbol == "{symbol}")
+  |> filter(fn: (r) => r.exchange == "{exchange}")
+  |> filter(fn: (r) => r._field == "quantity")
+  |> keep(columns: ["_time", "side", "price_bucket", "_value"])
+  |> group(columns: ["side", "price_bucket"])
+  |> sort(columns: ["_time"])
+'''
+    try:
+        tables = query_api.query(flux)
+    except Exception as e:
+        logger.warning("liquidity-heatmap Influx query failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Heatmap data unavailable: {type(e).__name__}",
+        )
+
+    bid_rows: list[list] = []
+    ask_rows: list[list] = []
+    time_buckets: set[int] = set()
+
+    for table in tables:
+        for record in table.records:
+            side = record.values.get("side")
+            bucket = int(record.values.get("price_bucket", 0))
+            if side == "bid" and bucket < bucket_count:
+                bid_rows.append([
+                    int(record.get_time().timestamp() * 1000),
+                    bucket,
+                    float(record.get_value()),
+                ])
+                time_buckets.add(int(record.get_time().timestamp() * 1000))
+            elif side == "ask" and bucket < bucket_count:
+                ask_rows.append([
+                    int(record.get_time().timestamp() * 1000),
+                    bucket,
+                    float(record.get_value()),
+                ])
+                time_buckets.add(int(record.get_time().timestamp() * 1000))
+
+    return {
+        "data": {"bid": bid_rows, "ask": ask_rows},
+        "matrix_shape": {
+            "time_buckets": len(time_buckets),
+            "price_buckets_per_side": bucket_count,
+        },
+        "filter": {
+            "symbol": symbol,
+            "hours": hours,
+            "bucket_count": bucket_count,
+            "exchange": exchange,
+        },
+    }
+
+
+# ============================================================================
+# NEWS ↔ PRICE IMPACT (Task 4, v0.24.5)
+# ----------------------------------------------------------------------------
+# For each news article in ``gold_news_market_impact`` we measured
+# the price change at t+1h, t+4h and t+24h (see
+# src/lakehouse/gold/news_impact.py). This endpoint surfaces the
+# top-impactful news so a UI can render a "News Impact" panel and
+# overlay markers on the candlestick chart.
+#
+# Query params:
+#   days            — lookback window in days (default 7, max 90).
+#   limit           — max rows returned (default 50, max 200).
+#   symbol          — optional filter, e.g. "BTCUSDT".
+#   min_impact_pct  — only return rows where ABS(impact_score) >= N.
+#                     Default 0 (no filter). Useful for hiding noise.
+#   exchange        — reference exchange (default 'binance'). Only one
+#                     reference is stored per row in v0.24.5.
+#
+# Sort: by ABS(impact_score) DESC (most market-moving first).
+# ============================================================================
+
+
+_NEWS_IMPACT_TABLE = "iceberg.crypto_lakehouse.gold_news_market_impact"
+
+
+@router.get("/news-impact")
+async def get_news_impact(
+    days: int = Query(7, ge=1, le=90, description="Lookback window in days"),
+    limit: int = Query(50, ge=1, le=200),
+    symbol: Optional[str] = Query(
+        None, pattern=r"^[A-Z0-9]{2,20}USDT$",
+        description="Optional single-symbol filter (canonical form, e.g. BTCUSDT)",
+    ),
+    min_impact_pct: float = Query(
+        0.0, ge=0.0, le=100.0,
+        description="Only return rows with |impact_score| >= N",
+    ),
+    exchange: str = Query("binance", min_length=1, max_length=32),
+):
+    """Top-impactful news from ``gold_news_market_impact``."""
+    try:
+        trino = await get_trino()
+    except Exception as e:
+        logger.warning("news-impact Trino init failed: %s", e)
+        record_trino_fallback("news_impact", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Trino unavailable: {type(e).__name__}",
+        )
+
+    where_clauses = [
+        f"published_at >= current_timestamp - INTERVAL '{int(days)}' DAY",
+        f"exchange = '{exchange}'",
+    ]
+    if symbol:
+        where_clauses.append(f"symbol = '{symbol}'")
+    if min_impact_pct > 0:
+        where_clauses.append(f"ABS(impact_score) >= {float(min_impact_pct)}")
+
+    where_sql = " AND ".join(where_clauses)
+    sql = f"""
+        SELECT
+            news_id,
+            symbol,
+            exchange,
+            published_at,
+            headline,
+            url,
+            source,
+            sentiment,
+            price_at_news,
+            price_1h_after,
+            price_4h_after,
+            price_24h_after,
+            change_1h_pct,
+            change_4h_pct,
+            change_24h_pct,
+            impact_score,
+            computed_at
+        FROM {_NEWS_IMPACT_TABLE}
+        WHERE {where_sql}
+        ORDER BY ABS(impact_score) DESC NULLS LAST
+        LIMIT {int(limit)}
+    """
+    try:
+        raw_rows = await trino.fetch_all(sql, query_type="news_impact")
+    except Exception as e:
+        logger.warning("news-impact Trino query failed: %s", e)
+        record_trino_fallback("news_impact", type(e).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Gold data unavailable: {type(e).__name__}",
+        )
+
+    # ``trino.fetch_all`` returns list[tuple] in column-declaration order.
+    # Convert to list[dict] for the response.
+    column_names = [
+        "news_id", "symbol", "exchange", "published_at",
+        "headline", "url", "source", "sentiment",
+        "price_at_news", "price_1h_after", "price_4h_after",
+        "price_24h_after", "change_1h_pct", "change_4h_pct",
+        "change_24h_pct", "impact_score", "computed_at",
+    ]
+    data: list[dict] = []
+    for row in raw_rows:
+        item = {}
+        for col, val in zip(column_names, row):
+            if col in ("published_at", "computed_at") and val is not None and not isinstance(val, str):
+                val = str(val)
+            item[col] = val
+        data.append(item)
+
+    return {
+        "data": data,
+        "count": len(data),
+        "filter": {
+            "days": days,
+            "limit": limit,
+            "symbol": symbol,
+            "min_impact_pct": min_impact_pct,
+            "exchange": exchange,
+        },
+    }
+
+
+@router.get("/whale-alerts")
+async def get_whale_alerts(
+    min_usd: float = Query(100_000, ge=1_000, le=100_000_000,
+                           description="Minimum notional USD"),
+    limit: int = Query(20, ge=1, le=200),
+    since_minutes: int = Query(60, ge=1, le=60,
+                               description="Lookback in minutes; clamped to 60"),
+    symbol: str | None = Query(None, description="Filter by symbol, e.g. BTCUSDT"),
+    exchange: str = Query("binance", description="Exchange filter"),
+):
+    """Real-time whale alerts (large trades >= min_usd).
+
+    Reads ``whale:alerts:{exchange}:{symbol}`` Redis sorted sets and
+    returns the most recent alerts, newest first. Each alert is a JSON
+    blob produced by the Flink ``WhaleAlertWriter``.
+
+    Note: ``since_minutes`` is clamped to 60 (Redis TTL). To query
+    older alerts, use the InfluxDB ``whale_alerts`` measurement
+    directly (out of scope for v0.24.4).
+    """
+    from backend.core.database import get_redis
+
+    # Clamp lookback to Redis TTL
+    since_minutes = min(since_minutes, 60)
+    cutoff_ms = int((time.time() - since_minutes * 60) * 1000)
+
+    try:
+        r = await get_redis()
+    except Exception as e:
+        logger.warning("whale-alerts: redis client init failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Redis unavailable: {type(e).__name__}",
+        )
+
+    # Determine which keys to scan
+    if symbol:
+        keys = [_whale_alert_key(exchange, symbol)]
+    else:
+        # Scan all whale:alerts:*:{symbol} keys (any exchange)
+        keys = []
+        cursor = 0
+        try:
+            while True:
+                cursor, batch = await r.scan(
+                    cursor, match=f"whale:alerts:{exchange}:*", count=200,
+                )
+                keys.extend(batch)
+                if cursor == 0:
+                    break
+        except Exception as e:
+            logger.warning("whale-alerts: redis SCAN failed: %s", e)
+            raise HTTPException(
+                status_code=503,
+                detail=f"Redis SCAN failed: {type(e).__name__}",
+            )
+
+    if not keys:
+        return {
+            "count": 0,
+            "data": [],
+            "min_usd": min_usd,
+            "since_minutes": since_minutes,
+            "filter": {"exchange": exchange, "symbol": symbol},
+            "computed_at": datetime.now().isoformat(),
+        }
+
+    # Pull the most recent ``limit`` alerts across all matching keys.
+    # We ZRANGEBYSCORE with REV + LIMIT to avoid loading the full
+    # sorted set (which can hold up to 1000 entries per symbol).
+    all_alerts: list[dict] = []
+    try:
+        for key in keys:
+            # Newest first, within the freshness window
+            members = await r.zrevrangebyscore(
+                key, max="+inf", min=cutoff_ms,
+                start=0, num=limit,
+            )
+            for m in members:
+                try:
+                    payload = json.loads(m)
+                except (ValueError, TypeError):
+                    continue
+                # Apply min_usd filter (in case Redis has older
+                # alerts written with a lower threshold)
+                if float(payload.get("notional_usd", 0)) < min_usd:
+                    continue
+                all_alerts.append(payload)
+    except Exception as e:
+        logger.warning("whale-alerts: redis ZRANGE failed: %s", e)
+        raise HTTPException(
+            status_code=503,
+            detail=f"Redis ZRANGE failed: {type(e).__name__}",
+        )
+
+    # Sort by trade_time DESC and slice to ``limit``
+    all_alerts.sort(key=lambda a: a.get("trade_time", 0), reverse=True)
+    top = all_alerts[:limit]
+
+    return {
+        "count": len(top),
+        "data": top,
+        "min_usd": min_usd,
+        "since_minutes": since_minutes,
+        "filter": {"exchange": exchange, "symbol": symbol},
+        "computed_at": datetime.now().isoformat(),
+        "warning": (
+            "Older alerts (>60min) are not in Redis. Use the InfluxDB "
+            "whale_alerts measurement for historical queries."
+        ) if since_minutes >= 60 else None,
+    }

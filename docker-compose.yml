@@ -27,6 +27,7 @@ volumes:
   redis-sentinel-3-data:
   flink-checkpoints:
   spark-events:
+  spark-submit-logs:
   trino-data:
   dagster-home:
   letsencrypt:
@@ -97,7 +98,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 512M
     healthcheck:
       test:
         - CMD-SHELL
@@ -141,7 +142,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 512M
     healthcheck:
       test:
         [
@@ -187,7 +188,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 512M
     healthcheck:
       test:
         [
@@ -519,9 +520,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
-        reservations:
           memory: 1G
+        reservations:
+          memory: 512M
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
       FLINK_PROPERTIES: "taskmanager.numberOfTaskSlots: 12"
@@ -575,7 +576,7 @@ services:
         limits:
           memory: 4G
         reservations:
-          memory: 2G
+          memory: 512M
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
       FLINK_TASKMANAGER_SLOTS: 12
@@ -624,7 +625,7 @@ services:
       SPARK_MASTER_HOST: spark-master
       SPARK_MASTER_PORT: 7077
       SPARK_MASTER_WEBUI_PORT: 8080
-      SPARK_HISTORY_OPTS: "-Dspark.history.fs.logDirectory=/opt/spark-events -Dspark.history.ui.port=18080"
+      SPARK_HISTORY_OPTS: "-Dspark.history.fs.logDirectory=/opt/spark-events -Dspark.history.ui.port=18080 -Dspark.history.fs.cleaner.enabled=true -Dspark.history.fs.cleaner.interval=1d -Dspark.history.fs.cleaner.maxAge=3d"
       SPARK_CONF_DIR: /opt/spark/conf
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
@@ -637,7 +638,7 @@ services:
     volumes:
       - ./:/app
       - spark-events:/opt/spark-events
-      - ./spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+      - ./config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./config/spark/metrics.properties:/opt/spark/conf/metrics.properties:ro
     networks:
       - crypto-net
@@ -652,6 +653,49 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+
+  spark-submit:
+    profiles: ["dev", "prod"]
+    build:
+      context: .
+      dockerfile: docker/spark-submit/Dockerfile
+    image: cryptoprice/spark-submit:local
+    container_name: spark-submit
+    hostname: spark-submit
+    restart: unless-stopped
+    environment:
+      SPARK_MASTER_URL: spark://spark-master:7077
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - ./:/app:rw
+      - spark-submit-logs:/var/log/spark-submit
+    depends_on:
+      spark-master:
+        condition: service_started
+      kafka-1:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - crypto-net
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f SparkSubmit > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
 
   spark-worker:
     profiles: ["dev", "prod"]
@@ -668,6 +712,8 @@ services:
       SPARK_WORKER_CORES: 2
       SPARK_WORKER_WEBUI_PORT: 8084
       SPARK_CONF_DIR: /opt/spark/conf
+      # ── Disk-bleed fix: auto-purge finished app work dirs older than 1h ──
+      SPARK_WORKER_OPTS: "-Dspark.worker.cleanup.enabled=true -Dspark.worker.cleanup.interval=1800 -Dspark.worker.cleanup.appDataTtl=3600"
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -684,7 +730,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 512M
     depends_on:
       - spark-master
 
@@ -703,6 +749,8 @@ services:
       SPARK_WORKER_CORES: 2
       SPARK_WORKER_WEBUI_PORT: 8085
       SPARK_CONF_DIR: /opt/spark/conf
+      # ── Disk-bleed fix: auto-purge finished app work dirs older than 1h ──
+      SPARK_WORKER_OPTS: "-Dspark.worker.cleanup.enabled=true -Dspark.worker.cleanup.interval=1800 -Dspark.worker.cleanup.appDataTtl=3600"
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -719,7 +767,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 512M
     depends_on:
       - spark-master
 
@@ -1208,11 +1256,12 @@ services:
           memory: 128M
     profiles:
       - monitoring
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9121/metrics"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
+    # NOTE: oliver006/redis_exporter is a minimal FROM-scratch Go image
+    # with no shell, no busybox, no wget/curl/nc — every healthcheck
+    # command (including ["CMD-SHELL", "exit 0"]) fails because
+    # Docker cannot find a shell to interpret it. We rely on the
+    # exporter's own /metrics endpoint (scrape error = visible in
+    # Prometheus) instead of a Docker healthcheck.
 
   prometheus:
     image: prom/prometheus:v2.45.0
@@ -1237,9 +1286,14 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 2G
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      # NOTE: prometheus runs with --web.route-prefix=/prometheus/ (Grafana
+      # behind reverse proxy uses /prometheus/ as the sub-path). The
+      # healthcheck URL MUST include that prefix, otherwise wget will
+      # always 404 and the container will be marked unhealthy, which
+      # cascades to fastapi-dev / fastapi-prod via depends_on.
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/prometheus/-/healthy"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -1295,8 +1349,15 @@ services:
       - GF_SECURITY_ADMIN_USER=admin
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
       - GF_USERS_ALLOW_SIGN_UP=false
-      - GF_SERVER_ROOT_URL=%(protocol)s://%(domain)s/grafana/
-      - GF_SERVER_SERVE_FROM_SUB_PATH=true
+      # Use the direct container port so the UI works without going
+      # through the nginx reverse proxy (the user is accessing
+      # `http://localhost:3001` directly during development and
+      # `serve_from_sub_path` was causing 301 -> /grafana/login ->
+      # /grafana/login loops when accessed on a different port).
+      # The nginx-prod.conf `location /grafana/` still proxies the
+      # same Grafana instance for production access.
+      - GF_SERVER_ROOT_URL=http://localhost:3001
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
       - GF_INSTALL_PLUGINS=
     volumes:
       - grafana-data:/var/lib/grafana

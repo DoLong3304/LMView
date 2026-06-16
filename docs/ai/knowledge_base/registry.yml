@@ -89,3 +89,37 @@ sources:
     tags: [glossary, bilingual, vietnamese, english]
     allowed_for_rag: false
     file_path: pending/bilingual_glossary.md
+
+  - source_id: lmview-ai-grounding
+    title: LMView AI Grounding — Platform Architecture & Capabilities
+    description: Approved canonical notes on LMView architecture, features, data freshness, and limitations for AI grounding.
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-12"
+    lmview_version_scope: "0.24.x"
+    source_urls: []
+    tags: [lmview, architecture, capabilities, grounding, ai]
+    allowed_for_rag: true
+    file_path: approved/lmview_ai_grounding.md
+    internal_only: false
+
+  - source_id: lmview-data-caveats
+    title: LMView Data Caveats & Limitations
+    description: Approved canonical notes on data limitations, freshness caveats, exchange gaps, and AI capability boundaries.
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-12"
+    lmview_version_scope: "0.24.x"
+    source_urls: []
+    tags: [lmview, caveats, limitations, data, freshness, safety]
+    allowed_for_rag: true
+    file_path: approved/lmview_data_caveats.md
+    internal_only: false

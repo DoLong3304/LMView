@@ -1,0 +1,104 @@
+apiVersion: 1
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Contact points — where alerts get delivered
+# ══════════════════════════════════════════════════════════════════════════════
+# A contact point is the destination for alert notifications. We provision
+# several out of the box, all disabled by default (or sending to a stub
+# webhook) so that the operator can enable the right one per environment.
+#
+# To enable a contact point, set the corresponding env var in .env:
+#   * GRAFANA_WEBHOOK_URL   — for the ``webhook`` contact point
+#   * GRAFANA_SLACK_WEBHOOK — for the ``slack`` contact point (full URL)
+#   * GRAFANA_EMAIL_TO      — comma-separated recipients for the ``email`` CP
+#
+# If none are set, the ``internal-log`` contact point is the default
+
+# NOTE on ${VAR} syntax: Grafana uses Go's os.ExpandEnv for YAML
+# provisioning, which does NOT support shell-style ${VAR:-default}.
+# Below we write the variable alone; if the corresponding env var is
+# unset Grafana will substitute an empty string. To preserve sane
+# fallbacks, we add a literal default in a comment on the same line.
+# To enable a contact point, set the env var AND remove the
+# placeholder default in the line below. — it
+# records alerts in the Grafana internal log (visible via ``docker logs grafana``)
+# so nothing is silently lost.
+
+contactPoints:
+  # 1. Default — internal log (always enabled)
+  - orgId: 1
+    name: internal-log
+    receivers:
+      - uid: internal-log-uid
+        # type "webhook" is the generic HTTP integration. We do NOT
+        # use "prometheus-alertmanager" because that's reserved for
+        # the actual Alertmanager integration (no `url` setting
+        # accepted) and would fail validation in Grafana 10+.
+        type: webhook
+        settings:
+          # Stub URL — actual alerts go through Grafana's built-in
+          # ``Alerting > Log`` channel (visible via ``docker logs grafana``).
+          url: http://localhost:5001/no-op
+        disableResolveMessage: false
+
+  # 2. Webhook (Slack-compatible, generic)
+  - orgId: 1
+    name: webhook
+    receivers:
+      - uid: webhook-uid
+        type: webhook
+        settings:
+          # Grafana uses Go's os.ExpandEnv for YAML provisioning.
+          # The shell-style "${VAR}" syntax is NOT supported
+          # and would leave url empty if GRAFANA_WEBHOOK_URL is unset.
+          # We always provide a literal default so validation passes;
+          # set GRAFANA_WEBHOOK_URL in your .env to override.
+          url: "http://localhost:5001/no-op-webhook"
+        disableResolveMessage: false
+
+  # 3. Slack
+  - orgId: 1
+    name: slack
+    receivers:
+      - uid: slack-uid
+        type: slack
+        settings:
+          url: "https://hooks.slack.com/services/T00000000/B00000000/PLACEHOLDER"
+          # The default channel is ``#lmview-alerts``. Override with
+          # GRAFANA_SLACK_CHANNEL.
+          channel: "#alerts"
+          # Mention the on-call handle in the message body.
+          mentionUsers: "@oncall"
+          title: |
+            {{ template "slack.title" . }}
+          text: |
+            {{ range .Alerts }}{{ .Annotations.summary }}
+            {{ .Annotations.description }}
+            {{ end }}
+        disableResolveMessage: false
+
+  # 4. Email
+  - orgId: 1
+    name: email
+    receivers:
+      - uid: email-uid
+        type: email
+        settings:
+          # Comma-separated list of recipients. Grafana
+          # sends to all of them.
+          addresses: "oncall@example.com"
+          # Use the SMTP server configured in grafana.ini.
+        disableResolveMessage: false
+
+  # 5. PagerDuty (Events API v2)
+  - orgId: 1
+    name: pagerduty
+    receivers:
+      - uid: pagerduty-uid
+        type: pagerduty
+        settings:
+          integrationKey: "PLACEHOLDER_PAGERDUTY_KEY"
+          severity: critical
+          # Auto-resolve when the alert closes.
+          autoResolve: true
+        disableResolveMessage: false

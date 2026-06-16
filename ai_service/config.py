@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional
 
 
 VALID_AI_MODES = {"auto", "local", "api", "none"}
+VALID_ORCHESTRATION_MODES = {"legacy", "langgraph"}
 DEFAULT_API_MODEL = "openai/qwen3.5-plus"
 DEFAULT_QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
@@ -41,6 +42,7 @@ class AISettings:
     max_tokens: int
     top_p: float
     timeout_seconds: int
+    orchestration_mode: str = "legacy"
 
 
 def normalize_mode(value: Optional[str]) -> str:
@@ -138,6 +140,10 @@ def load_settings() -> AISettings:
         )
     )
 
+    orch_mode = os.environ.get("AI_ORCHESTRATION", "legacy").strip().lower()
+    if orch_mode not in VALID_ORCHESTRATION_MODES:
+        orch_mode = "legacy"
+
     return AISettings(
         mode=mode,
         config_path=config_path,
@@ -150,6 +156,7 @@ def load_settings() -> AISettings:
         max_tokens=int(inference.get("max_tokens", 2048)),
         top_p=float(inference.get("top_p", 0.95)),
         timeout_seconds=int(inference.get("timeout_seconds", 60)),
+        orchestration_mode=orch_mode,
     )
 
 

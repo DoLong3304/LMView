@@ -1,24 +1,47 @@
 # LiteLLM proxy catalog for LMView AI.
-# Main backend routing reads ai.api.yaml/ai.local.yaml directly.
+# Unified LLM routing with health checks, retries, and auto-fallback.
 
 model_list:
-  - model_name: qwen3.5-plus
+  # ── Local vLLM (primary when available) ──────────────────────────────────
+  - model_name: qwen-local
+    litellm_params:
+      model: openai/qwen-local
+      api_base: http://vllm:8000/v1
+      api_key: not-needed
+    model_info:
+      mode: chat
+      notes: Local vLLM inference — zero cost, low latency when GPU available.
+
+  # ── DashScope API (Qwen cloud fallback) ──────────────────────────────────
+  - model_name: qwen-api
     litellm_params:
       model: openai/qwen3.5-plus
       api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
       api_key: os.environ/DASHSCOPE_API_KEY
     model_info:
+      mode: chat
       notes: OpenAI-compatible usage uses prompt_tokens/completion_tokens/total_tokens.
 
-  - model_name: local-vllm
+  # ── DeepSeek API (secondary API fallback) ────────────────────────────────
+  - model_name: deepseek
     litellm_params:
-      model: openai/Qwen/Qwen2.5-7B-Instruct
-      api_base: http://vllm:8000/v1
-      api_key: not-needed
+      model: deepseek/deepseek-chat
+      api_key: os.environ/DEEPSEEK_API_KEY
+    model_info:
+      mode: chat
 
 litellm_settings:
   drop_params: true
   set_verbose: false
+  num_retries: 3
+  request_timeout: 60
+  fallbacks:
+    - qwen-local: ["qwen-api"]
+    - qwen-api: ["deepseek"]
+
+router_settings:
+  routing_strategy: simple-shuffle
+  num_retries: 2
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

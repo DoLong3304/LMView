@@ -304,6 +304,7 @@ export function useAiChat(): UseAiChatReturn {
               token_input: response.token_input ?? undefined,
               token_output: response.token_output ?? undefined,
               estimated_cost_usd: response.estimated_cost_usd ?? undefined,
+              news_context: response.news_context ?? undefined,
             };
             if (nextSessionId && user?.id) {
               setSessionId(nextSessionId);
