@@ -9,8 +9,13 @@
 #   docker node update --label-add role=core  <manager-node>
 #   docker node update --label-add role=worker <worker-node>
 #
-# Machine 1 (role=core):   Storage, databases, brokers, API, frontend, nginx
-# Machine 2 (role=worker): Flink, Spark, Dagster, monitoring, logging
+# Machine 1 (role=core):   8 vCPU, 32 GB RAM
+#   Storage, databases, brokers, API, frontend, nginx, AI services
+#   Memory budget: ~25 GB services + ~5 GB OS/buffers
+#
+# Machine 2 (role=worker): 4 vCPU, 16 GB RAM
+#   Flink, Spark, Trino, Dagster, monitoring, logging
+#   Memory budget: ~13 GB services + ~3 GB OS/buffers
 #
 # Shared EFS mount: /mnt/efs/lmview (code + config sync across nodes)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -23,7 +28,7 @@ networks:
 services:
 
   # ════════════════════════════════════════════════════════════════════════════
-  # DATA LAYER — core node
+  # DATA LAYER — core node (8 vCPU, 32 GB)
   # ════════════════════════════════════════════════════════════════════════════
 
   zookeeper:
@@ -34,6 +39,9 @@ services:
         condition: on-failure
         delay: 10s
         max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
 
   kafka-1:
     deploy:
@@ -194,7 +202,110 @@ services:
         max_attempts: 5
 
   # ════════════════════════════════════════════════════════════════════════════
-  # COMPUTE LAYER — worker node
+  # API + FRONTEND + PRODUCER — core node
+  # ════════════════════════════════════════════════════════════════════════════
+
+  fastapi-prod:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  nginx-prod:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 256M
+
+  certbot-auto:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 60s
+        max_attempts: 3
+
+  duckdns-auto:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 60s
+        max_attempts: 3
+
+  influx-backfill:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: none
+
+  producer:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # AI SERVICES — core node
+  # ════════════════════════════════════════════════════════════════════════════
+
+  ai-service:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: none
+      resources:
+        limits:
+          memory: 2G
+
+  litellm:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 1G
+
+  finbert-worker:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 4G
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # COMPUTE LAYER — worker node (4 vCPU, 16 GB)
   # ════════════════════════════════════════════════════════════════════════════
 
   flink-jobmanager:
@@ -222,7 +333,7 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 4G
+          memory: 2G
         reservations:
           memory: 512M
 
@@ -236,7 +347,7 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 2G
+          memory: 1.5G
         reservations:
           memory: 512M
 
@@ -250,13 +361,12 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 2G
+          memory: 1.5G
         reservations:
           memory: 512M
 
   spark-worker:
     deploy:
-      replicas: 2
       placement:
         constraints: [node.labels.role == worker]
       restart_policy:
@@ -302,7 +412,7 @@ services:
   trino:
     deploy:
       placement:
-        constraints: [node.labels.role == core]
+        constraints: [node.labels.role == worker]
       restart_policy:
         condition: on-failure
         delay: 10s
@@ -336,81 +446,7 @@ services:
           memory: 512M
 
   # ════════════════════════════════════════════════════════════════════════════
-  # API LAYER — core node
-  # ════════════════════════════════════════════════════════════════════════════
-
-  fastapi-prod:
-    deploy:
-      placement:
-        constraints: [node.labels.role == core]
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 5
-      resources:
-        limits:
-          memory: 512M
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # FRONTEND (Nginx + React SPA) — core node
-  # ════════════════════════════════════════════════════════════════════════════
-
-  nginx-prod:
-    deploy:
-      placement:
-        constraints: [node.labels.role == core]
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 5
-      resources:
-        limits:
-          memory: 256M
-
-  certbot-auto:
-    deploy:
-      placement:
-        constraints: [node.labels.role == core]
-      restart_policy:
-        condition: on-failure
-        delay: 60s
-        max_attempts: 3
-
-  duckdns-auto:
-    deploy:
-      placement:
-        constraints: [node.labels.role == core]
-      restart_policy:
-        condition: on-failure
-        delay: 60s
-        max_attempts: 3
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # BACKFILL — core node (one-shot, needs InfluxDB)
-  # ════════════════════════════════════════════════════════════════════════════
-
-  influx-backfill:
-    deploy:
-      placement:
-        constraints: [node.labels.role == core]
-      restart_policy:
-        condition: none
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # PRODUCER — core node (needs Kafka + Redis)
-  # ════════════════════════════════════════════════════════════════════════════
-
-  producer:
-    deploy:
-      placement:
-        constraints: [node.labels.role == core]
-      restart_policy:
-        condition: on-failure
-        delay: 10s
-        max_attempts: 5
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # MONITORING — worker node (opt-in via --profile monitoring)
+  # MONITORING — worker node
   # ════════════════════════════════════════════════════════════════════════════
 
   redis-exporter:
@@ -435,7 +471,7 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 2G
+          memory: 1.5G
 
   kafka-exporter:
     deploy:
@@ -474,7 +510,7 @@ services:
           memory: 256M
 
   # ════════════════════════════════════════════════════════════════════════════
-  # LOGGING — worker node (opt-in via --profile logging)
+  # LOGGING — worker node
   # ════════════════════════════════════════════════════════════════════════════
 
   loki:
