@@ -1,0 +1,502 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Docker Swarm Override — 2-node AWS EC2 deployment
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage:
+#   docker stack deploy -c docker-compose.yml -c docker-compose.swarm.yml lmview \
+#     --resolve-image never
+#
+# Node labels (set once per node):
+#   docker node update --label-add role=core  <manager-node>
+#   docker node update --label-add role=worker <worker-node>
+#
+# Machine 1 (role=core):   Storage, databases, brokers, API, frontend, nginx
+# Machine 2 (role=worker): Flink, Spark, Dagster, monitoring, logging
+#
+# Shared EFS mount: /mnt/efs/lmview (code + config sync across nodes)
+# ─────────────────────────────────────────────────────────────────────────────
+
+networks:
+  crypto-net:
+    driver: overlay
+    attachable: true
+
+services:
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # DATA LAYER — core node
+  # ════════════════════════════════════════════════════════════════════════════
+
+  zookeeper:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+
+  kafka-1:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  kafka-2:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  kafka-3:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  schema-registry:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  minio:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 1G
+
+  minio-init:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: none
+
+  influxdb:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 4G
+
+  postgres:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # REDIS SENTINEL CLUSTER — core node
+  # ════════════════════════════════════════════════════════════════════════════
+
+  redis-master:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 2.5G
+
+  redis-replica-1:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 2.5G
+
+  redis-replica-2:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 2.5G
+
+  redis-sentinel-1:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+
+  redis-sentinel-2:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+
+  redis-sentinel-3:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # COMPUTE LAYER — worker node
+  # ════════════════════════════════════════════════════════════════════════════
+
+  flink-jobmanager:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+  flink-taskmanager:
+    deploy:
+      replicas: 2
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 512M
+
+  spark-master:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  spark-submit:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+
+  spark-worker:
+    deploy:
+      replicas: 2
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  spark-worker-2:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  job-watchdog:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 30s
+        max_attempts: 3
+
+  auto-submit-jobs:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: none
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # QUERY + ORCHESTRATION — worker node
+  # ════════════════════════════════════════════════════════════════════════════
+
+  trino:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 2G
+
+  dagster-webserver:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  dagster-daemon:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # API LAYER — core node
+  # ════════════════════════════════════════════════════════════════════════════
+
+  fastapi-prod:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # FRONTEND (Nginx + React SPA) — core node
+  # ════════════════════════════════════════════════════════════════════════════
+
+  nginx-prod:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 256M
+
+  certbot-auto:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 60s
+        max_attempts: 3
+
+  duckdns-auto:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 60s
+        max_attempts: 3
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BACKFILL — core node (one-shot, needs InfluxDB)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  influx-backfill:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: none
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # PRODUCER — core node (needs Kafka + Redis)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  producer:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # MONITORING — worker node (opt-in via --profile monitoring)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  redis-exporter:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 128M
+
+  prometheus:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 2G
+
+  kafka-exporter:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 128M
+
+  node-exporter:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 64M
+
+  grafana:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 256M
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # LOGGING — worker node (opt-in via --profile logging)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  loki:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 512M
+
+  promtail:
+    deploy:
+      placement:
+        constraints: [node.labels.role == worker]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 3
+      resources:
+        limits:
+          memory: 256M

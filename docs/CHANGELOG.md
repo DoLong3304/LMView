@@ -8,6 +8,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.25.37] - 2026-06-16
+
+### Added
+
+- **Docker Swarm overlay 37.1** - Created `docker-compose.swarm.yml` with deploy blocks for all 41 services, placement constraints (core/worker node labels), restart policies (on-failure), and `replicas: 2` for `flink-taskmanager` and `spark-worker`. Network driver overridden from `bridge` to `overlay` for multi-node communication.
+- **Swarm deployment script 37.2** - Created `scripts/deploy_aws_swarm.sh` with strict error handling, preflight checks (swarm active, node labels, .env existence), local image build, `docker stack deploy --resolve-image never`, and post-deploy status output including required AWS Security Group ports.
+- **Cloud infrastructure env 37.3** - Added `DOMAIN_NAME`, `CORS_ORIGINS`, `VITE_API_BASE_URL` documentation, and `AWS_EFS_MOUNT_PATH` guidance to `.env.example`. Created `.env.production` template with production-ready placeholders.
+- **Makefile swarm targets 37.4** - Added `make swarm-deploy`, `make swarm-deploy-quick`, `make swarm-status`, and `make swarm-down` targets.
+
+### Changed
+
+- **Nginx prod hardening 37.5** - Added `proxy_set_header Connection ""` to the REST API proxy block in `nginx-prod.conf` for keep-alive robustness through Docker Swarm overlay networking.
+- **Gitignore broadening 37.6** - Extended `.gitignore` to cover `.env.*` variants (except `.env.example`) so `.env.production` and other env files with secrets are never committed.
+
+### Files
+
+- `docker-compose.swarm.yml` (new)
+- `scripts/deploy_aws_swarm.sh` (new)
+- `.env.production` (new)
+- `.env.example`
+- `docker/nginx/nginx-prod.conf`
+- `Makefile`
+- `.gitignore`
+
+---
+
 ## [0.25.36] - 2026-06-16
 
 ### Changed

@@ -80,6 +80,26 @@ stop-all: ## Stop ALL services across all profiles
 	docker compose --profile dev --profile prod --profile monitoring --profile logging down
 	@echo "✅ All stopped"
 
+# ─── Docker Swarm (AWS EC2) ──────────────────────────────────────────────────
+
+.PHONY: swarm-deploy
+swarm-deploy: ## Deploy to Docker Swarm (builds images, then deploys stack)
+	bash scripts/deploy_aws_swarm.sh
+
+.PHONY: swarm-deploy-quick
+swarm-deploy-quick: ## Deploy to Docker Swarm (skip image build)
+	bash scripts/deploy_aws_swarm.sh --skip-build
+
+.PHONY: swarm-status
+swarm-status: ## Show Swarm stack services and tasks
+	@docker stack services lmview 2>/dev/null || echo "Stack 'lmview' not deployed."
+	@echo ""
+	@docker stack ps lmview --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}" 2>/dev/null | head -40 || true
+
+.PHONY: swarm-down
+swarm-down: ## Remove the Swarm stack
+	docker stack rm lmview
+
 # ─── Jobs ────────────────────────────────────────────────────────────────────
 
 .PHONY: submit-jobs
