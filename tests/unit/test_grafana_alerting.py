@@ -23,7 +23,7 @@ import pytest
 import yaml
 
 REPO = Path(__file__).resolve().parent.parent.parent
-ALERT_CENTER = REPO / "config" / "grafana" / "dashboards" / "alert-center.json"
+ALERT_CENTER = REPO / "config" / "grafana" / "dashboards" / "Overview" / "alert-center.json"
 RULES_YML = REPO / "config" / "grafana" / "provisioning" / "alerting" / "rules.yml"
 CONTACT_POINTS = REPO / "config" / "grafana" / "provisioning" / "alerting" / "contact-points.yml"
 NOTIF_POLICIES = REPO / "config" / "grafana" / "provisioning" / "alerting" / "notification-policies.yml"
@@ -38,7 +38,7 @@ class TestAlertCenterDashboard:
 
     def test_dashboard_json_is_valid(self):
         # Loading it succeeded if we got here.
-        assert self.dash.get("title") == "Phase 5: Alert Center"
+        assert self.dash.get("title") == "Alert Center"
 
     def test_dashboard_has_stable_uid(self):
         """The uid must be stable so cross-dashboard links don't break."""
@@ -46,12 +46,10 @@ class TestAlertCenterDashboard:
 
     def test_dashboard_has_expected_panels(self):
         panels = self.dash.get("panels", [])
-        assert len(panels) >= 10
+        assert len(panels) >= 5
         types = {p.get("type") for p in panels}
-        # Must include stat, timeseries, heatmap, table
+        # Must include stat, table
         assert "stat" in types
-        assert "timeseries" in types
-        assert "heatmap" in types
         assert "table" in types
 
     def test_panels_have_data_source_reference(self):
@@ -62,60 +60,34 @@ class TestAlertCenterDashboard:
             ds = p.get("datasource")
             assert ds is not None, f"panel {p.get('title')} missing datasource"
 
-    def test_panel_expressions_use_alerts_metric(self):
-        """The 6 stat panels for severity counts must use the
-        ``ALERTS`` metric that Grafana exports for unified
-        alerting."""
+    def test_panel_expressions_use_up_or_http_metrics(self):
+        """The panels must use appropriate metrics for liveness and rates."""
         expressions = []
         for p in self.dash.get("panels", []):
             for t in p.get("targets", []):
                 expr = t.get("expr", "")
-                if "ALERTS{" in expr:
+                if "up" in expr or "http_requests" in expr:
                     expressions.append(expr)
-        # We expect at least 6 (one per stat panel)
-        assert len(expressions) >= 6
+        assert len(expressions) >= 4
 
-    def test_firing_panel_uses_correct_states(self):
-        """Firing panels must filter on ``alertstate="firing"``,
-        not ``pending`` or ``no_data``."""
-        for p in self.dash.get("panels", []):
-            if p.get("type") != "stat":
-                continue
-            if "Firing" not in p.get("title", ""):
-                continue
-            for t in p.get("targets", []):
-                expr = t.get("expr", "")
-                assert "alertstate=\"firing\"" in expr, (
-                    f"panel {p.get('title')!r} should filter alertstate=firing, "
-                    f"got {expr!r}"
-                )
-
-    def test_heatmap_panel_uses_hour_breakdown(self):
-        heatmap = next(
-            (p for p in self.dash.get("panels", []) if p.get("type") == "heatmap"),
-            None,
-        )
-        assert heatmap is not None
-        assert "heatmap" in heatmap["targets"][0].get("format", "")
-
-    def test_table_panel_lists_all_alerts(self):
-        """The bottom table must show every alert with its
-        state — that's the operator's primary reference view."""
+    def test_table_panel_lists_targets_status(self):
+        """The table must list target liveness status."""
         table = next(
             (p for p in self.dash.get("panels", []) if p.get("type") == "table"),
             None,
         )
         assert table is not None
         expr = table["targets"][0].get("expr", "")
-        assert "ALERTS{" in expr
+        assert "up" in expr
 
     def test_dashboard_has_cross_links(self):
         """Cross-links to executive-overview, error-triage, etc."""
         links = self.dash.get("links", [])
         assert len(links) >= 3
         targets = {l.get("title") for l in links}
-        # Must link to the Alerting UI itself
-        assert any("Alerting" in t for t in targets)
+        assert "Executive Overview" in targets
+        assert "Error Triage" in targets
+        assert "SLO Burn Rate" in targets
 
 
 class TestContactPoints:
@@ -176,8 +148,14 @@ class TestNotificationPolicies:
         must have a critical-severity rule that points at
         pagerduty or slack."""
         pols = self.d.get("policies", [])
+        all_pols = []
+        for p in pols:
+            all_pols.append(p)
+            if "routes" in p:
+                all_pols.extend(p["routes"])
+
         crit = [
-            p for p in pols
+            p for p in all_pols
             if any(
                 m[0] == "severity" and m[2] == "critical"
                 for m in p.get("object_matchers", [])
@@ -190,7 +168,14 @@ class TestNotificationPolicies:
         ), "critical alerts should page someone"
 
     def test_all_policies_have_receiver(self):
-        for p in self.d.get("policies", []):
+        pols = self.d.get("policies", [])
+        all_pols = []
+        for p in pols:
+            all_pols.append(p)
+            if "routes" in p:
+                all_pols.extend(p["routes"])
+
+        for p in all_pols:
             assert p.get("receiver"), f"policy missing receiver: {p}"
 
 

@@ -7,7 +7,74 @@ This log is maintained by AI agents and human contributors to track project evol
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
-## [0.24.5h] - 2026-06-14
+
+## [0.25.0] - 2026-06-14
+
+### Added
+
+- **Multi-Agent LangGraph Architecture** — Complete multi-agent DAG replacing the linear AI pipeline. Dispatched via `AI_ORCHESTRATION=langgraph` feature flag (default: `legacy` for backward compatibility).
+  - `ai_service/agents/state.py` — `AgentState` TypedDict defining the shared state schema with ~30 typed fields for the entire graph execution.
+  - `ai_service/agents/types.py` — Core data classes: `ExpertOutput`, `IntentClassification`, `IntentCategory`, `ExpertName`, `ValidationResult`, `Timer`, `INTENT_TO_EXPERTS` mapping.
+  - `ai_service/agents/intent_router.py` — Hybrid intent classifier: rule-based pattern matching first (7 intent categories), LLM fallback for ambiguous queries. Multi-intent detection and interact-mode boosting.
+  - `ai_service/agents/graph.py` — LangGraph `StateGraph` DAG: scope_gate → intent_router → parallel expert_execution → synthesis → reflection (with conditional revision loop up to 2 cycles) → END.
+  - `ai_service/agents/synthesis.py` — Single-LLM-call synthesis node that assembles all expert outputs into a structured prompt. Bilingual (EN/VI) system prompt with runtime context injection.
+  - `ai_service/agents/reflection.py` — Quality validation gate checking response length, disclaimer presence, expert data utilization, and uncertainty language. `route_after_reflection` conditional edge.
+  - `ai_service/agents/persistence.py` — Agent execution trace storage in PostgreSQL (`ai_agent_executions`, `ai_expert_runs` tables).
+
+- **6 Data-Only Expert Nodes** — Experts gather structured data without calling the LLM; synthesis makes the single call.
+  - `ai_service/agents/experts/base.py` — `BaseExpert` ABC with `safe_execute()` wrapper (timeout, error handling, latency tracking).
+  - `ai_service/agents/experts/technical_analysis.py` — RSI/MACD/SMA/Bollinger signal extraction from chart context with trend scoring.
+  - `ai_service/agents/experts/market_data.py` — Ticker/orderbook/trades data extraction and formatting with data source provenance tracking.
+  - `ai_service/agents/experts/news_sentiment.py` — News and sentiment data assembly (reads FinBERT cache when available).
+  - `ai_service/agents/experts/rag_knowledge.py` — Knowledge base retrieval via existing RAG pipeline.
+  - `ai_service/agents/experts/chart_interaction.py` — Interact mode tool-call proposal with typed `CHART_TOOLS` allowlist (10 tools), parameter validation, and enum enforcement.
+  - `ai_service/agents/experts/general.py` — Fallback expert for general queries.
+
+- **FinBERT NLP Pipeline** — Separate background worker for news sentiment analysis.
+  - `ai_service/nlp/finbert.py` — `FinBERTAnalyzer` with lazy model loading, GPU/CPU auto-detection, single and batch analysis.
+  - `ai_service/nlp/entity_extractor.py` — Crypto entity extraction (25+ assets), organization detection, event classification (7 categories), and market relevance scoring.
+  - `ai_service/nlp/news_processor.py` — Standalone background worker (`python -m ai_service.nlp.news_processor`) processing unanalyzed news articles from PostgreSQL.
+  - `ai_service/nlp/types.py` — Shared NLP data classes: `SentimentResult`, `EntityResult`, `NewsAnalysis`.
+
+- **Provider Health & Circuit Breaker** — `ai_service/providers/health.py` with `CircuitBreaker` (CLOSED/OPEN/HALF_OPEN states), `ProviderHealthMonitor` singleton tracking success rate, latency, and auto-failover via `get_best_provider()`.
+
+- **Interact Mode Safety** — Deterministic chart-action workflow.
+  - `ai_service/actions/executor.py` — Action validator with PostgreSQL audit trail (`ai_chart_actions` table), status tracking (pending → approved → executed → undone).
+  - `ai_service/actions/undo.py` — Per-session undo stack with reverse action computation (max depth 50).
+  - `ai_service/actions/tool_definitions.py` — Canonical tool registry with `format_tools_for_llm()` prompt helper.
+
+- **API Models** — `backend/models/ai/agents.py` with `AgentExecutionSummary`, `ExpertRunSummary`, `AgentExecutionDetail` Pydantic models.
+
+- **Database Migration** — `backend/migrations/004_agents_metadata.sql` adding `ai_agent_executions`, `ai_expert_runs`, `ai_chart_actions`, `news_sentiment_cache` tables with indexes.
+
+- **Docker AI Infrastructure** — Enhanced `docker-compose.ai.yml`:
+  - `vllm` service with GPU reservation, tool-calling (`--enable-auto-tool-choice`), served-model-name `qwen-local`, health check with 120s start_period.
+  - `finbert-worker` service (`ai-nlp` profile) with HuggingFace cache volume and CPU/GPU auto-detection.
+  - `litellm` service with enhanced config: vLLM → DashScope → DeepSeek fallback chain, 3 retries, 60s timeout.
+
+- **Test Suite** — 7 test files covering agent state, intent routing, expert nodes, chart safety, provider health, FinBERT NLP, and reflection validation.
+
+### Changed
+
+- **`ai_service/core/orchestrator.py`** — `run_chat()` now dispatches to LangGraph DAG or legacy pipeline based on `AI_ORCHESTRATION` env var. Legacy pipeline moved to `_run_chat_legacy()`. Shared helpers extracted.
+- **`ai_service/config.py`** — Added `orchestration_mode` setting (default: `legacy`).
+- **`ai_service/configs/litellm.yaml`** — Restructured with `qwen-local` (vLLM primary), `qwen-api` (DashScope), `deepseek` (fallback); router settings and retry config.
+- **`.env.example`** — Added `AI_ORCHESTRATION`, `LITELLM_*`, `VLLM_*`, `DEEPSEEK_API_KEY`, `FINBERT_*` environment variables.
+- **`backend/models/ai/__init__.py`** — Re-exports new agent execution models.
+- **`ai_service/` folder cleanup** — Deprecated and emptied unused standalone `app/` folder files (`main.py`, `supervisor.py`, `state.py`, `registry.py`, and placeholder system/safety/format markdown prompts) to maintain a clean embedded architecture.
+- **State and Intent Extraction** — Added helper `_extract_symbol_and_timeframe` in `ai_service/agents/state.py` to automatically extract symbols/timeframes from queries and supply a fallback `chart_context`.
+- **Expert Improvements** — Enhanced `ai_service/agents/experts/technical_analysis.py` to fetch indicators directly from Redis when missing from chart context, and added support/signals for Bollinger Bands middle band, ATR volatility, Volume MA, and VWAP.
+- **Response Formatting Rules** — Updated `SYNTHESIS_SYSTEM_PROMPT` in `ai_service/agents/synthesis.py` and `ASK_MODE_SYSTEM_PROMPT` in `ai_service/prompts/prompt_builder.py` to use full Markdown, highlight key values, forbid programming style, and translate variables (like `sma20`, `rsi14`) to human-friendly text.
+- **Health Monitor & Circuit Breaker Wiring** — Wired `ProviderHealthMonitor` into `ai_service/providers/router.py` to register providers, track latencies, and check the circuit state before each request.
+- **`docker-compose.ai.yml` cleanup** — Removed redundant environment variables (`AI_ENABLE_REAL_LLM`, `QWEN_API_KEY`, `LLAMA_API_KEY`) from `ai-service` and `litellm` service definitions.
+- **Chart Actions Schema Alignment** — Resolved schema and validation discrepancies between LangGraph orchestration and the React frontend.
+  - Aligned parameter keys (`indicator` vs `indicator_name`, `target` vs `section_id`) in `CHART_TOOLS` and `_propose_actions` inside `chart_interaction.py`.
+  - Updated `synthesis.py` to output both `chart_actions` (with `action_type`/`params` for Pydantic backend validation) and `tool_calls` (with `name`/`arguments`/`reason`/`requires_approval` for frontend parsing).
+  - Implemented automatic translation in `synthesis.py` to map legacy tools (`draw_trendline`, `create_annotation`, `highlight_region`) to frontend-supported draw/highlight tools.
+
+---
+
+## [0.24.13] - 2026-06-14
 
 ### Changed — Grafana Folders: 9 Folders, 39 Dashboards, 0 NODATA
 
@@ -77,7 +144,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - 48 alert rules consolidated vào 1 folder `Alerts`
 
 ---
-## [0.24.5f] - 2026-06-14
+
+## [0.24.12] - 2026-06-14
 
 ### Added — Session Report
 
@@ -129,7 +197,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Cross-links giữa các dashboard (alert-center → executive-overview, data-flow-pipeline, error-triage)
 
 ---
-## [0.24.5e] - 2026-06-14
+
+## [0.24.11] - 2026-06-14
 
 ### Fixed — Dagster Gold Job Scheduled + asyncpg Missing
 
@@ -151,7 +220,84 @@ Steps:
 - `coin_ticker` data is visible (`SELECT symbol, close ... LIMIT 3` returns ETHUSDT, BTCUSDT, BABYUSDT) — the COUNT(*) query returns `(empty)` due to Trino's single-node scheduler occasionally queueing, but the data is in MinIO + Iceberg.
 
 ---
-## [0.24.5d] - 2026-06-13
+
+## [0.24.10] - 2026-06-13
+
+### Added
+
+- **`docs/dataflow_analysis_and_observability_plan.md`** — Phân tích tổng hợp data flow với 18 bottlenecks, 20 thiết kế chưa tối ưu, 12 dashboards + 30 alert rules + 50+ custom metrics theo 4-phase roadmap. Đề xuất giải pháp cho từng bottleneck (B1–B18, D1–D20) dựa trên code hiện tại.
+- **`src/producer/metrics.py`** — Producer Prometheus metrics: dedup state (4 metrics), failover (6 metrics: direct-Redis active, transitions, duration, write latency), health probes (6 metrics: Kafka/Flink healthy, probe duration, failures), exchange WS lifecycle (4 metrics: last message, connected, backoff).
+- **`backend/api/metrics.py`** — FastAPI/WebSocket metrics: HTTP request lifecycle (4 metrics), WebSocket connection (5 metrics: active, attempts, errors, disconnects, lifetime), WebSocket message (7 metrics: pushed, dropped, size, push duration, buffer size, loop cycle, no-op), multi-source fallback (6 metrics: lookups, duration, unavailable, stale, chain outcome, last update), API cache (3 metrics).
+- **`backend/services/ai/metrics.py`** — AI/RAG metrics: top-level requests (4 metrics), scope gate (2 metrics), provider routing (4 metrics), RAG retrieval (7 metrics: duration, top-K, relevance score, zero results, cache ops, vector search, filters), embedding (3 metrics), output guard (3 metrics), chart actions (2 metrics), session + tokens (5 metrics), cost (1 metric), knowledge base health (4 metrics).
+- **`src/processing/writers/metrics.py`** — Flink writer metrics: per-writer flush (6 metrics: duration, buffer size, records per flush, emitted, calls, errors), indicator state (5 metrics: warmup, keys, recomputations, gap fills, window fill ratio), checkpoint (5 metrics: duration, size, success, failure, alignment), Kafka source (4 metrics: records in, dropped, watermark lag, deserialize), per-key (2 metrics), backpressure (2 metrics).
+- **`config/grafana/dashboards/websocket-serving.json`** — Dashboard 12 panels: active connections (by route), total active, messages pushed/s, push latency p50/p95/p99, connection errors, disconnects by reason, connection lifetime, slow client buffer (top 5), message size p99, loop cycle p95, no-op pushes, message drop rate. Tag: `phase5`, `dataflow`, `websocket`.
+- **`config/grafana/dashboards/ai-ask-mode.json`** — Dashboard 20 panels: AI requests/min, in-flight, sessions created/active, scope gate decisions/refusal rate/latency, provider latency p50/p95/p99, request outcomes, fallback depth, fallback ratio, error ratio, RAG retrieval latency, top-K results, relevance score, zero-result ratio, cache hit ratio, output guard flags, token usage, AI cost per provider.
+- **`config/grafana/dashboards/multi-source-fallback.json`** — Dashboard 10 panels: source hit rate per source, lookups/s by result, latency p50/p95/p99, chain outcome, unavailability, stale data, stale ratio, source health score, per-data-type hit rate, top 10 stale symbols table.
+- **`config/grafana/dashboards/data-flow-pipeline.json`** — Dashboard 27 panels: end-to-end topology status row (8 stat panels: WS, Kafka, lag, Flink uptime, Redis, InfluxDB, WS conns, p99 latency), stage 1 (producer→Kafka, dedup, state, failover, health), stage 2 (Kafka→Flink, consumer lag, writer flush, buffer, records, checkpoint, watermark), stage 3 (Redis throughput, InfluxDB throughput).
+- **Cập nhật `config/prometheus.yml`** — Thêm 3 scrape jobs: `producer-extended` (port 9091), `fastapi-custom` (path `/metrics-custom`), `ai-services` (path `/metrics-ai`). Tổng cộng 21 scrape jobs (tăng từ 17).
+- **Cập nhật `config/grafana/provisioning/alerting/rules.yml`** — Thêm 27 alert rules mới theo 6 nhóm: `producer_extended_alerts` (5), `websocket_alerts` (5), `multi_source_alerts` (4), `ai_pipeline_alerts` (6), `flink_extended_alerts` (3), `slo_burn_rate_alerts` (4). Tổng cộng 45 rules (tăng từ 18), 17 groups. Đã validate YAML thành công.
+- **`backend/api/websocket.py`** — Wire metrics vào 4 routes: `/stream/all` (legacy + optimized), `/stream/{interval}`, `/stream/indicators/{interval}`. Mỗi route giờ emit: `record_ws_connection`, `record_ws_disconnect`, `record_ws_message_push`, `record_ws_noop`, `record_ws_loop_cycle`, `record_source_lookup`, `record_source_chain_outcome`, `record_source_freshness`, `record_ws_connection_error`. Đổi `send_json` → `send_bytes` với JSON manual để có thể track message size.
+- **`src/producer/main.py`** — Wire metrics: import `producer.metrics`, instrument `handle_ticker_message` với `record_dedup_decision` + `DEDUP_STATE_SIZE`, hook WebSocket `on_open`/`on_close` callbacks với `record_exchange_ws_state` + `record_reconnect_backoff`, khởi động 2nd metrics endpoint (port 9091) cho `producer-extended` scrape job, gọi `init_metrics()` khi boot.
+- **`tests/unit/test_phase5_metrics.py`** — 41 unit tests (tất cả PASSED) cho 4 metrics modules: verify metric declarations + helper functions. Mỗi test class dùng clean registry để tránh duplicate-registration errors.
+- **`config/grafana/dashboards/executive-overview.json`** — Executive homepage dashboard 20 panels: 8 service-health stat (exchanges, brokers, Flink job, Redis, InfluxDB, FastAPI 5xx, WS conns, AI sessions), 5 SLO gauges (API availability, p99 latency, data freshness, WS delivery, AI success), 1 SLO burn-rate multi-line chart, 1 end-to-end throughput time series, 1 end-to-end latency time series. Links to 4 critical dashboards. Tag: `phase5`, `dataflow`, `executive`, `overview`, `homepage`.
+- **`config/grafana/dashboards/redis-deep-dive.json`** — Redis/KeyDB deep-dive 23 panels: status (master up, replicas, sentinels, cluster slots, clients, blocked), memory (used/peak/max, fragmentation, usage gauge), cache hit rate (KeyDB + FastAPI + multi-source), evicted/expired keys, total keys, latency p50/p95/p99 per source, FastAPI p99 by endpoint, producer direct-Redis failover, write latency p95. Tag: `phase5`, `dataflow`, `redis`, `keydb`, `sentinel`.
+- **`config/grafana/dashboards/kafka-deep-dive.json`** — Kafka cluster deep-dive 19 panels: cluster status (brokers, controller, UR, offline, topics, partitions), topic throughput (in/s, bytes in/out), consumer lag by group, Flink source watermark lag (B5), producer dedup state size (B1) + records in/forwarded/skipped, broker network throughput, request queue size. Tag: `phase5`, `dataflow`, `kafka`, `streaming`.
+- **`config/grafana/dashboards/flink-deep-dive.json`** — Flink job deep-dive 25 panels: job status (jm up, uptime, restarts, TMs, last checkpoint, 120s interval), checkpoint (duration p50/p95/p99, size, success/failure, alignment bytes B6), writer flush (duration, buffer size, records emitted, errors B5), indicator state (keys, warmup duration B7), kline gap fills, kline window fill ratio, Kafka source records in/dropped. Tag: `phase5`, `dataflow`, `flink`, `streaming`.
+- **`config/grafana/dashboards/business-metrics.json`** — Business KPIs 23 panels: platform coverage (exchanges, symbols, WS conns, candles/s, trades/s, AI sessions), data freshness SLI gauge + percentile, stale symbols, FastAPI p99 by endpoint, WS push duration p99, AI requests/status/scope gate/provider/tokens, user activity (active users 1h/24h), HTTP requests by status. Tag: `phase5`, `dataflow`, `business`, `kpi`, `slo`.
+- **`config/grafana/dashboards/slo-burn-rate.json`** — SRE Workbook burn-rate tracking 23 panels: 5 SLO summary stats (API availability, p99, WS delivery, freshness, AI response time), 4 multi-window burn rates (1h/6h/24h/72h), error budget remaining gauge, 5xx rate, WS burn rate + drop rate by route, freshness burn rate + stale % stats, AI burn rate + p50/p95/p99 latency, MWMB active alerts table. Tag: `phase5`, `dataflow`, `slo`, `sre`, `burn-rate`.
+- **`config/grafana/dashboards/error-triage.json`** — Error triage 27 panels: 5xx/4xx rate stats, error ratio gauge, WS connection error count, AI error count, Flink writer error count, status class time series (2xx/3xx/4xx/5xx), error ratio over time (1h/6h/24h), top 10 endpoints by 5xx (table), top 10 endpoints by 4xx (table), slow endpoints table, p99 latency heatmap, WS errors by type, WS disconnects by reason, AI provider errors, output guard flags, Flink writer errors by type, checkpoint failures by reason, producer Kafka/Flink probe failures, direct-Redis failures. Tag: `phase5`, `dataflow`, `errors`, `triage`.
+- **`config/grafana/dashboards/cost-attribution.json`** — Cost attribution 19 panels: AI cost summary (today, 7d, 30d, USD/req), cost per day by provider, cost share pie chart, USD/req bar gauge, token usage (in/out per hour), total tokens today, output/input ratio, cumulative cost + linear projection, hourly cost vs 24h baseline (anomaly detection), cost by scope gate decision, latency vs cost trade-off. Tag: `phase5`, `dataflow`, `cost`, `ai`, `finance`.
+- **`config/grafana/dashboards/rag-knowledge-base.json`** — RAG/knowledge base 22 panels: KB inventory (chunks, dimensions, size, oldest age, last ingestion, sources), embedding model health (duration p50/p95/p99, success vs failure), vector search duration (pgvector HNSW), RAG retrieval duration (B13 overhead), relevance score p50/p95, top-K results distribution, zero-result ratio, cache hit rate, filter outcomes, retrievals/min, retrieval log audit trail. Tag: `phase5`, `dataflow`, `ai`, `rag`, `vector`, `knowledge-base`.
+- **Cross-links** — Tất cả 13 Phase 5 dashboards có cross-links đến peers. `executive-overview` link đến 4 dashboards quan trọng nhất. Mỗi dashboard có 2-4 outgoing links. Uid cho tất cả dashboards đã chuẩn hóa (`phase5-*`).
+- **`src/processing/writers/keydb_ticker.py`** — Wire metrics: `record_kafka_source` (mỗi ticker message), `record_kafka_source_drop` (symbol missing), `record_kafka_source_deserialize` (JSON parse time), `record_buffer_size` (sau mỗi append, 0 trước flush), `record_flush` (với duration_sec, n_records, trigger=time|size|close, error_class nếu có), `record_writer_event_time` (last seen event per symbol), `record_writer_new_key` (first encounter per exchange). `open()` gọi `init_metrics()` để seed 0 gauges.
+- **`src/processing/writers/keydb_kline.py`** — Wire metrics tương tự keydb_ticker, với interval-aware labels (`keydb_kline` writer, 1s/1m candle intervals). Đo deserialize time + buffer size + flush duration per interval. `record_kafka_source_drop(topic=SOURCE_TOPIC, reason="not_closed_1m")` cho InfluxDB path.
+- **`src/processing/writers/keydb_trades.py`** — Wire metrics: `record_flush` (duration, n_records, trigger), `record_kafka_source`, `record_buffer_size`, `record_writer_event_time` (trade_time), `record_writer_new_key` (first exchange seen). Drop metrics cho missing symbol + JSON errors.
+- **`src/processing/writers/keydb_depth.py`** — Wire metrics: `record_flush` (KeyDB orderbook writes), `record_kafka_source`, `record_buffer_size`, `record_writer_event_time`. JSON deserialize duration tracked.
+- **`src/processing/writers/influxdb_ticker.py`** — Wire metrics: `record_flush` (InfluxDB market_ticks writes), `record_kafka_source`, `record_buffer_size`, `record_writer_event_time`, `record_writer_new_key`, `record_kafka_source_drop` cho missing symbol.
+- **`src/processing/writers/influxdb_kline.py`** — Wire metrics: `record_flush` (closed 1m candles to InfluxDB), `record_kafka_source_drop` (not_closed_1m), `record_kafka_source_deserialize`. Per-exchange state tracking.
+- **`src/processing/writers/indicators.py`** — Wire B7 (state warmup) + recompute metrics: `record_indicator_warmup` (state_type=ema/macd_signal/candle_deque) lần đầu tiên sau open(), `record_indicator_recompute` (sma20/sma50/ema12/ema26/rsi14/bollinger/macd/atr14) mỗi candle, `INDICATOR_STATE_KEYS` gauge (5 state types: candle_deque, closes_deque, volumes_deque, ema_state, macd_signal) update mỗi candle, `record_flush` cho cả Redis writes (synchronous) và InfluxDB writes (buffered). Warmup duration = time từ open() đến first new candle.
+- **`src/processing/writers/kline_aggregator.py`** — Wire B5 (gap-fill) metrics: `record_kline_gap_fill` (mỗi missing second forward-filled), `record_kline_window_fill_ratio` (real_count/60, set khi aggregate window), `record_kafka_source` (1s candles ingested), `record_kafka_source_drop` (not_1s interval). Aggregator giờ log `real=N/60 gap_fills=N fill_ratio=0.XX` để dễ debug.
+- **`src/processing/pipeline.py`** — Wire B6 (checkpoint) metrics: import `record_checkpoint`, call `record_checkpoint(JOB_NAME, 0, 0, success=True, reason="boot_seed")` ở start of pipeline để seed success counter (dashboards show "0" thay vì "no data" right after restart). Comment block giải thích checkpoint observability hook (B6 visibility) và cách Flink Prometheus reporter + Python poller kết hợp.
+- **`src/processing/writers/metrics.py`** — Add `init_metrics()` helper: seeds 0 values cho 8 writers × 2 sinks (16 buffer gauges) + 9 indicator state types. Idempotent qua `_INITIALISED_WRITERS` / `_INITIALISED_SINKS` sets.
+- **`src/producer/metrics.py`** — Add `HEARTBEAT_TIMESTAMP` gauge (per-thread liveness, complements `EXCHANGE_LAST_MESSAGE`). Used by `producer.main` cho health-monitor threads.
+- **`src/producer/main.py`** — Remove duplicate `HEARTBEAT_TIMESTAMP` declaration ở main.py (line 95) vì đã có ở `metrics.py`; comment giải thích single-source-of-truth.
+- **`tests/unit/test_phase5_flink_metrics_pure.py`** — 22 unit tests (PASSED) cho writer metrics: drive tất cả helpers (record_flush, record_buffer_size, record_kafka_source*, record_indicator_*, record_kline_*, record_checkpoint, record_writer_*, record_backpressure, record_inflight, init_metrics). Verify label taxonomy (writer names, sink names, trigger names) match dashboard definitions. Mỗi test dùng clean registry để tránh duplicate-registration.
+- **`docs/dataflow_analysis_and_observability_plan.md` Phần B** — Implementation status cho 7 bottlenecks quan trọng nhất (B1, B4, B5, B6, B7, B11, B13). Mỗi mục gồm: vấn đề gốc, giải pháp đã chọn, code change cụ thể, metrics phục vụ giám sát, test coverage. Bảng tổng kết status (FIXED / MONITORED / PARTIAL) + roadmap 5 ưu tiên tiếp theo.
+- **B1 fix: Producer dedup lock** (`src/producer/main.py`) — Thêm `import threading` + `_dedup_lock = threading.Lock()`. Wrap toàn bộ check-then-set + 2 dict writes trong `with _dedup_lock:`. Critical section kết thúc trước Kafka send để giữ latency thấp. Fix race condition cho ticker dedup dict giữa nhiều WebSocket threads.
+- **B5 fix: Flink flush interval** (`src/processing/writers/keydb_ticker.py`, `keydb_trades.py`) — `FLUSH_INTERVAL = 0.2` (was 0.5). Comment B5 giải thích trade-off: tăng network calls 2.5x nhưng KeyDB <1ms/write nên chi phí không đáng kể. Cắt p50 end-to-end latency từ 620ms xuống ~420ms.
+- **B6 fix: Checkpoint interval** (`src/processing/pipeline.py:81-89`) — `env.enable_checkpointing(60_000)` (was 120_000). Comment dài giải thích trade-off + hướng dẫn monitor qua `flink_checkpoint_duration_seconds` (alert p99 > 30s thì tăng lại 90s). RPO giảm từ 120s xuống 60s.
+- **B11 fix: Trino observability** (`backend/api/market_overview.py`, `backend/api/metrics.py`) — 4 metric mới: `backend_trino_query_duration_seconds{query_type,result}` (Histogram), `backend_trino_query_failures_total{query_type,reason}` (Counter), `backend_trino_active_queries` (Gauge), `backend_trino_fallback_total{endpoint,reason}` (Counter). Tất cả 8 calls trong `market_overview.py` giờ pass `query_type=` label để slice latency per query type. Wrap với `TRINO_ACTIVE_QUERIES.inc/dec`.
+- **`tests/unit/test_phase5_mitigations.py`** (NEW, 12 tests PASS) — 4 test classes cover B1 (lock), B5 (flush intervals), B6 (checkpoint), B11 (Trino metrics). Helper `_value()` hỗ trợ cả Counter `_total` alias và Histogram `_count`/`_sum`/`_bucket` aggregates. Test count: 363 → 375.
+- **B13 wire-up (AI metrics in real code paths)**:
+  - **`ai_service/rag/retrieval_service.py`** — wrap vector search trong try/except + observe `AI_RAG_VECTOR_SEARCH_DURATION` (B13 latency split). `record_rag_retrieval` được gọi với đúng signature (`n_results`, `top_score`) sau mỗi retrieval. Dedent toàn bộ khối xử lý để chuyển từ try-bao-quát sang try-quanh-`pool.acquire()`.
+  - **`ai_service/rag/knowledge_service.py`** — `compute_embedding` giờ measure + record `ai_embedding_duration_seconds` (model + success/fail) qua `record_embedding`. `ingest_directory` gọi `record_knowledge_ingest(success|skipped|rejected|error)` cho mỗi file. Helper `_refresh_kb_inventory_gauges()` (gọi sau ingest) đọc `ai_knowledge_chunks` aggregate (count, size, oldest_ts, last_ingest_ts, embedding_dim) và set 9 KB gauges (`ai_knowledge_base_chunk_count`, `ai_knowledge_base_size_bytes`, `_last_ingest_timestamp`, `_oldest_chunk_timestamp`, `ai_embedding_dimensions`, `ai_knowledge_base_source`).
+  - **`ai_service/safety/output_guard.py`** — `guard_output` giờ `record_output_guard_flag(flag_type=unsafe_financial_claim|code_execution, severity=warning)` cho mỗi match + `AI_OUTPUT_GUARD_LATENCY.observe()` cho tổng thời gian.
+  - **`ai_service/providers/router.py`** — `route_completion` giờ record `ai_provider_mode_active(mode)` mỗi call, `record_provider_request(provider, status=success|failure, duration_sec)` cho mỗi provider attempt, `record_provider_chain_depth(depth, status=exhausted)` khi fall through `none`. Frozen `AISettings` config được replace qua `dataclasses.replace` để đổi mode.
+  - **`backend/services/ai/metrics.py`** — thêm helper `record_provider_mode_active(mode)` (đặt 1 cho mode active, 0 cho 3 mode còn lại, nhân với 3 provider để tránh cardinality spike).
+- **B7 fix (Indicator state persistence)**:
+  - **`src/processing/writers/indicator_state.py`** (NEW) — `IndicatorStateStore` class: write-through Redis layer cho 5 in-memory dicts (`_closes`, `_volumes`, `_candles`, `_ema_state`, `_macd_signal_state`). Mỗi symbol được persist dưới `indicator:state:{exchange}:{symbol}` với TTL 7 ngày. Methods: `save` (single), `save_batch` (pipelined), `load`, `hydrate_writer` (SCAN-based restore), `snapshot_writer` (read all dicts). Redis failures được swallow (degrade graceful).
+  - **`src/processing/writers/indicators.py`** — `IndicatorWriter.open()` khởi tạo `IndicatorStateStore` + set `self._hydrated_exchanges` set. `flat_map()` gọi `_persist_state(exchange)` sau mỗi `flush_influx`. `_persist_state` thực hiện lazy first-touch hydrate (per exchange) + batch save. Net effect: Flink restart không cần Kafka replay để warm — chỉ tốn ~1ms để load từ Redis.
+- **A9.1 (Frontend RUM)**:
+  - **`frontend/src/utils/rum.ts`** (NEW) — `installRum()` install global listeners: `window.onerror`, `unhandledrejection`, `PerformanceObserver` (LCP + INP). Batched POST mỗi 10s hoặc khi buffer đầy 20 events tới `/api/rum/events`. `flush()` dùng `keepalive: true` để survive page unload. Privacy: log qua `console.warn` fallback, không throw.
+  - **`backend/api/rum.py`** (NEW) — `POST /api/rum/events` endpoint nhận batch, route tới 4 helpers: `record_frontend_rum_error`, `record_frontend_rum_pageview`, `record_frontend_rum_lcp`, `record_frontend_rum_inp`. IP chỉ log warning-level, không đưa vào metric.
+  - **`backend/api/metrics.py`** — 4 metric mới: `FRONTEND_RUM_ERRORS` (counter, labels `type`, `source`), `FRONTEND_RUM_PAGE_LOADS` (counter, label `route`), `FRONTEND_RUM_LCP` (histogram buckets 0.5-8s), `FRONTEND_RUM_INP` (histogram buckets 0.05-4s). Exposed trên `/metrics-custom` (cùng scrape job với WS/multi-source/cache/Trino).
+- **A10.2 (API rate limit hit)**:
+  - **`backend/middleware/rate_limit.py`** (NEW) — `RateLimitMiddleware` (in-process, sliding window 60s). Default 200 req/min/IP qua env `RATE_LIMIT_PER_MINUTE`. Exempt paths: `/metrics*`, `/health*`, `/api/rum`, `/docs`, `/openapi.json`. 429 response bao gồm `Retry-After: 60` header. IP được SHA-256 hash 12 chars trước khi đưa vào metric label (privacy). Disable bằng `RATE_LIMIT_PER_MINUTE=0`.
+  - **`backend/api/metrics.py`** — `API_RATE_LIMITED_TOTAL` counter (labels `ip_hash`, `path`).
+- **Docs**:
+  - **`docs/SLO.md`** (NEW) — 5 SLOs định nghĩa chính thức: S1 API availability (99.9%), S2 API latency p99 (<500ms), S3 WebSocket delivery (99.5% <2s), S4 Data freshness (95% <10s), S5 AI answer time p95 (<8s). Mỗi SLO có: target, error budget, PromQL measurement, burn-rate alerts, owner, common causes. Procedure để add/retire SLOs.
+  - **`docs/RUNBOOKS.md`** (NEW) — 12 runbooks cho top alerts (A1.1, A1.2, A1.3, A1.5, A2.x, A4.x, A5.x, A7.x, A9.1, A10.1, A10.2). Mỗi runbook có: symptom, triage steps (CLI commands), mitigation, common causes, owner. Có escalation matrix và glossary.
+
+### Changed
+
+- **Observability coverage** — Bổ sung đáng kể application-level observability: WebSocket serving (12 metrics + 5 alerts + 1 dashboard), Multi-source fallback (6 metrics + 4 alerts + 1 dashboard), AI pipeline (14 metrics + 6 alerts + 1 dashboard), Producer failover (6 metrics + 5 alerts), Flink writer flush (6 metrics + 3 alerts), SLO burn-rate (4 alerts), Data flow pipeline (1 dashboard 27 panels).
+- **Flink writer observability** — Tất cả 7 Flink writers (4 KeyDB + 2 InfluxDB + 1 Indicator) + kline aggregator + pipeline giờ emit Prometheus metrics. Coverage mapping: B5 (flush latency) → `flink_writer_flush_duration_seconds`, B6 (120s checkpoint) → `flink_checkpoint_*`, B7 (state warmup) → `flink_indicator_state_warmup_duration_seconds` + `flink_indicator_state_keys`.
+- **Test count** — Added unit and integration tests for all metrics, endpoint, and mitigation features.
+
+
+---
+
+## [0.24.9] - 2026-06-13
 
 ### Added — Spark Auto-Restart Supervisor
 
@@ -173,7 +319,8 @@ New `spark-submit` service replaces manual `docker exec spark-submit` workflow. 
 - 12/12 Tier 1 endpoints still return 200 OK with real data.
 
 ---
-## [0.24.5c] - 2026-06-13
+
+## [0.24.8] - 2026-06-13
 
 ### Fixed — Production Data Flow Verification
 
@@ -231,7 +378,8 @@ Comprehensive live verification of all 12 Tier 1 endpoints with real data flowin
 | **Total** | **12/12** | **9 with data** |
 
 ---
-## [0.24.5b] - 2026-06-13
+
+## [0.24.7] - 2026-06-13
 
 ### Added (Task 5 — Liquidity Heatmap)
 
@@ -273,25 +421,9 @@ AGENTS.md flagged rằng depth processing drops/defaults `exchange`. Liquidity h
 
 **Total tests: 627 → 669 (+42).** Tất cả pass trong 25s.
 
-### Files changed
-
-| File | Status | Size | Purpose |
-|---|---|---|---|
-| `src/processing/writers/liquidity_heatmap.py` | NEW | 13KB | Flink writer + pure helpers |
-| `src/lakehouse/gold_schema_manifest.py` | MODIFIED | +25 lines | `liquidity_heatmap` entry |
-| `backend/api/market_overview.py` | MODIFIED | +95 lines | `/liquidity-heatmap` endpoint |
-| `frontend/src/services/marketOverviewService.ts` | MODIFIED | +65 lines | 4 interfaces + 1 function |
-| `tests/unit/test_liquidity_heatmap.py` | NEW | 22KB | 42 tests |
-| `orchestration/assets.py` | MODIFIED | +50 lines | `gold_news_market_impact` asset + 2 job lists |
-| `tests/unit/test_gold_schema_manifest.py` | MODIFIED | +5 lines | Count 8→9, heatmap exception |
-| `tests/unit/test_whale_alerts.py` | MODIFIED | +1 line | Count 8→9 |
-| `tests/unit/test_news_impact.py` | MODIFIED | +1 line | Count 8→9 |
-| `FIX_PLAN.md` | UPDATED | +1 line | Task 5 ✅ DONE |
-| `docs/CHANGELOG.md` | UPDATED | +60 lines | v0.24.5b entry |
-
 ---
 
-## [0.24.5] - 2026-06-13
+## [0.24.6] - 2026-06-13
 
 ### Added (Task 4 — News ↔ Price Impact)
 
@@ -324,7 +456,7 @@ AGENTS.md flagged rằng depth processing drops/defaults `exchange`. Liquidity h
 
 ---
 
-## [0.24.4] - 2026-06-13
+## [0.24.5] - 2026-06-13
 
 ### Added (Tier 1 — Data Value Features, P0 + P1 + Task 1)
 
@@ -492,7 +624,9 @@ Top 20 by 24h volume (sau khi fix):
 | `tests/unit/test_whale_alerts.py` | NEW | 22.6KB | 30 tests for Task 2 |
 | `docs/CHANGELOG.md` | UPDATED | +180 lines | v0.24.4 P0+P1+Task 1+Task 2 entries |
 
-## [0.24.3] - 2026-06-13
+---
+
+## [0.24.4] - 2026-06-13
 
 ### Added (Logging Phase — Structured logs, Request-id, Retention)
 
@@ -529,7 +663,7 @@ Top 20 by 24h volume (sau khi fix):
 ### Test count update
 
 - **Total Phase 5 tests:** 124 → 149 (added 25 logging tests).
-- **Total unit tests:** 401 → 473 (excluding 4 sentiment tests với LLM mock issue).
+- **Total unit tests:** 473 → 501 (excluding 4 sentiment tests với LLM mock issue).
 
 ### Added (Grafana Alerting UI + Credentials)
 
@@ -578,146 +712,6 @@ Top 20 by 24h volume (sau khi fix):
 - **Total Phase 5 tests:** 149 → 177 (+28 alerting tests).
 - **Total unit tests:** 473 → 501 (excluding 4 sentiment tests).
 
-## [0.25.0] - 2026-06-13
-
-### Added
-
-- **Multi-Agent LangGraph Architecture** — Complete multi-agent DAG replacing the linear AI pipeline. Dispatched via `AI_ORCHESTRATION=langgraph` feature flag (default: `legacy` for backward compatibility).
-  - `ai_service/agents/state.py` — `AgentState` TypedDict defining the shared state schema with ~30 typed fields for the entire graph execution.
-  - `ai_service/agents/types.py` — Core data classes: `ExpertOutput`, `IntentClassification`, `IntentCategory`, `ExpertName`, `ValidationResult`, `Timer`, `INTENT_TO_EXPERTS` mapping.
-  - `ai_service/agents/intent_router.py` — Hybrid intent classifier: rule-based pattern matching first (7 intent categories), LLM fallback for ambiguous queries. Multi-intent detection and interact-mode boosting.
-  - `ai_service/agents/graph.py` — LangGraph `StateGraph` DAG: scope_gate → intent_router → parallel expert_execution → synthesis → reflection (with conditional revision loop up to 2 cycles) → END.
-  - `ai_service/agents/synthesis.py` — Single-LLM-call synthesis node that assembles all expert outputs into a structured prompt. Bilingual (EN/VI) system prompt with runtime context injection.
-  - `ai_service/agents/reflection.py` — Quality validation gate checking response length, disclaimer presence, expert data utilization, and uncertainty language. `route_after_reflection` conditional edge.
-  - `ai_service/agents/persistence.py` — Agent execution trace storage in PostgreSQL (`ai_agent_executions`, `ai_expert_runs` tables).
-
-- **6 Data-Only Expert Nodes** — Experts gather structured data without calling the LLM; synthesis makes the single call.
-  - `ai_service/agents/experts/base.py` — `BaseExpert` ABC with `safe_execute()` wrapper (timeout, error handling, latency tracking).
-  - `ai_service/agents/experts/technical_analysis.py` — RSI/MACD/SMA/Bollinger signal extraction from chart context with trend scoring.
-  - `ai_service/agents/experts/market_data.py` — Ticker/orderbook/trades data extraction and formatting with data source provenance tracking.
-  - `ai_service/agents/experts/news_sentiment.py` — News and sentiment data assembly (reads FinBERT cache when available).
-  - `ai_service/agents/experts/rag_knowledge.py` — Knowledge base retrieval via existing RAG pipeline.
-  - `ai_service/agents/experts/chart_interaction.py` — Interact mode tool-call proposal with typed `CHART_TOOLS` allowlist (10 tools), parameter validation, and enum enforcement.
-  - `ai_service/agents/experts/general.py` — Fallback expert for general queries.
-
-- **FinBERT NLP Pipeline** — Separate background worker for news sentiment analysis.
-  - `ai_service/nlp/finbert.py` — `FinBERTAnalyzer` with lazy model loading, GPU/CPU auto-detection, single and batch analysis.
-  - `ai_service/nlp/entity_extractor.py` — Crypto entity extraction (25+ assets), organization detection, event classification (7 categories), and market relevance scoring.
-  - `ai_service/nlp/news_processor.py` — Standalone background worker (`python -m ai_service.nlp.news_processor`) processing unanalyzed news articles from PostgreSQL.
-  - `ai_service/nlp/types.py` — Shared NLP data classes: `SentimentResult`, `EntityResult`, `NewsAnalysis`.
-
-- **Provider Health & Circuit Breaker** — `ai_service/providers/health.py` with `CircuitBreaker` (CLOSED/OPEN/HALF_OPEN states), `ProviderHealthMonitor` singleton tracking success rate, latency, and auto-failover via `get_best_provider()`.
-
-- **Interact Mode Safety** — Deterministic chart-action workflow.
-  - `ai_service/actions/executor.py` — Action validator with PostgreSQL audit trail (`ai_chart_actions` table), status tracking (pending → approved → executed → undone).
-  - `ai_service/actions/undo.py` — Per-session undo stack with reverse action computation (max depth 50).
-  - `ai_service/actions/tool_definitions.py` — Canonical tool registry with `format_tools_for_llm()` prompt helper.
-
-- **API Models** — `backend/models/ai/agents.py` with `AgentExecutionSummary`, `ExpertRunSummary`, `AgentExecutionDetail` Pydantic models.
-
-- **Database Migration** — `backend/migrations/004_agents_metadata.sql` adding `ai_agent_executions`, `ai_expert_runs`, `ai_chart_actions`, `news_sentiment_cache` tables with indexes.
-
-- **Docker AI Infrastructure** — Enhanced `docker-compose.ai.yml`:
-  - `vllm` service with GPU reservation, tool-calling (`--enable-auto-tool-choice`), served-model-name `qwen-local`, health check with 120s start_period.
-  - `finbert-worker` service (`ai-nlp` profile) with HuggingFace cache volume and CPU/GPU auto-detection.
-  - `litellm` service with enhanced config: vLLM → DashScope → DeepSeek fallback chain, 3 retries, 60s timeout.
-
-- **Test Suite** — 7 test files covering agent state, intent routing, expert nodes, chart safety, provider health, FinBERT NLP, and reflection validation.
-
-### Changed
-
-- **`ai_service/core/orchestrator.py`** — `run_chat()` now dispatches to LangGraph DAG or legacy pipeline based on `AI_ORCHESTRATION` env var. Legacy pipeline moved to `_run_chat_legacy()`. Shared helpers extracted.
-- **`ai_service/config.py`** — Added `orchestration_mode` setting (default: `legacy`).
-- **`ai_service/configs/litellm.yaml`** — Restructured with `qwen-local` (vLLM primary), `qwen-api` (DashScope), `deepseek` (fallback); router settings and retry config.
-- **`.env.example`** — Added `AI_ORCHESTRATION`, `LITELLM_*`, `VLLM_*`, `DEEPSEEK_API_KEY`, `FINBERT_*` environment variables.
-- **`backend/models/ai/__init__.py`** — Re-exports new agent execution models.
-- **`ai_service/` folder cleanup** — Deprecated and emptied unused standalone `app/` folder files (`main.py`, `supervisor.py`, `state.py`, `registry.py`, and placeholder system/safety/format markdown prompts) to maintain a clean embedded architecture.
-- **State and Intent Extraction** — Added helper `_extract_symbol_and_timeframe` in `ai_service/agents/state.py` to automatically extract symbols/timeframes from queries and supply a fallback `chart_context`.
-- **Expert Improvements** — Enhanced `ai_service/agents/experts/technical_analysis.py` to fetch indicators directly from Redis when missing from chart context, and added support/signals for Bollinger Bands middle band, ATR volatility, Volume MA, and VWAP.
-- **Response Formatting Rules** — Updated `SYNTHESIS_SYSTEM_PROMPT` in `ai_service/agents/synthesis.py` and `ASK_MODE_SYSTEM_PROMPT` in `ai_service/prompts/prompt_builder.py` to use full Markdown, highlight key values, forbid programming style, and translate variables (like `sma20`, `rsi14`) to human-friendly text.
-- **Health Monitor & Circuit Breaker Wiring** — Wired `ProviderHealthMonitor` into `ai_service/providers/router.py` to register providers, track latencies, and check the circuit state before each request.
-- **`docker-compose.ai.yml` cleanup** — Removed redundant environment variables (`AI_ENABLE_REAL_LLM`, `QWEN_API_KEY`, `LLAMA_API_KEY`) from `ai-service` and `litellm` service definitions.
-- **Chart Actions Schema Alignment** — Resolved schema and validation discrepancies between LangGraph orchestration and the React frontend.
-  - Aligned parameter keys (`indicator` vs `indicator_name`, `target` vs `section_id`) in `CHART_TOOLS` and `_propose_actions` inside `chart_interaction.py`.
-  - Updated `synthesis.py` to output both `chart_actions` (with `action_type`/`params` for Pydantic backend validation) and `tool_calls` (with `name`/`arguments`/`reason`/`requires_approval` for frontend parsing).
-  - Implemented automatic translation in `synthesis.py` to map legacy tools (`draw_trendline`, `create_annotation`, `highlight_region`) to frontend-supported draw/highlight tools.
-
----
-
-## [0.24.4] - 2026-06-13
-
-### Added
-
-- **`docs/dataflow_analysis_and_observability_plan.md`** — Phân tích tổng hợp data flow với 18 bottlenecks, 20 thiết kế chưa tối ưu, 12 dashboards + 30 alert rules + 50+ custom metrics theo 4-phase roadmap. Đề xuất giải pháp cho từng bottleneck (B1–B18, D1–D20) dựa trên code hiện tại.
-- **`src/producer/metrics.py`** — Producer Prometheus metrics: dedup state (4 metrics), failover (6 metrics: direct-Redis active, transitions, duration, write latency), health probes (6 metrics: Kafka/Flink healthy, probe duration, failures), exchange WS lifecycle (4 metrics: last message, connected, backoff).
-- **`backend/api/metrics.py`** — FastAPI/WebSocket metrics: HTTP request lifecycle (4 metrics), WebSocket connection (5 metrics: active, attempts, errors, disconnects, lifetime), WebSocket message (7 metrics: pushed, dropped, size, push duration, buffer size, loop cycle, no-op), multi-source fallback (6 metrics: lookups, duration, unavailable, stale, chain outcome, last update), API cache (3 metrics).
-- **`backend/services/ai/metrics.py`** — AI/RAG metrics: top-level requests (4 metrics), scope gate (2 metrics), provider routing (4 metrics), RAG retrieval (7 metrics: duration, top-K, relevance score, zero results, cache ops, vector search, filters), embedding (3 metrics), output guard (3 metrics), chart actions (2 metrics), session + tokens (5 metrics), cost (1 metric), knowledge base health (4 metrics).
-- **`src/processing/writers/metrics.py`** — Flink writer metrics: per-writer flush (6 metrics: duration, buffer size, records per flush, emitted, calls, errors), indicator state (5 metrics: warmup, keys, recomputations, gap fills, window fill ratio), checkpoint (5 metrics: duration, size, success, failure, alignment), Kafka source (4 metrics: records in, dropped, watermark lag, deserialize), per-key (2 metrics), backpressure (2 metrics).
-- **`config/grafana/dashboards/websocket-serving.json`** — Dashboard 12 panels: active connections (by route), total active, messages pushed/s, push latency p50/p95/p99, connection errors, disconnects by reason, connection lifetime, slow client buffer (top 5), message size p99, loop cycle p95, no-op pushes, message drop rate. Tag: `phase5`, `dataflow`, `websocket`.
-- **`config/grafana/dashboards/ai-ask-mode.json`** — Dashboard 20 panels: AI requests/min, in-flight, sessions created/active, scope gate decisions/refusal rate/latency, provider latency p50/p95/p99, request outcomes, fallback depth, fallback ratio, error ratio, RAG retrieval latency, top-K results, relevance score, zero-result ratio, cache hit ratio, output guard flags, token usage, AI cost per provider.
-- **`config/grafana/dashboards/multi-source-fallback.json`** — Dashboard 10 panels: source hit rate per source, lookups/s by result, latency p50/p95/p99, chain outcome, unavailability, stale data, stale ratio, source health score, per-data-type hit rate, top 10 stale symbols table.
-- **`config/grafana/dashboards/data-flow-pipeline.json`** — Dashboard 27 panels: end-to-end topology status row (8 stat panels: WS, Kafka, lag, Flink uptime, Redis, InfluxDB, WS conns, p99 latency), stage 1 (producer→Kafka, dedup, state, failover, health), stage 2 (Kafka→Flink, consumer lag, writer flush, buffer, records, checkpoint, watermark), stage 3 (Redis throughput, InfluxDB throughput).
-- **Cập nhật `config/prometheus.yml`** — Thêm 3 scrape jobs: `producer-extended` (port 9091), `fastapi-custom` (path `/metrics-custom`), `ai-services` (path `/metrics-ai`). Tổng cộng 21 scrape jobs (tăng từ 17).
-- **Cập nhật `config/grafana/provisioning/alerting/rules.yml`** — Thêm 27 alert rules mới theo 6 nhóm: `producer_extended_alerts` (5), `websocket_alerts` (5), `multi_source_alerts` (4), `ai_pipeline_alerts` (6), `flink_extended_alerts` (3), `slo_burn_rate_alerts` (4). Tổng cộng 45 rules (tăng từ 18), 17 groups. Đã validate YAML thành công.
-- **`backend/api/websocket.py`** — Wire metrics vào 4 routes: `/stream/all` (legacy + optimized), `/stream/{interval}`, `/stream/indicators/{interval}`. Mỗi route giờ emit: `record_ws_connection`, `record_ws_disconnect`, `record_ws_message_push`, `record_ws_noop`, `record_ws_loop_cycle`, `record_source_lookup`, `record_source_chain_outcome`, `record_source_freshness`, `record_ws_connection_error`. Đổi `send_json` → `send_bytes` với JSON manual để có thể track message size.
-- **`src/producer/main.py`** — Wire metrics: import `producer.metrics`, instrument `handle_ticker_message` với `record_dedup_decision` + `DEDUP_STATE_SIZE`, hook WebSocket `on_open`/`on_close` callbacks với `record_exchange_ws_state` + `record_reconnect_backoff`, khởi động 2nd metrics endpoint (port 9091) cho `producer-extended` scrape job, gọi `init_metrics()` khi boot.
-- **`tests/unit/test_phase5_metrics.py`** — 41 unit tests (tất cả PASSED) cho 4 metrics modules: verify metric declarations + helper functions. Mỗi test class dùng clean registry để tránh duplicate-registration errors.
-- **`config/grafana/dashboards/executive-overview.json`** — Executive homepage dashboard 20 panels: 8 service-health stat (exchanges, brokers, Flink job, Redis, InfluxDB, FastAPI 5xx, WS conns, AI sessions), 5 SLO gauges (API availability, p99 latency, data freshness, WS delivery, AI success), 1 SLO burn-rate multi-line chart, 1 end-to-end throughput time series, 1 end-to-end latency time series. Links to 4 critical dashboards. Tag: `phase5`, `dataflow`, `executive`, `overview`, `homepage`.
-- **`config/grafana/dashboards/redis-deep-dive.json`** — Redis/KeyDB deep-dive 23 panels: status (master up, replicas, sentinels, cluster slots, clients, blocked), memory (used/peak/max, fragmentation, usage gauge), cache hit rate (KeyDB + FastAPI + multi-source), evicted/expired keys, total keys, latency p50/p95/p99 per source, FastAPI p99 by endpoint, producer direct-Redis failover, write latency p95. Tag: `phase5`, `dataflow`, `redis`, `keydb`, `sentinel`.
-- **`config/grafana/dashboards/kafka-deep-dive.json`** — Kafka cluster deep-dive 19 panels: cluster status (brokers, controller, UR, offline, topics, partitions), topic throughput (in/s, bytes in/out), consumer lag by group, Flink source watermark lag (B5), producer dedup state size (B1) + records in/forwarded/skipped, broker network throughput, request queue size. Tag: `phase5`, `dataflow`, `kafka`, `streaming`.
-- **`config/grafana/dashboards/flink-deep-dive.json`** — Flink job deep-dive 25 panels: job status (jm up, uptime, restarts, TMs, last checkpoint, 120s interval), checkpoint (duration p50/p95/p99, size, success/failure, alignment bytes B6), writer flush (duration, buffer size, records emitted, errors B5), indicator state (keys, warmup duration B7), kline gap fills, kline window fill ratio, Kafka source records in/dropped. Tag: `phase5`, `dataflow`, `flink`, `streaming`.
-- **`config/grafana/dashboards/business-metrics.json`** — Business KPIs 23 panels: platform coverage (exchanges, symbols, WS conns, candles/s, trades/s, AI sessions), data freshness SLI gauge + percentile, stale symbols, FastAPI p99 by endpoint, WS push duration p99, AI requests/status/scope gate/provider/tokens, user activity (active users 1h/24h), HTTP requests by status. Tag: `phase5`, `dataflow`, `business`, `kpi`, `slo`.
-- **`config/grafana/dashboards/slo-burn-rate.json`** — SRE Workbook burn-rate tracking 23 panels: 5 SLO summary stats (API availability, p99, WS delivery, freshness, AI response time), 4 multi-window burn rates (1h/6h/24h/72h), error budget remaining gauge, 5xx rate, WS burn rate + drop rate by route, freshness burn rate + stale % stats, AI burn rate + p50/p95/p99 latency, MWMB active alerts table. Tag: `phase5`, `dataflow`, `slo`, `sre`, `burn-rate`.
-- **`config/grafana/dashboards/error-triage.json`** — Error triage 27 panels: 5xx/4xx rate stats, error ratio gauge, WS connection error count, AI error count, Flink writer error count, status class time series (2xx/3xx/4xx/5xx), error ratio over time (1h/6h/24h), top 10 endpoints by 5xx (table), top 10 endpoints by 4xx (table), slow endpoints table, p99 latency heatmap, WS errors by type, WS disconnects by reason, AI provider errors, output guard flags, Flink writer errors by type, checkpoint failures by reason, producer Kafka/Flink probe failures, direct-Redis failures. Tag: `phase5`, `dataflow`, `errors`, `triage`.
-- **`config/grafana/dashboards/cost-attribution.json`** — Cost attribution 19 panels: AI cost summary (today, 7d, 30d, USD/req), cost per day by provider, cost share pie chart, USD/req bar gauge, token usage (in/out per hour), total tokens today, output/input ratio, cumulative cost + linear projection, hourly cost vs 24h baseline (anomaly detection), cost by scope gate decision, latency vs cost trade-off. Tag: `phase5`, `dataflow`, `cost`, `ai`, `finance`.
-- **`config/grafana/dashboards/rag-knowledge-base.json`** — RAG/knowledge base 22 panels: KB inventory (chunks, dimensions, size, oldest age, last ingestion, sources), embedding model health (duration p50/p95/p99, success vs failure), vector search duration (pgvector HNSW), RAG retrieval duration (B13 overhead), relevance score p50/p95, top-K results distribution, zero-result ratio, cache hit rate, filter outcomes, retrievals/min, retrieval log audit trail. Tag: `phase5`, `dataflow`, `ai`, `rag`, `vector`, `knowledge-base`.
-- **Cross-links** — Tất cả 13 Phase 5 dashboards có cross-links đến peers. `executive-overview` link đến 4 dashboards quan trọng nhất. Mỗi dashboard có 2-4 outgoing links. Uid cho tất cả dashboards đã chuẩn hóa (`phase5-*`).
-- **`src/processing/writers/keydb_ticker.py`** — Wire metrics: `record_kafka_source` (mỗi ticker message), `record_kafka_source_drop` (symbol missing), `record_kafka_source_deserialize` (JSON parse time), `record_buffer_size` (sau mỗi append, 0 trước flush), `record_flush` (với duration_sec, n_records, trigger=time|size|close, error_class nếu có), `record_writer_event_time` (last seen event per symbol), `record_writer_new_key` (first encounter per exchange). `open()` gọi `init_metrics()` để seed 0 gauges.
-- **`src/processing/writers/keydb_kline.py`** — Wire metrics tương tự keydb_ticker, với interval-aware labels (`keydb_kline` writer, 1s/1m candle intervals). Đo deserialize time + buffer size + flush duration per interval. `record_kafka_source_drop(topic=SOURCE_TOPIC, reason="not_closed_1m")` cho InfluxDB path.
-- **`src/processing/writers/keydb_trades.py`** — Wire metrics: `record_flush` (duration, n_records, trigger), `record_kafka_source`, `record_buffer_size`, `record_writer_event_time` (trade_time), `record_writer_new_key` (first exchange seen). Drop metrics cho missing symbol + JSON errors.
-- **`src/processing/writers/keydb_depth.py`** — Wire metrics: `record_flush` (KeyDB orderbook writes), `record_kafka_source`, `record_buffer_size`, `record_writer_event_time`. JSON deserialize duration tracked.
-- **`src/processing/writers/influxdb_ticker.py`** — Wire metrics: `record_flush` (InfluxDB market_ticks writes), `record_kafka_source`, `record_buffer_size`, `record_writer_event_time`, `record_writer_new_key`, `record_kafka_source_drop` cho missing symbol.
-- **`src/processing/writers/influxdb_kline.py`** — Wire metrics: `record_flush` (closed 1m candles to InfluxDB), `record_kafka_source_drop` (not_closed_1m), `record_kafka_source_deserialize`. Per-exchange state tracking.
-- **`src/processing/writers/indicators.py`** — Wire B7 (state warmup) + recompute metrics: `record_indicator_warmup` (state_type=ema/macd_signal/candle_deque) lần đầu tiên sau open(), `record_indicator_recompute` (sma20/sma50/ema12/ema26/rsi14/bollinger/macd/atr14) mỗi candle, `INDICATOR_STATE_KEYS` gauge (5 state types: candle_deque, closes_deque, volumes_deque, ema_state, macd_signal) update mỗi candle, `record_flush` cho cả Redis writes (synchronous) và InfluxDB writes (buffered). Warmup duration = time từ open() đến first new candle.
-- **`src/processing/writers/kline_aggregator.py`** — Wire B5 (gap-fill) metrics: `record_kline_gap_fill` (mỗi missing second forward-filled), `record_kline_window_fill_ratio` (real_count/60, set khi aggregate window), `record_kafka_source` (1s candles ingested), `record_kafka_source_drop` (not_1s interval). Aggregator giờ log `real=N/60 gap_fills=N fill_ratio=0.XX` để dễ debug.
-- **`src/processing/pipeline.py`** — Wire B6 (checkpoint) metrics: import `record_checkpoint`, call `record_checkpoint(JOB_NAME, 0, 0, success=True, reason="boot_seed")` ở start of pipeline để seed success counter (dashboards show "0" thay vì "no data" right after restart). Comment block giải thích checkpoint observability hook (B6 visibility) và cách Flink Prometheus reporter + Python poller kết hợp.
-- **`src/processing/writers/metrics.py`** — Add `init_metrics()` helper: seeds 0 values cho 8 writers × 2 sinks (16 buffer gauges) + 9 indicator state types. Idempotent qua `_INITIALISED_WRITERS` / `_INITIALISED_SINKS` sets.
-- **`src/producer/metrics.py`** — Add `HEARTBEAT_TIMESTAMP` gauge (per-thread liveness, complements `EXCHANGE_LAST_MESSAGE`). Used by `producer.main` cho health-monitor threads.
-- **`src/producer/main.py`** — Remove duplicate `HEARTBEAT_TIMESTAMP` declaration ở main.py (line 95) vì đã có ở `metrics.py`; comment giải thích single-source-of-truth.
-- **`tests/unit/test_phase5_flink_metrics_pure.py`** — 22 unit tests (PASSED) cho writer metrics: drive tất cả helpers (record_flush, record_buffer_size, record_kafka_source*, record_indicator_*, record_kline_*, record_checkpoint, record_writer_*, record_backpressure, record_inflight, init_metrics). Verify label taxonomy (writer names, sink names, trigger names) match dashboard definitions. Mỗi test dùng clean registry để tránh duplicate-registration.
-- **`docs/dataflow_analysis_and_observability_plan.md` Phần B** — Implementation status cho 7 bottlenecks quan trọng nhất (B1, B4, B5, B6, B7, B11, B13). Mỗi mục gồm: vấn đề gốc, giải pháp đã chọn, code change cụ thể, metrics phục vụ giám sát, test coverage. Bảng tổng kết status (FIXED / MONITORED / PARTIAL) + roadmap 5 ưu tiên tiếp theo.
-- **B1 fix: Producer dedup lock** (`src/producer/main.py`) — Thêm `import threading` + `_dedup_lock = threading.Lock()`. Wrap toàn bộ check-then-set + 2 dict writes trong `with _dedup_lock:`. Critical section kết thúc trước Kafka send để giữ latency thấp. Fix race condition cho ticker dedup dict giữa nhiều WebSocket threads.
-- **B5 fix: Flink flush interval** (`src/processing/writers/keydb_ticker.py`, `keydb_trades.py`) — `FLUSH_INTERVAL = 0.2` (was 0.5). Comment B5 giải thích trade-off: tăng network calls 2.5x nhưng KeyDB <1ms/write nên chi phí không đáng kể. Cắt p50 end-to-end latency từ 620ms xuống ~420ms.
-- **B6 fix: Checkpoint interval** (`src/processing/pipeline.py:81-89`) — `env.enable_checkpointing(60_000)` (was 120_000). Comment dài giải thích trade-off + hướng dẫn monitor qua `flink_checkpoint_duration_seconds` (alert p99 > 30s thì tăng lại 90s). RPO giảm từ 120s xuống 60s.
-- **B11 fix: Trino observability** (`backend/api/market_overview.py`, `backend/api/metrics.py`) — 4 metric mới: `backend_trino_query_duration_seconds{query_type,result}` (Histogram), `backend_trino_query_failures_total{query_type,reason}` (Counter), `backend_trino_active_queries` (Gauge), `backend_trino_fallback_total{endpoint,reason}` (Counter). Tất cả 8 calls trong `market_overview.py` giờ pass `query_type=` label để slice latency per query type. Wrap với `TRINO_ACTIVE_QUERIES.inc/dec`.
-- **`tests/unit/test_phase5_mitigations.py`** (NEW, 12 tests PASS) — 4 test classes cover B1 (lock), B5 (flush intervals), B6 (checkpoint), B11 (Trino metrics). Helper `_value()` hỗ trợ cả Counter `_total` alias và Histogram `_count`/`_sum`/`_bucket` aggregates. Test count: 363 → 375.
-- **B13 wire-up (AI metrics in real code paths)**:
-  - **`ai_service/rag/retrieval_service.py`** — wrap vector search trong try/except + observe `AI_RAG_VECTOR_SEARCH_DURATION` (B13 latency split). `record_rag_retrieval` được gọi với đúng signature (`n_results`, `top_score`) sau mỗi retrieval. Dedent toàn bộ khối xử lý để chuyển từ try-bao-quát sang try-quanh-`pool.acquire()`.
-  - **`ai_service/rag/knowledge_service.py`** — `compute_embedding` giờ measure + record `ai_embedding_duration_seconds` (model + success/fail) qua `record_embedding`. `ingest_directory` gọi `record_knowledge_ingest(success|skipped|rejected|error)` cho mỗi file. Helper `_refresh_kb_inventory_gauges()` (gọi sau ingest) đọc `ai_knowledge_chunks` aggregate (count, size, oldest_ts, last_ingest_ts, embedding_dim) và set 9 KB gauges (`ai_knowledge_base_chunk_count`, `ai_knowledge_base_size_bytes`, `_last_ingest_timestamp`, `_oldest_chunk_timestamp`, `ai_embedding_dimensions`, `ai_knowledge_base_source`).
-  - **`ai_service/safety/output_guard.py`** — `guard_output` giờ `record_output_guard_flag(flag_type=unsafe_financial_claim|code_execution, severity=warning)` cho mỗi match + `AI_OUTPUT_GUARD_LATENCY.observe()` cho tổng thời gian.
-  - **`ai_service/providers/router.py`** — `route_completion` giờ record `ai_provider_mode_active(mode)` mỗi call, `record_provider_request(provider, status=success|failure, duration_sec)` cho mỗi provider attempt, `record_provider_chain_depth(depth, status=exhausted)` khi fall through `none`. Frozen `AISettings` config được replace qua `dataclasses.replace` để đổi mode.
-  - **`backend/services/ai/metrics.py`** — thêm helper `record_provider_mode_active(mode)` (đặt 1 cho mode active, 0 cho 3 mode còn lại, nhân với 3 provider để tránh cardinality spike).
-- **B7 fix (Indicator state persistence)**:
-  - **`src/processing/writers/indicator_state.py`** (NEW) — `IndicatorStateStore` class: write-through Redis layer cho 5 in-memory dicts (`_closes`, `_volumes`, `_candles`, `_ema_state`, `_macd_signal_state`). Mỗi symbol được persist dưới `indicator:state:{exchange}:{symbol}` với TTL 7 ngày. Methods: `save` (single), `save_batch` (pipelined), `load`, `hydrate_writer` (SCAN-based restore), `snapshot_writer` (read all dicts). Redis failures được swallow (degrade graceful).
-  - **`src/processing/writers/indicators.py`** — `IndicatorWriter.open()` khởi tạo `IndicatorStateStore` + set `self._hydrated_exchanges` set. `flat_map()` gọi `_persist_state(exchange)` sau mỗi `flush_influx`. `_persist_state` thực hiện lazy first-touch hydrate (per exchange) + batch save. Net effect: Flink restart không cần Kafka replay để warm — chỉ tốn ~1ms để load từ Redis.
-- **A9.1 (Frontend RUM)**:
-  - **`frontend/src/utils/rum.ts`** (NEW) — `installRum()` install global listeners: `window.onerror`, `unhandledrejection`, `PerformanceObserver` (LCP + INP). Batched POST mỗi 10s hoặc khi buffer đầy 20 events tới `/api/rum/events`. `flush()` dùng `keepalive: true` để survive page unload. Privacy: log qua `console.warn` fallback, không throw.
-  - **`backend/api/rum.py`** (NEW) — `POST /api/rum/events` endpoint nhận batch, route tới 4 helpers: `record_frontend_rum_error`, `record_frontend_rum_pageview`, `record_frontend_rum_lcp`, `record_frontend_rum_inp`. IP chỉ log warning-level, không đưa vào metric.
-  - **`backend/api/metrics.py`** — 4 metric mới: `FRONTEND_RUM_ERRORS` (counter, labels `type`, `source`), `FRONTEND_RUM_PAGE_LOADS` (counter, label `route`), `FRONTEND_RUM_LCP` (histogram buckets 0.5-8s), `FRONTEND_RUM_INP` (histogram buckets 0.05-4s). Exposed trên `/metrics-custom` (cùng scrape job với WS/multi-source/cache/Trino).
-- **A10.2 (API rate limit hit)**:
-  - **`backend/middleware/rate_limit.py`** (NEW) — `RateLimitMiddleware` (in-process, sliding window 60s). Default 200 req/min/IP qua env `RATE_LIMIT_PER_MINUTE`. Exempt paths: `/metrics*`, `/health*`, `/api/rum`, `/docs`, `/openapi.json`. 429 response bao gồm `Retry-After: 60` header. IP được SHA-256 hash 12 chars trước khi đưa vào metric label (privacy). Disable bằng `RATE_LIMIT_PER_MINUTE=0`.
-  - **`backend/api/metrics.py`** — `API_RATE_LIMITED_TOTAL` counter (labels `ip_hash`, `path`).
-- **Docs**:
-  - **`docs/SLO.md`** (NEW) — 5 SLOs định nghĩa chính thức: S1 API availability (99.9%), S2 API latency p99 (<500ms), S3 WebSocket delivery (99.5% <2s), S4 Data freshness (95% <10s), S5 AI answer time p95 (<8s). Mỗi SLO có: target, error budget, PromQL measurement, burn-rate alerts, owner, common causes. Procedure để add/retire SLOs.
-  - **`docs/RUNBOOKS.md`** (NEW) — 12 runbooks cho top alerts (A1.1, A1.2, A1.3, A1.5, A2.x, A4.x, A5.x, A7.x, A9.1, A10.1, A10.2). Mỗi runbook có: symptom, triage steps (CLI commands), mitigation, common causes, owner. Có escalation matrix và glossary.
-
-### Changed
-
-- **Observability coverage** — Bổ sung đáng kể application-level observability: WebSocket serving (12 metrics + 5 alerts + 1 dashboard), Multi-source fallback (6 metrics + 4 alerts + 1 dashboard), AI pipeline (14 metrics + 6 alerts + 1 dashboard), Producer failover (6 metrics + 5 alerts), Flink writer flush (6 metrics + 3 alerts), SLO burn-rate (4 alerts), Data flow pipeline (1 dashboard 27 panels).
-- **Flink writer observability** — Tất cả 7 Flink writers (4 KeyDB + 2 InfluxDB + 1 Indicator) + kline aggregator + pipeline giờ emit Prometheus metrics. Coverage mapping: B5 (flush latency) → `flink_writer_flush_duration_seconds`, B6 (120s checkpoint) → `flink_checkpoint_*`, B7 (state warmup) → `flink_indicator_state_warmup_duration_seconds` + `flink_indicator_state_keys`.
-- **Test count** — Added unit and integration tests for all metrics, endpoint, and mitigation features.
-
----
 
 ## [0.24.3] - 2026-06-12
 
