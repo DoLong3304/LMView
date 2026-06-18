@@ -1151,7 +1151,167 @@ The frontend has **5 potential price sources**:
 | 6 | Producer ticker throttle 30s (heartbeat interval) | MEDIUM | `main.py:125` |
 | 7 | Flink `latest-offset` = no historical data on restart | MEDIUM | `pipeline.py:122` |
 
-See [docs/error_plan.md](docs/error_plan.md) for full fix plan.
+### Docker Swarm Architecture
+
+**Multi-Node Deployment Strategy**
+
+LMView supports Docker Swarm deployment across multiple EC2 instances with shared EFS storage. This architecture enables horizontal scaling while maintaining service isolation and resource optimization.
+
+**Key Components:**
+
+1. **Local Image Registry**  
+   Since `docker stack deploy` distributes tasks to remote worker nodes, custom-built images must be available on all nodes. The deployment strategy uses a local Docker registry (`manager_ip:5000`) running as a Swarm service on the manager node.
+   
+   Process:
+   - `scripts/deploy_aws_swarm.sh` builds all custom images locally
+   - Tags images with registry prefix: `172.31.21.135:5000/cryptoprice/...`
+   - Pushes to local registry before stack deployment
+   - Worker nodes pull from this registry when services start
+   
+   Custom images pushed to registry:
+   ```
+   cryptoprice/kafka:3.9.0
+   cryptoprice/flink:1.18.1
+   cryptoprice/spark:3.5.5
+   cryptoprice/spark-submit:local
+   cryptoprice/fastapi:0.25.0
+   cryptoprice/nginx:1.31.0
+   cryptoprice/producer:0.25.0
+   cryptoprice/influx-backfill:0.25.0
+   cryptoprice/trino:442
+   cryptoprice/dagster:1.8.10
+   ```
+
+2. **Worker Node Daemon Configuration**  
+   Every node in the swarm must trust the insecure local registry. This is configured by adding the manager's IP to `insecure-registries` in `/etc/docker/daemon.json`:
+   
+   ```json
+   {
+     "insecure-registries": ["172.31.21.135:5000"]
+   }
+   ```
+   
+   Setup script: `scripts/setup_swarm_node.sh <MANAGER_IP>`  
+   Must be run on **BOTH** manager and worker nodes with sudo before deployment.
+
+3. **Absolute EFS Path Volume Mounts**  
+   **Critical constraint:** Docker Swarm does NOT support relative path bind mounts like `./:/app`.
+   
+   Why: When a service is scheduled on a worker node, Docker on the worker resolves `./` relative to the worker daemon's context, not the shared EFS mount. This causes services to fail with "no such file or directory" errors when they can't find code or config files.
+   
+   Solution: `docker-compose.swarm.yml` overrides all volume mounts to use absolute EFS paths:
+   ```yaml
+   services:
+     producer:
+       volumes:
+         - /mnt/efs/LMView:/app  # NOT ./:/app
+   
+     kafka-1:
+       volumes:
+         - kafka-1-data:/var/lib/kafka/data  # Named volumes stay unchanged
+         - /mnt/efs/LMView/config/jmx:/jmx
+         - /mnt/efs/LMView/docker/kafka/entrypoint.sh:/entrypoint.sh:ro
+   ```
+   
+   Services requiring volume overrides (25+ services):
+   - Compute layer: Flink, Spark, Trino, Dagster
+   - Data layer: Kafka (3 brokers), Redis Sentinels (3), PostgreSQL
+   - Processing: Producer, job-watchdog, auto-submit-jobs, influx-backfill
+   - AI: litellm, finbert-worker
+   - Automation: certbot-auto, duckdns-auto
+   - Monitoring: Prometheus, Grafana, Loki, Promtail
+   
+   Named volumes (preserved unchanged):
+   - `kafka-*-data`, `redis-*-data`, `postgres-data`
+   - `influxdb-data`, `minio-data`, `flink-checkpoints`
+   - `prometheus-data`, `grafana-storage`, `loki-data`
+   - `letsencrypt`, `certbot-webroot`
+
+4. **Service Placement Constraints**  
+   Node labels control which services run on which physical machines:
+   
+   ```yaml
+   services:
+     fastapi-prod:
+       deploy:
+         placement:
+           constraints: [node.labels.role == core]
+   
+     flink-jobmanager:
+       deploy:
+         placement:
+           constraints: [node.labels.role == worker]
+   ```
+   
+   Set labels once per node:
+   ```bash
+   docker node update --label-add role=core <manager-node-id>
+   docker node update --label-add role=worker <worker-node-id>
+   ```
+   
+   **Distribution strategy:**
+   - **Core node (8 vCPU, 32 GB RAM):** Data storage, messaging, API, frontend, AI services
+   - **Worker node (4 vCPU, 16 GB RAM):** Compute (Flink, Spark, Trino), monitoring, orchestration
+   
+   See `docs/DEPLOY_SWARM.md` for complete workload distribution table.
+
+5. **Overlay Network**  
+   Swarm uses an encrypted overlay network for inter-service communication across nodes:
+   ```yaml
+   networks:
+     crypto-net:
+       driver: overlay
+       attachable: true
+   ```
+   
+   Required ports between nodes:
+   - TCP 2377: Swarm management
+   - TCP/UDP 7946: Swarm gossip
+   - UDP 4789: VXLAN overlay network
+   - TCP 5000: Local Docker registry
+
+6. **Resource Limits and Reservations**  
+   Services have memory limits to prevent OOM and ensure fair resource distribution:
+   ```yaml
+   services:
+     flink-taskmanager:
+       deploy:
+         resources:
+           limits:
+             memory: 3.5G
+           reservations:
+             memory: 1G
+   ```
+   
+   Memory budgets:
+   - Core node: ~25 GB services + 5 GB OS/buffers (21 GB free under normal load)
+   - Worker node: ~13 GB services + 3 GB OS/buffers (3 GB free under normal load)
+
+7. **Service DNS Resolution**  
+   All inter-service communication uses service names (e.g., `http://fastapi-prod:8080`, `kafka-1:9092`), not hardcoded IPs. Swarm's built-in DNS resolves service names to container IPs across the overlay network.
+   
+   **Anti-pattern:** Hardcoded private IPs like `http://172.31.21.135:8085` break when node IPs change or deploying to different environments.
+
+8. **HSTS Safety for ACME Challenges**  
+   Nginx is configured to only send the `Strict-Transport-Security` header if a valid Let's Encrypt certificate marker (`.lmview_cert_ok`) is present. This prevents browsers from caching strict HTTPS requirements for the self-signed fallback cert, which creates a redirect loop that blocks ACME challenges.
+   
+   Certificate flow:
+   1. Initial deployment: self-signed cert, no HSTS header
+   2. Certbot obtains Let's Encrypt cert, writes marker file
+   3. Nginx detects marker, enables HSTS header
+   4. Browser caches HSTS for future visits
+
+**Deployment Workflow:**
+
+1. Prerequisites: EFS mounted, Docker installed, Swarm initialized, node labels set, insecure registry configured
+2. Run: `bash scripts/deploy_aws_swarm.sh`
+3. Script: builds images → pushes to local registry → renders compose config → deploys stack
+4. Swarm: schedules services per placement constraints → pulls images from local registry → starts containers
+5. Verify: `docker stack services cryptoprice`, `docker stack ps cryptoprice`
+
+**Complete deployment guide:** `docs/DEPLOY_SWARM.md`
+
+See [docs/error_plan.md](docs/error_plan.md) for real-time pipeline details and price desync fixes.
 
 ---
 

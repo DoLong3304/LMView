@@ -17,6 +17,10 @@ my_project_env/
 .env
 .env.*
 !.env.example
+*.pk
+*.pem
+*-pk
+lmview-pk
 
 # Dagster runtime
 .tmp_dagster_home_*/
@@ -33,6 +37,18 @@ spark-events/
 # OS
 .DS_Store
 Thumbs.db
+
+# Temp/debug files
+docker-compose-rendered.yml
+deps.zip
+*_LOG.MD
+*_STATUS.md
+*_SUMMARY.md
+ISSUES_FOUND.md
+test_llm.py
+test_router.py
+add_aliases.py
+update_swarm.py
 
 .vscode
 .idea

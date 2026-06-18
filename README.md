@@ -231,6 +231,35 @@ Before deploying to a public host:
 
 ---
 
+## Cloud Deployment (Docker Swarm)
+
+For production deployment on AWS EC2 with Docker Swarm:
+
+**Architecture:** Multi-node cluster with service placement optimization
+- Core node (8 vCPU, 32 GB): Data storage, messaging, API, frontend, AI
+- Worker node (4 vCPU, 16 GB): Compute (Flink, Spark, Trino), monitoring, orchestration
+- Shared EFS storage for code and config sync
+
+**Quick Start:**
+```bash
+# On manager node
+cd /mnt/efs/LMView
+bash scripts/deploy_aws_swarm.sh
+```
+
+**Complete guide:** [docs/DEPLOY_SWARM.md](docs/DEPLOY_SWARM.md)
+
+Covers:
+- AWS infrastructure setup (VPC, security groups, EFS)
+- Docker Swarm initialization and node labels
+- Local registry configuration
+- Volume mount strategy (absolute EFS paths)
+- Service placement constraints
+- Deployment workflow and verification
+- Troubleshooting and maintenance
+
+---
+
 ## Authors
 
 Built and maintained by D22 Fintech, PTIT students:
