@@ -1296,6 +1296,63 @@ services:
           memory: 512M
 
   # ══════════════════════════════════════════════════════════════════════════════
+  # BINANCE REST KLINE FEED (Phase 5 — replaces dead producer's kline path)
+  #
+  # Binance WS is 403-geofenced from this AWS region, but the REST API on
+  # the same host works. This service polls /api/v3/klines for the top-N
+  # USDT symbols and writes the canonical candle shape to Redis, keeping
+  # candle:1m:* and candle:1s:* fresh so the frontend chart doesn't snap.
+  # Long-term replacement for the cron stopgap (scripts/cron_refresh_klines.sh).
+  # See docs/system/13-caveats.md DP-6.
+  # ══════════════════════════════════════════════════════════════════════════════
+
+  binance-kline-rest:
+    profiles: ["dev", "prod"]
+    build:
+      context: .
+      dockerfile: docker/kline-rest/Dockerfile
+    image: cryptoprice/binance-kline-rest:0.1.0
+    container_name: binance-kline-rest
+    hostname: binance-kline-rest
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis-master
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      REDIS_SENTINELS: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      REDIS_MASTER_NAME: mymaster
+      KEYDB_1S_RETENTION_DAYS: "1"
+      KEYDB_1M_RETENTION_DAYS: "7"
+      KLINE_REST_TOP_N: "100"
+      KLINE_REST_POLL_1M_S: "30"
+      KLINE_REST_LIMIT_1M: "100"
+      KLINE_REST_ENABLE_1S: "false"
+      KLINE_REST_POLL_1S_S: "5"
+      KLINE_REST_LIMIT_1S: "60"
+      KLINE_REST_MAX_CONCURRENT: "20"
+      KLINE_REST_INTER_SYMBOL_DELAY_S: "0.05"
+      KLINE_REST_REDIS_FLUSH_MS: "500"
+      KLINE_REST_REDIS_BUFFER_MAX: "5000"
+      METRICS_HOST: "0.0.0.0"
+      METRICS_PORT: "9101"
+      LOG_LEVEL: "INFO"
+    networks:
+      - crypto-net
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; r=urllib.request.urlopen('http://localhost:9101/healthz', timeout=3); sys.exit(0 if r.status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ══════════════════════════════════════════════════════════════════════════════
   # MONITORING STACK (opt-in via --profile monitoring)
   # ══════════════════════════════════════════════════════════════════════════════
 

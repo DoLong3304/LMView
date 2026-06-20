@@ -1,6 +1,6 @@
 <!-- ====================================================================== -->
 <!-- LMView — SYSTEM.md (Phiên bản Tiếng Việt)                             -->
-<!-- Tài liệu kiến trúc hệ thống toàn diện. Phiên bản 0.25.52.            -->
+<!-- Tài liệu kiến trúc hệ thống toàn diện. Phiên bản 0.25.53.            -->
 <!-- Được viết lại với giải thích chi tiết cho sinh viên năm 1.            -->
 <!--                                                                        -->
 <!-- Cách đọc tài liệu này:                                                -->

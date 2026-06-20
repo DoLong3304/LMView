@@ -8,9 +8,76 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
-## [0.25.52] - 2026-06-20
+## [0.25.53] - 2026-06-20
 
-### Added — Caveat DP-6 stopgap (producer permanently dead)
+### Added — DP-6 binance-kline-rest long-term replacement for dead producer
+
+Replaces the cron-based stopgap (`scripts/refresh_redis_klines.py` + crontab)
+with a proper self-contained Swarm service modeled on `binance-ticker-ws`:
+
+- **`src/kline_rest/poller.py`** — Async REST poller for Binance `/api/v3/klines`.
+  Configurable intervals (default: 1m at 30s cadence). Top-N symbols sorted by
+  24h quote volume. Smart rate limiting (avoids Binance 1200 req/min cap).
+  Health endpoint exposes sweep count, errors, rate-limit hits.
+- **`src/kline_rest/redis_writer.py`** — Async pipelined Redis writer with
+  coalescing buffer (same-bucket updates deduped within flush window).
+  ZADD dedup via `ZREMRANGEBYSCORE` before `ZADD` (mirrors `keydb_kline.py`).
+  Periodic TTL-bounded cleanup every 60 writes per key (mirrors `keydb_kline.py`
+  `CLEANUP_EVERY` pattern).
+- **`src/kline_rest/config.py`** — Environment-driven config (top N, poll intervals,
+  batch sizes, log level, Redis Sentinel params).
+- **`src/kline_rest/main.py`** — aiohttp health/metrics server (port 9101).
+- **`docker/kline-rest/Dockerfile`** — Multi-stage, same base as `ticker-ws`.
+- **`docker-compose.yml`** — `binance-kline-rest` service with healthcheck, resource
+  limits, `prod` and `dev` profiles, cryptoprice_net network.
+- **`scripts/deploy_aws_swarm.sh`** — Added `binance-kline-rest:0.1.0` to
+  `CUSTOM_IMAGES`. Fixed missing `cryptoprice/binance-ticker-ws:0.1.0` which was
+  previously not in `CUSTOM_IMAGES` (ticker-ws was manually deployed and orphaned
+  from the stack).
+
+### Fixed — DP-1 Critical dedup bug in kline-rest redis_writer
+
+Initial kline-rest implementation skipped `ZREMRANGEBYSCORE` before `ZADD`,
+causing duplicate sorted-set members for the same bucket on every poll. Over
+3+ hours, this accumulated 1218 members for BTCUSDT vs the expected ~100.
+Fixed by adding the `zremrangebyscore(key, score, score)` step (matching the
+pattern in `keydb_kline.py` line 96, contractually documented in AGENTS.md).
+Also added periodic TTL-bound cleanup (`CLEANUP_EVERY=60` — zremrangebyscore
+of members older than TTL window) to proactively trim stale members.
+
+Verified: ZCOUNT for forming bucket stays exactly 1 across multiple polls.
+Injected 10-day-old phantom member verified removed by cleanup cycle.
+
+### Fixed — IB-9 deploy_aws_swarm.sh CUSTOM_IMAGES gaps
+
+- `binance-ticker-ws:0.1.0` was missing from CUSTOM_IMAGES — the service existed
+  as an orphaned service (manually created outside the stack). Added so the
+  stack properly owns it.
+- `binance-kline-rest:0.1.0` added.
+
+### Changed — BB-8 Frontend gap defense deployed (nginx rebuild)
+
+Frontend image rebuilt and pushed to local registry. `docker service update
+--force` on `cryptoprice_nginx-prod` deployed BB-8 gap defense fix to browsers.
+Bundle hashes match between local dist/ and container (confirmed via md5sum).
+
+### Changed — Cron stopgap removed
+
+`scripts/cron_refresh_klines.sh` crontab entry removed — fully replaced by
+`binance-kline-rest` Swarm service.
+
+### Fixed — IB-4 backfill-1m stuck on Spark master connection
+
+Diagnosis completed: `backfill-1m` service (1/1) connects to `spark://spark-master:7077`
+but Spark master logs show `Connection reset by peer` on the taskmanager node.
+The issue is that `spark-master` is not a service in the current Compose — it
+was removed during refactoring or never included. The backfill service references
+`spark-master` which doesn't exist in the stack. [OPEN — not a regression from this
+release; requires architecture decision on Spark master deployment.]
+
+---
+
+## [0.25.52] - 2026-06-20
 
 The producer service is permanently dead: Binance WebSocket endpoints return `403 Forbidden` from `awselb/2.0` (AWS ELB geofencing) on every reconnect, and prior OOM exits (137). Only `binance-ticker-ws` (Phase 4) keeps ticker data flowing. Kline / trade / depth Kafka topics receive nothing, and the Redis `candle:1m:*` / `candle:1s:*` caches go stale within minutes — which surfaced as the reported "frontend chart snaps to a point" symptom (322 USD vertical gap between stale last close 63300 and live ticker 63622).
 
