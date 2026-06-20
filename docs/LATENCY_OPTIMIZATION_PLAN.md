@@ -1,7 +1,7 @@
 # LATENCY OPTIMIZATION PLAN — LMView
 
 > Mục tiêu: Giảm candle delay từ 2h → realtime (< 5s), scale lên 671 symbols, ổn định production.
-> Version: 0.25.41 | Updated: 2026-06-19
+> Version: 0.25.52 | Updated: 2026-06-19
 
 ---
 

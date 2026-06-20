@@ -262,4 +262,4 @@ Built and maintained by D22 Fintech, PTIT students:
 
 ---
 
-Status: Active development | Version: **0.25.42** | Deployed: Docker Swarm on AWS EC2
+Status: Active development | Version: **0.25.52** | Deployed: Docker Swarm on AWS EC2

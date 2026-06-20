@@ -1862,6 +1862,23 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         const lastClosed = lastClosedCandleRef.current;
         const forming = formingCandleRef.current;
 
+        // Gap defense: if the last known candle is far older than the current
+        // bucket (e.g. cache went stale while producer was down), do NOT bridge
+        // the gap with a synthetic candle. Bridging draws a vertical line from
+        // the stale close to the live price, which the user sees as the chart
+        // "snapping to a point". Instead, drop the stale reference and wait for
+        // a fresh onCandle event to re-anchor. Threshold = 5 buckets.
+        const MAX_BRIDGE_BUCKETS = 5;
+        const maxGapSec = timeframeSec * MAX_BRIDGE_BUCKETS;
+        if (forming && bucketTime - forming.time > maxGapSec) {
+          formingCandleRef.current = null;
+          return;
+        }
+        if (!forming && lastClosed && bucketTime - lastClosed.time > maxGapSec) {
+          lastClosedCandleRef.current = null;
+          return;
+        }
+
         let nextCandle: Candle;
 
         if (forming && forming.time === bucketTime) {

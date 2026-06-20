@@ -8,6 +8,47 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.25.52] - 2026-06-20
+
+### Added — Caveat DP-6 stopgap (producer permanently dead)
+
+The producer service is permanently dead: Binance WebSocket endpoints return `403 Forbidden` from `awselb/2.0` (AWS ELB geofencing) on every reconnect, and prior OOM exits (137). Only `binance-ticker-ws` (Phase 4) keeps ticker data flowing. Kline / trade / depth Kafka topics receive nothing, and the Redis `candle:1m:*` / `candle:1s:*` caches go stale within minutes — which surfaced as the reported "frontend chart snaps to a point" symptom (322 USD vertical gap between stale last close 63300 and live ticker 63622).
+
+Binance REST API on the same host returns 200 (only WS is geofenced), so a REST fallback is viable.
+
+- **`scripts/refresh_redis_klines.py`** — Sentinel-aware REST → Redis 1m candle refresher. Pulls recent klines from `api.binance.com/api/v3/klines` and writes them in the exact canonical shape produced by `keydb_kline.py` / `DirectRedisWriter` (`{"t","o","h","l","c","v","qv","n","x"}` via ZADD on `candle:1m:{exchange}:{symbol}`, plus HSET on `candle:latest:{exchange}:{symbol}`). Optional `--with-1s` for 1s candles. Defaults to top-N USDT symbols by 24h quote volume, filtering stablecoins.
+
+- **`scripts/cron_refresh_klines.sh`** — Host crontab wrapper that runs the refresher inside the `fastapi-prod` container (has redis-py + Sentinel env + EFS mount). Installed as `*/2 * * * *`, refreshes top-30 symbols × 100 1m candles every 2 min. Logs to `/tmp/lmview-kline-refresh.log`. Non-fatal if the container is down (cron retries next tick).
+
+### Fixed — Caveat BB-8 (frontend chart snap on stale cache)
+
+- **`frontend/src/features/chart/CandlestickChart.tsx`** — Added gap defense in the `onTicker` synthetic-candle handler. When the forming candle or last-closed candle is older than `5 * timeframeSec` relative to the current tick bucket, the stale reference is dropped and no synthetic bridging candle is drawn. Previously the handler bridged any gap with a vertical candle from `lastClosed.close` to `ticker.price`, which the user saw as the chart "snapping to a point" when the Redis cache went stale. The chart now waits for the next real `onCandle` event to re-anchor.
+
+  **Note**: this fix is in source only. nginx-prod serves the frontend from a baked image, so a frontend image rebuild + `nginx-prod` service update is required for the fix to reach browsers. The data-side stopgap (DP-6 cron) alone resolves the visible symptom in normal operation.
+
+### Docs
+
+- **`docs/system/13-caveats.md`** — Full audit rewrite. Each entry now carries a status badge (✅ FIXED / 🟡 PARTIAL / 🔴 OPEN / ⚪ OBSOLETE / 🟢 NEW). Added TL;DR audit summary at top. New entries: **DP-6** (producer dead + REST cron stopgap + long-term poller proposal), **BB-8** (chart snap fix), **IB-9** (YAML env-leak fix from v0.25.51, was undocumented). Marked BB-1 (klines cache) and AI-2 (ai-service scaffold) as OBSOLETE. Updated IB-4 with observed `lmview-backfill-1m` Spark connection failure.
+
+### Verified
+
+- Redis `candle:1m:binance:BTCUSDT` last close 63662 vs ticker 63660 (7 USD gap; was 322 USD) after refresh.
+- Cron fired on schedule: Redis 1m cache aged 25s at check time (within 2-min cadence).
+- `fastapi-prod` `/api/health` → 200 (postgresql + redis sentinel healthy).
+- `fastapi-prod` `/api/klines?symbol=BTCUSDT&interval=1m&limit=2` returns fresh candles.
+- `cd frontend && npm run typecheck` — clean.
+- `cd frontend && npm run build` — clean (12.9s).
+- All critical services healthy except `producer` (0/1, expected — DP-6) and `backfill-1m` (1/1 but stuck on Spark master connection, IB-4).
+
+### Known follow-ups
+
+- Frontend image rebuild + nginx-prod redeploy needed for BB-8 browser-side fix.
+- DP-6 long-term: build dedicated `binance-kline-rest` Swarm service (model on `binance-ticker-ws`) to replace both the dead producer's kline path and the cron stopgap. Trades + depth would need sibling REST pollers.
+- IB-4: `lmview-backfill-1m` Spark master connection — needs SPARK_HEALTH_URL fix.
+- 1s candle refresh not covered by stopgap (would need ~5 symbols × 1s polling).
+
+---
+
 ## [0.25.51] - 2026-06-20
 
 ### Fixed
