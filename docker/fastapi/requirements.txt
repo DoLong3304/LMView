@@ -1,5 +1,4 @@
 # Core API dependencies (always installed)
-# This file MUST stay small. sentence-transformers / torch / triton
 # (which together pull in ~5GB) live in requirements-ai.txt and are
 # only installed when AI_ENABLE_REAL_LLM=true. By default the system
 # uses the mock provider (per docs/CHANGELOG.md v0.24.3) so these
@@ -22,3 +21,14 @@ PyYAML==6.0.2
 feedparser==6.0.11
 beautifulsoup4==4.14.3
 vaderSentiment==3.3.2
+
+# RAG embedding model (pulls torch, ~2GB)
+
+# AI Orchestration dependencies
+langgraph==1.2.6
+langchain-core==1.4.8
+dashscope==1.25.23
+
+# RAG embedding model (heavy, pulls torch ~2GB)
+sentence-transformers==5.6.0
+numpy==2.4.6

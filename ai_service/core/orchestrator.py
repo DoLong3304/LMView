@@ -25,6 +25,27 @@ from ai_service.safety.scope_gate import check_scope
 logger = logging.getLogger("ai_service.core.orchestrator")
 
 
+TOOL_CATALOG_LEGACY = """**Chart Tool Catalog (for Interact mode proposals):**
+- `add_indicator` — add technical indicator (RSI, MACD, SMA, EMA, Bollinger, VWAP, ATR, etc.)
+- `remove_indicator` — remove an indicator from the chart
+- `set_timeframe` — switch timeframe (1s, 1m, 5m, 15m, 1h, 4h, 1d, 1w)
+- `set_chart_type` — change chart type (candles, bars, line, area, heikinAshi, renko)
+- `draw_trendline` — draw a trendline between two price/time points
+- `highlight_candles` — highlight a range of candles by index or timestamp
+- `highlight_region` — highlight a rectangular region (price + time)
+- `highlight_chart_area` — highlight by percentage coordinates
+- `create_annotation` — add a text annotation at a chart point
+- `draw_tool` — select or place a drawing tool (trendline, fibonacci, rectangle, cursor)
+- `set_visible_range` — set visible time range on the chart
+- `start_tour` — launch the interactive LMView workspace guided tour
+- `highlight_section` — highlight a UI section for guided learning
+"""
+
+
+def _build_tool_catalog_text_legacy() -> str:
+    return TOOL_CATALOG_LEGACY
+
+
 def _title_from_message(message: str) -> str:
     trimmed = " ".join(message.strip().split())
     if not trimmed:
@@ -277,9 +298,15 @@ async def _run_chat_legacy(body: AIChatRequest, user_id: str) -> AIChatResponse:
             LLMMessage(
                 role="system",
                 content=(
-                    "Interact mode may propose safe LMView UI actions as tool calls. "
+                    "Interact mode: You may propose LMView chart actions as tool calls. "
                     "Never execute actions directly. Return prose first; backend will "
-                    "normalize action proposals for user approval."
+                    "normalize action proposals for user approval.\n\n"
+                    "Step-by-step analysis guidance: After presenting your analysis, "
+                    "propose ONE specific chart action per response that would help the user "
+                    "understand the data better — e.g., adding an RSI indicator, highlighting "
+                    "a support zone, switching to a 4H timeframe, or starting the guided tour. "
+                    "Use the tool catalog below to select the correct action type.\n\n"
+                    + _build_tool_catalog_text_legacy()
                 ),
                 name="interaction_policy",
             ),

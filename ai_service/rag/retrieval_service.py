@@ -157,10 +157,9 @@ async def retrieve(
     # relevance score, and zero-result rate.
     ai_metrics.record_rag_retrieval(
         duration_sec=elapsed_ms / 1000.0,
-        top_k_used=len(chunks),
-        relevance_score=sum(c.score for c in chunks) / len(chunks) if chunks else 0.0,
+        n_results=len(chunks),
+        top_score=sum(c.score for c in chunks) / len(chunks) if chunks else 0.0,
         cache_hit=False,
-        zero_results=len(chunks) == 0,
     )
 
     # Add warnings for weak results

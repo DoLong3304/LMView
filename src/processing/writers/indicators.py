@@ -250,12 +250,12 @@ class IndicatorWriter(FlatMapFunction):
 
             if not value.get("is_closed"):
                 record_kafka_source_drop(topic=SOURCE_TOPIC, reason="not_closed")
-                return []
+                return iter([])
 
             symbol = value.get("symbol")
             if not symbol:
                 record_kafka_source_drop(topic=SOURCE_TOPIC, reason="missing_symbol")
-                return []
+                return iter([])
 
             exchange = value.get("exchange", "binance")
             interval = value.get("interval", "1m")
@@ -454,7 +454,7 @@ class IndicatorWriter(FlatMapFunction):
                 # We log at DEBUG because the parent ``log.error``
                 # already carries the user-facing information.
                 log.debug("[Indicators] metric record failed: %s", metric_exc)
-        return []
+        return iter([])
 
     def _persist_state(self, exchange: str) -> None:
         """Snapshot the writer's in-process dicts to Redis (B7).

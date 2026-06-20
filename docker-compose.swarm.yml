@@ -44,10 +44,8 @@ services:
           memory: 512M
 
   kafka-1:
-    volumes:
-      - kafka-1-data:/var/lib/kafka/data
-      - /mnt/efs/LMView/config/jmx:/jmx
-      - /mnt/efs/LMView/docker/kafka/entrypoint.sh:/entrypoint.sh:ro
+    environment:
+      KAFKA_ADVERTISED_HOST: kafka-1
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -57,13 +55,13 @@ services:
         max_attempts: 5
       resources:
         limits:
+          memory: 2G
+        reservations:
           memory: 1G
 
   kafka-2:
-    volumes:
-      - kafka-2-data:/var/lib/kafka/data
-      - /mnt/efs/LMView/config/jmx:/jmx
-      - /mnt/efs/LMView/docker/kafka/entrypoint.sh:/entrypoint.sh:ro
+    environment:
+      KAFKA_ADVERTISED_HOST: kafka-2
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -73,13 +71,13 @@ services:
         max_attempts: 5
       resources:
         limits:
+          memory: 2G
+        reservations:
           memory: 1G
 
   kafka-3:
-    volumes:
-      - kafka-3-data:/var/lib/kafka/data
-      - /mnt/efs/LMView/config/jmx:/jmx
-      - /mnt/efs/LMView/docker/kafka/entrypoint.sh:/entrypoint.sh:ro
+    environment:
+      KAFKA_ADVERTISED_HOST: kafka-3
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -89,6 +87,8 @@ services:
         max_attempts: 5
       resources:
         limits:
+          memory: 2G
+        reservations:
           memory: 1G
 
   schema-registry:
@@ -135,9 +135,6 @@ services:
           memory: 4G
 
   postgres:
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - /mnt/efs/LMView/docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -190,49 +187,6 @@ services:
           memory: 2.5G
 
   redis-sentinel-1:
-    volumes:
-      - /mnt/efs/LMView/docker/redis/sentinel.conf:/etc/redis/sentinel.conf
-      - /mnt/efs/LMView/docker/redis/sentinel-entrypoint.sh:/sentinel-entrypoint.sh
-    deploy:
-      placement:
-        constraints: [node.labels.role == core]
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 5
-
-  redis-sentinel-2:
-    volumes:
-      - /mnt/efs/LMView/docker/redis/sentinel.conf:/etc/redis/sentinel.conf
-      - /mnt/efs/LMView/docker/redis/sentinel-entrypoint.sh:/sentinel-entrypoint.sh
-    deploy:
-      placement:
-        constraints: [node.labels.role == core]
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 5
-
-  redis-sentinel-3:
-    volumes:
-      - /mnt/efs/LMView/docker/redis/sentinel.conf:/etc/redis/sentinel.conf
-      - /mnt/efs/LMView/docker/redis/sentinel-entrypoint.sh:/sentinel-entrypoint.sh
-    deploy:
-      placement:
-        constraints: [node.labels.role == core]
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 5
-
-  # ════════════════════════════════════════════════════════════════════════════
-  # API + FRONTEND + PRODUCER — core node
-  # ════════════════════════════════════════════════════════════════════════════
-
-  fastapi-prod:
-    volumes:
-      - /mnt/efs/LMView/ai_service:/app/ai_service
-      - /mnt/efs/LMView/backend/api:/app/backend/api
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -242,14 +196,73 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 512M
+          memory: 128M
+
+  redis-sentinel-2:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 128M
+
+  redis-sentinel-3:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 128M
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # API + FRONTEND + PRODUCER — core node
+  # ════════════════════════════════════════════════════════════════════════════
+
+  fastapi-prod:
+    environment:
+      AI_MODE: ${AI_MODE:-api}
+      AI_ORCHESTRATION: ${AI_ORCHESTRATION:-legacy}
+      AI_ENABLE_REAL_LLM: ${AI_ENABLE_REAL_LLM:-true}
+      AI_ENABLE_RAG: ${AI_ENABLE_RAG:-true}
+      AI_CONFIG_PATH: ${AI_CONFIG_PATH:-ai_service/configs/ai.api.yaml}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      DASHSCOPE_API_KEYS: ${DASHSCOPE_API_KEYS:-}
+      QWEN_API_KEY: ${QWEN_API_KEY:-}
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      POSTGRES_USER: ${POSTGRES_USER:-iceberg}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_LMVIEW_DB: ${POSTGRES_LMVIEW_DB:-iceberg_catalog}
+    volumes:
+      - /mnt/efs/LMView/ai_service:/app/ai_service
+      - /mnt/efs/LMView/backend:/app/backend
+      - /mnt/efs/LMView/src:/app/src
+      - /mnt/efs/LMView/docs:/app/docs
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: any
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 2G
 
   nginx-prod:
     deploy:
       placement:
         constraints: [node.labels.role == core]
       restart_policy:
-        condition: on-failure
+        condition: any
         delay: 5s
         max_attempts: 5
       resources:
@@ -257,10 +270,6 @@ services:
           memory: 256M
 
   certbot-auto:
-    volumes:
-      - letsencrypt:/etc/letsencrypt
-      - certbot-webroot:/var/www/certbot
-      - /mnt/efs/LMView/scripts:/scripts:ro
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -268,10 +277,11 @@ services:
         condition: on-failure
         delay: 60s
         max_attempts: 3
+      resources:
+        limits:
+          memory: 128M
 
   duckdns-auto:
-    volumes:
-      - /mnt/efs/LMView/scripts:/scripts:ro
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -279,10 +289,11 @@ services:
         condition: on-failure
         delay: 60s
         max_attempts: 3
+      resources:
+        limits:
+          memory: 64M
 
   influx-backfill:
-    volumes:
-      - /mnt/efs/LMView:/app
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -290,8 +301,16 @@ services:
         condition: none
 
   producer:
-    volumes:
-      - /mnt/efs/LMView:/app
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    environment:
+      ENABLE_DIRECT_REDIS: "false"
+      KLINE_SYMBOLS_PER_CONN: "20"
+      DIRECT_REDIS_POOL_SIZE: "50"
+      KAFKA_RECONNECT_BACKOFF_MS: "500"
+      KAFKA_RECONNECT_BACKOFF_MAX_MS: "10000"
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -301,7 +320,27 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 1.5G
+          memory: 2G
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # BINANCE WS TICKER FEED (Phase 4 — replaces dead producer's @ticker path)
+  # ════════════════════════════════════════════════════════════════════════════
+
+  binance-ticker-ws:
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 10
+      resources:
+        limits:
+          memory: 512M
 
   # ════════════════════════════════════════════════════════════════════════════
   # AI SERVICES — core node
@@ -315,11 +354,9 @@ services:
         condition: none
       resources:
         limits:
-          memory: 2G
+          memory: 512M
 
   litellm:
-    volumes:
-      - /mnt/efs/LMView/ai_service/configs/litellm.yaml:/app/config.yaml:ro
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -329,11 +366,30 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 4G
-        reservations:
-          memory: 1G
+          memory: 2G
 
   finbert-worker:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - /mnt/efs/LMView:/app:ro
+    environment:
+      FINBERT_DEVICE: cpu
+      FINBERT_PROCESS_INTERVAL: 300
+      FINBERT_BATCH_SIZE: 32
+      POSTGRES_USER: ${POSTGRES_USER:-iceberg}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_LMVIEW_DB: ${POSTGRES_LMVIEW_DB:-iceberg_catalog}
+    command:
+      - bash
+      - -c
+      - |
+        pip install --quiet asyncpg transformers torch --extra-index-url https://download.pytorch.org/whl/cpu &&
+        python -m ai_service.nlp.news_processor
+    networks:
+      - crypto-net
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -344,16 +400,23 @@ services:
       resources:
         limits:
           memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/finbert_healthy || exit 1"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
 
   # ════════════════════════════════════════════════════════════════════════════
   # COMPUTE LAYER — worker node (4 vCPU, 16 GB)
   # ════════════════════════════════════════════════════════════════════════════
 
   flink-jobmanager:
+    environment:
+      REDIS_SENTINELS: ""
+      REDIS_HOST: redis-master
+      REDIS_PORT: 6379
     volumes:
-      - /mnt/efs/LMView:/app
-      - /mnt/efs/LMView/docker/flink/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml:ro
-      - flink-checkpoints:/tmp/flink-checkpoints
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -363,17 +426,23 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 1.5G
+          memory: 1G
         reservations:
           memory: 512M
-    environment:
-      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
 
   flink-taskmanager:
+    environment:
+      REDIS_SENTINELS: ""
+      REDIS_HOST: redis-master
+      REDIS_PORT: 6379
+      FLINK_PROPERTIES: |
+        taskmanager.memory.process.size: 1536m
+        taskmanager.memory.framework.off-heap.size: 96m
+        taskmanager.memory.task.off-heap.size: 256m
+        taskmanager.memory.managed.size: 192m
+        taskmanager.memory.network.min: 192m
+        taskmanager.memory.network.max: 384m
     volumes:
-      - /mnt/efs/LMView:/app
-      - /mnt/efs/LMView/docker/flink/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml:ro
-      - flink-checkpoints:/tmp/flink-checkpoints
     deploy:
       replicas: 2
       placement:
@@ -384,17 +453,11 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 3.5G
+          memory: 4G
         reservations:
-          memory: 1G
-    environment:
-      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+          memory: 2G
 
   spark-master:
-    volumes:
-      - /mnt/efs/LMView:/app
-      - /mnt/efs/LMView/config/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
-      - /mnt/efs/LMView/config/spark/metrics.properties:/opt/spark/conf/metrics.properties:ro
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -409,8 +472,6 @@ services:
           memory: 512M
 
   spark-submit:
-    volumes:
-      - /mnt/efs/LMView:/app:rw
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -425,9 +486,6 @@ services:
           memory: 512M
 
   spark-worker:
-    volumes:
-      - /mnt/efs/LMView:/app
-      - /mnt/efs/LMView/config/spark/metrics.properties:/opt/spark/conf/metrics.properties:ro
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -437,14 +495,9 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 1.5G
-        reservations:
           memory: 512M
 
   spark-worker-2:
-    volumes:
-      - /mnt/efs/LMView:/app
-      - /mnt/efs/LMView/config/spark/metrics.properties:/opt/spark/conf/metrics.properties:ro
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -454,13 +507,9 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 1.5G
-        reservations:
           memory: 512M
 
   job-watchdog:
-    volumes:
-      - /mnt/efs/LMView:/app:ro
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -470,11 +519,9 @@ services:
         max_attempts: 3
 
   auto-submit-jobs:
-    volumes:
-      - /mnt/efs/LMView:/app:ro
     deploy:
       placement:
-        constraints: [node.labels.role == core]
+        constraints: [node.labels.role == worker]
       restart_policy:
         condition: none
 
@@ -483,8 +530,6 @@ services:
   # ════════════════════════════════════════════════════════════════════════════
 
   trino:
-    volumes:
-      - /mnt/efs/LMView/config/jmx:/etc/trino/jmx:ro
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -497,8 +542,6 @@ services:
           memory: 2G
 
   dagster-webserver:
-    volumes:
-      - /mnt/efs/LMView:/app
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -511,8 +554,6 @@ services:
           memory: 512M
 
   dagster-daemon:
-    volumes:
-      - /mnt/efs/LMView:/app
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -541,9 +582,6 @@ services:
           memory: 128M
 
   prometheus:
-    volumes:
-      - prometheus-data:/prometheus
-      - /mnt/efs/LMView/config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -556,6 +594,11 @@ services:
           memory: 1.5G
 
   kafka-exporter:
+    command:
+      # Use tasks.<service> for cross-node DNS in Swarm
+      - --kafka.server=tasks.kafka-1:9092
+      - --kafka.server=tasks.kafka-2:9092
+      - --kafka.server=tasks.kafka-3:9092
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -580,10 +623,6 @@ services:
           memory: 64M
 
   grafana:
-    volumes:
-      - grafana-storage:/var/lib/grafana
-      - /mnt/efs/LMView/config/grafana/provisioning:/etc/grafana/provisioning:ro
-      - /mnt/efs/LMView/config/grafana/dashboards:/var/lib/grafana/dashboards:ro
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -600,9 +639,6 @@ services:
   # ════════════════════════════════════════════════════════════════════════════
 
   loki:
-    volumes:
-      - loki-data:/loki
-      - /mnt/efs/LMView/config/loki-config.yml:/etc/loki/local-config.yaml:ro
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -615,9 +651,6 @@ services:
           memory: 512M
 
   promtail:
-    volumes:
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /mnt/efs/LMView/config/promtail-config.yml:/etc/promtail/config.yml:ro
     deploy:
       placement:
         constraints: [node.labels.role == worker]
@@ -628,36 +661,3 @@ services:
       resources:
         limits:
           memory: 256M
-
-# ══════════════════════════════════════════════════════════════════════════════
-# VOLUMES
-# ══════════════════════════════════════════════════════════════════════════════
-# Named volumes are shared across the swarm and persist data between deployments.
-
-volumes:
-  kafka-1-data:
-  kafka-2-data:
-  kafka-3-data:
-  zookeeper-data:
-  minio-data:
-  influxdb-data:
-  influxdb-config:
-  postgres-data:
-  redis-master-data:
-  redis-replica-1-data:
-  redis-replica-2-data:
-  redis-sentinel-1-data:
-  redis-sentinel-2-data:
-  redis-sentinel-3-data:
-  flink-checkpoints:
-  spark-events:
-  spark-submit-logs:
-  trino-data:
-  dagster-home:
-  letsencrypt:
-  certbot-webroot:
-  prometheus-data:
-  grafana-storage:
-  loki-data:
-  flink_deps:
-  registry-data:

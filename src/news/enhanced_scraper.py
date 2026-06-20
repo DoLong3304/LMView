@@ -89,7 +89,7 @@ class EnhancedRSSSource(EnhancedNewsSource):
 
         except Exception as e:
             self.error_count += 1
-            logger.error(f"❌ {self.name}: Error - {e}")
+            logger.error(f"❌ {self.name}: Error - {e}", exc_info=True)
             return []
 
     def _extract_content(self, entry) -> str:
@@ -147,22 +147,20 @@ class EnhancedRSSSource(EnhancedNewsSource):
 
     def _parse_date(self, date_str: str) -> int:
         """Parse date string to Unix timestamp (milliseconds).
-
-        Returns 0 on parse failure — callers treat 0 as "no
-        date" and the article still flows downstream. This is
-        a best-effort parse, so we log at DEBUG only.
         """
+        import email.utils
+        from datetime import datetime, timezone
         try:
             if date_str:
-                dt = feedparser._parse_date(date_str)
-                if dt:
-                    return int(datetime(*dt[:6]).timestamp() * 1000)
-        except (ValueError, TypeError, IndexError) as exc:
-            # Common case: feedparser returns None for unparseable
-            # strings. We log at DEBUG because this is expected
-            # for ~5% of RSS feeds.
-            logger.debug("unparseable date %r: %s", date_str, exc)
-        return 0
+                dt = email.utils.parsedate_to_datetime(date_str)
+                return int(dt.timestamp() * 1000)
+        except Exception as exc:
+            # Try to parse ISO format if email.utils fails
+            try:
+                dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                return int(dt.timestamp() * 1000)
+            except Exception:
+                logger.debug("unparseable date %r: %s", date_str, exc)
         return int(datetime.now().timestamp() * 1000)
 
 

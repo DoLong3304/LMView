@@ -41,7 +41,12 @@ def get_partition(key: str, num_partitions: int = NUM_PARTITIONS) -> int:
 
 
 def create_kafka_producer() -> KafkaProducer:
-    """Create a Kafka producer with LZ4 compression and retry logic."""
+    """Create a Kafka producer with LZ4 compression and retry logic.
+
+    Includes auto-reconnect settings so transient broker failures don't
+    permanently break the producer. The old ``retries`` parameter alone
+    is insufficient — we must also configure reconnection backoff.
+    """
     while True:
         try:
             log.info("Connecting to Kafka at %s ...", KAFKA_BOOTSTRAP)
@@ -53,8 +58,11 @@ def create_kafka_producer() -> KafkaProducer:
                 linger_ms=10,
                 batch_size=32 * 1024,
                 buffer_memory=64 * 1024 * 1024,
-                retries=3,
-                max_in_flight_requests_per_connection=5,
+                retries=5,
+                max_in_flight_requests_per_connection=3,
+                reconnect_backoff_ms=500,
+                reconnect_backoff_max_ms=10000,
+                request_timeout_ms=30000,
             )
             p.bootstrap_connected()
             log.info("Successfully connected to Kafka cluster.")
@@ -88,14 +96,26 @@ def send_to_kafka(topic: str, record: dict, avro_serializer=None) -> None:
     Serialize and send a record to Kafka with consistent partitioning (thread-safe).
 
     Uses consistent hashing to ensure same symbol always goes to same partition.
+    Auto-recreates the producer if it detects a closed/broken state.
     """
-    producer = get_producer()
-    key: str = record.get("symbol", "")
+    global _producer
 
-    # Calculate partition using consistent hashing
+    def _recreate() -> KafkaProducer:
+        with _producer_lock:
+            if _producer is not None:
+                try:
+                    _producer.close(timeout=5)
+                except Exception:
+                    pass
+                _producer = None
+            _producer = create_kafka_producer()
+        return _producer
+
+    key: str = record.get("symbol", "")
     partition = get_partition(key) if key else None
 
     try:
+        producer = get_producer()
         value_bytes = (
             avro_serializer.serialize(topic, record)
             if avro_serializer
@@ -103,12 +123,26 @@ def send_to_kafka(topic: str, record: dict, avro_serializer=None) -> None:
         )
         future = producer.send(topic, key=key, value=value_bytes, partition=partition)
         future.add_errback(_on_send_error, topic, key)
-    except KafkaError as e:
-        log.error("[KAFKA] Sync send error (dropped message) | topic=%s symbol=%s partition=%s error=%s",
-                  topic, key, partition, e)
+    except (KafkaError, RuntimeError) as e:
+        err_str = str(e)
+        # Detect "RecordAccumulator is closed" (broker disconnect) or similar
+        # fatal producer states — recreate the producer on next call.
+        if "closed" in err_str.lower() or "broker" in err_str.lower():
+            log.warning(
+                "[KAFKA] Producer broken (%s), recreating... | topic=%s symbol=%s",
+                err_str, topic, key,
+            )
+            _recreate()
+        else:
+            log.error(
+                "[KAFKA] Sync send error | topic=%s symbol=%s partition=%s error=%s",
+                topic, key, partition, e,
+            )
     except Exception as e:
-        log.error("[KAFKA] Unexpected send error | topic=%s symbol=%s partition=%s error=%s",
-                  topic, key, partition, e)
+        log.error(
+            "[KAFKA] Unexpected send error | topic=%s symbol=%s partition=%s error=%s",
+            topic, key, partition, e,
+        )
 
 
 def flush_and_close() -> None:

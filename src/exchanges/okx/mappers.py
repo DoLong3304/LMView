@@ -103,8 +103,8 @@ def map_kline(raw: dict) -> dict:
     """
     if isinstance(raw, list) and len(raw) >= 8:
         kline_start = int(raw[0])
-        # OKX uses 1s interval, so close time is start + 1000ms
-        kline_close = kline_start + 1000
+        # OKX sends 1m candles, so close time is start + 59_999ms
+        kline_close = kline_start + 59_999
 
         return {
             "event_time":   int(time.time() * 1000),
@@ -112,7 +112,7 @@ def map_kline(raw: dict) -> dict:
             "exchange":     "okx",
             "kline_start":  kline_start,
             "kline_close":  kline_close,
-            "interval":     "1s",
+            "interval":     "",  # Set by caller from channel name
             "open":         float(raw[1]),
             "high":         float(raw[2]),
             "low":          float(raw[3]),
@@ -129,8 +129,8 @@ def map_kline(raw: dict) -> dict:
         "symbol":       normalize_symbol(raw.get("instId", "")),
         "exchange":     "okx",
         "kline_start":  int(raw.get("ts", 0)),
-        "kline_close":  int(raw.get("ts", 0)) + 1000,
-        "interval":     "1s",
+        "kline_close":  int(raw.get("ts", 0)) + 59_999,
+        "interval":     "",  # Set by caller from channel name
         "open":         float(raw.get("o", 0)),
         "high":         float(raw.get("h", 0)),
         "low":          float(raw.get("l", 0)),

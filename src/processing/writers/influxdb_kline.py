@@ -95,13 +95,13 @@ class InfluxDBKlineWriter(FlatMapFunction):
             # InfluxDB stores only closed 1m candles for 90-day analytics/history.
             if value.get("interval") != "1m" or not bool(value.get("is_closed", False)):
                 record_kafka_source_drop(topic=SOURCE_TOPIC, reason="not_closed_1m")
-                return []
+                return iter([])
 
             exchange = value.get("exchange", "binance")
             symbol = value.get("symbol")
             if not symbol:
                 record_kafka_source_drop(topic=SOURCE_TOPIC, reason="missing_symbol")
-                return []
+                return iter([])
 
             point = (
                 Point("candles")
@@ -141,4 +141,4 @@ class InfluxDBKlineWriter(FlatMapFunction):
             s = value.get("symbol") if isinstance(value, dict) else "unknown"
             log.error("[InfluxDB/candles] flat_map error | symbol=%s error=%s", s, e)
             record_kafka_source_drop(topic=SOURCE_TOPIC, reason=type(e).__name__)
-        return []
+        return iter([])

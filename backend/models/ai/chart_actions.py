@@ -31,6 +31,8 @@ class AIChartActionType(str, Enum):
     ADD_NOTE = "add_note"
     CAPTURE_CHART_SNAPSHOT = "capture_chart_snapshot"
     CLEAR_AI_ANNOTATIONS = "clear_ai_annotations"
+    START_TOUR = "start_tour"
+    VIEW_SECTION = "view_section"
 
 
 class AIChartAction(BaseModel):

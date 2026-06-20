@@ -715,7 +715,7 @@ const TradingDashboard: React.FC = () => {
             // Restore full chart data when exiting replay
             candleSeries.setData(chartCandles);
         }
-    }, [isReplayActive, candleSeries, chartCandles]);
+    }, [isReplayActive, candleSeries]);
 
     const drawingsLocked =
         drawings.length > 0 && drawings.every((drawing) => drawing.locked);

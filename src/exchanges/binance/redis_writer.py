@@ -7,6 +7,8 @@ import json
 import logging
 from typing import Optional
 
+import redis
+
 from common.flink_redis_sentinel import get_flink_redis
 from common.config import ENABLE_DIRECT_REDIS
 
@@ -22,7 +24,20 @@ class DirectRedisWriter:
     DEPTH_TTL = 300           # 5 min
 
     def __init__(self):
-        self._r = get_flink_redis()
+        # Dedicated connection pool — separate from get_flink_redis() shared pool
+        import os
+        pool_size = int(os.getenv('DIRECT_REDIS_POOL_SIZE', '50'))
+        self._pool = redis.ConnectionPool(
+            host=os.getenv('REDIS_HOST', 'redis-master'),
+            port=int(os.getenv('REDIS_PORT', '6379')),
+            db=0,
+            max_connections=pool_size,
+            socket_connect_timeout=5,
+            socket_keepalive=True,
+            decode_responses=True,
+            health_check_interval=30,
+        )
+        self._r = redis.Redis(connection_pool=self._pool)
         self._enabled = ENABLE_DIRECT_REDIS
 
     def _check_enabled(self) -> bool:
@@ -60,8 +75,11 @@ class DirectRedisWriter:
                 "h24_high":   str(data.get("h24_high", 0)),
                 "h24_low":    str(data.get("h24_low", 0)),
             }
-            self._r.hset(key, mapping=mapping)
-            self._r.expire(key, self.TICKER_TTL)
+            # DP-1: Pipeline HSET + EXPIRE into single round-trip
+            pipe = self._r.pipeline()
+            pipe.hset(key, mapping=mapping)
+            pipe.expire(key, self.TICKER_TTL)
+            pipe.execute()
             return True
         except Exception as e:
             log.error("[DirectRedis/ticker] write error: %s", e)
@@ -86,13 +104,15 @@ class DirectRedisWriter:
                 "n": data.get("trade_count", 0),
                 "x": data.get("is_closed", False),
             }
-            self._r.zadd(key, {json.dumps(candle): data["kline_start"]})
-            self._r.expire(key, self.CANDLE_TTL)
+            # DP-1: Pipeline ZADD + EXPIRE into single round-trip
+            pipe = self._r.pipeline()
+            pipe.zadd(key, {json.dumps(candle): data["kline_start"]})
+            pipe.expire(key, self.CANDLE_TTL)
 
             # Also update latest candle hash for 1m+
             if interval != "1s":
                 latest_key = f"candle:latest:{exchange}:{symbol}"
-                self._r.hset(latest_key, mapping={
+                pipe.hset(latest_key, mapping={
                     "open":         str(data["open"]),
                     "high":         str(data["high"]),
                     "low":          str(data["low"]),
@@ -105,7 +125,8 @@ class DirectRedisWriter:
                     "interval":     interval,
                     "exchange":     exchange,
                 })
-                self._r.expire(latest_key, self.CANDLE_TTL)
+                pipe.expire(latest_key, self.CANDLE_TTL)
+            pipe.execute()
             return True
         except Exception as e:
             log.error("[DirectRedis/kline] write error: %s", e)
@@ -124,8 +145,11 @@ class DirectRedisWriter:
                 "m": data.get("is_buyer_maker", False),
                 "T": data.get("event_time", 0),
             }
-            self._r.zadd(key, {json.dumps(trade): data["trade_time"]})
-            self._r.expire(key, self.TRADE_TTL)
+            # DP-1: Pipeline ZADD + EXPIRE into single round-trip
+            pipe = self._r.pipeline()
+            pipe.zadd(key, {json.dumps(trade): data["trade_time"]})
+            pipe.expire(key, self.TRADE_TTL)
+            pipe.execute()
             return True
         except Exception as e:
             log.error("[DirectRedis/trade] write error: %s", e)
@@ -139,7 +163,9 @@ class DirectRedisWriter:
             key = f"orderbook:{exchange}:{symbol}"
             bids = data.get("bids", [])
             asks = data.get("asks", [])
-            self._r.hset(key, mapping={
+            # DP-1: Pipeline HSET + EXPIRE into single round-trip
+            pipe = self._r.pipeline()
+            pipe.hset(key, mapping={
                 "bids":           json.dumps(bids),
                 "asks":           json.dumps(asks),
                 "last_update_id": str(data.get("last_update_id", 0)),
@@ -151,7 +177,8 @@ class DirectRedisWriter:
                 "best_ask":       str(float(asks[0][0]) if asks else 0),
                 "spread":         str(round(float(asks[0][0]) - float(bids[0][0]), 8) if bids and asks else 0),
             })
-            self._r.expire(key, self.DEPTH_TTL)
+            pipe.expire(key, self.DEPTH_TTL)
+            pipe.execute()
             return True
         except Exception as e:
             log.error("[DirectRedis/depth] write error: %s", e)

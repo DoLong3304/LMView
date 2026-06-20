@@ -24,6 +24,7 @@ from ai_service.config import (
 )
 from ai_service.providers.base import BaseProvider
 from ai_service.providers.none_provider import NoneProvider
+from ai_service.providers.litellm_provider import QuotaExhaustedError
 from backend.services.ai import metrics as ai_metrics
 
 logger = logging.getLogger("ai_service.providers.router")
@@ -96,19 +97,30 @@ class ProviderRouter:
             logger.info("litellm not installed; API provider unavailable")
             return
 
-        for row in rows:
-            api_key = get_api_key(row.env_key)
-            if not api_key:
-                continue
-            self._providers["api"] = LiteLLMProvider(
-                provider_name="api",
-                model_name=row.model,
-                base_url=row.base_url,
-                api_key=api_key,
-                is_local=False,
-                priority=row.priority,
-            )
-            break
+        if not rows:
+            return
+
+        # Primary model is the first row; remaining rows become fallback chain
+        primary = rows[0]
+        api_key = get_api_key(primary.env_key)
+        if not api_key:
+            return
+
+        fallback_models = []
+        for fb_row in rows[1:]:
+            fb_key = get_api_key(fb_row.env_key)
+            if fb_key:
+                fallback_models.append(fb_row.model)
+
+        self._providers["api"] = LiteLLMProvider(
+            provider_name="api",
+            model_name=primary.model,
+            base_url=primary.base_url,
+            api_key=api_key,
+            is_local=False,
+            priority=primary.priority,
+            fallback_models=fallback_models,
+        )
 
     def get_provider_order(self) -> List[str]:
         """Return public provider names in try order."""
@@ -129,20 +141,16 @@ class ProviderRouter:
         providers_tried: List[str] = []
         providers_failed: List[str] = []
 
-        # Record the configured mode for dashboards that want to know which
-        # providers the router is *configured* to use (B13 observability).
         ai_metrics.record_provider_mode_active(self.settings.mode)
 
-        # Get health monitor instance
         from ai_service.providers.health import get_health_monitor
+        from ai_service.providers.litellm_provider import QuotaExhaustedError
         monitor = get_health_monitor()
 
         chain_depth = 0
         last_error: Optional[str] = None
-        chain_start = time.monotonic()
 
         for provider_name in self.get_provider_order():
-            # Skip if circuit breaker is open (for non-none providers)
             if provider_name != "none" and not monitor.should_try(provider_name):
                 logger.warning("Skipping AI provider '%s' due to open circuit breaker", provider_name)
                 providers_failed.append(provider_name)
@@ -154,15 +162,13 @@ class ProviderRouter:
             providers_tried.append(provider_name)
             chain_depth += 1
             provider_start = time.monotonic()
+
             try:
                 response = await provider.generate_chat_completion(request)
                 provider_duration = time.monotonic() - provider_start
                 latency_ms = int(provider_duration * 1000)
 
-                # Record success in health monitor
                 monitor.record_success(provider_name, latency_ms=latency_ms)
-
-                # Provider request success (B13 metrics).
                 ai_metrics.record_provider_request(
                     provider=provider_name,
                     status="success",
@@ -180,15 +186,24 @@ class ProviderRouter:
                     routing_reason=f"Selected {provider_name}",
                 )
                 return response, routing
+
+            except QuotaExhaustedError as exc:
+                # All models + keys exhausted for this provider; move to next
+                provider_duration = time.monotonic() - provider_start
+                last_error = str(exc)[:200]
+                providers_failed.append(provider_name)
+                monitor.record_failure(provider_name)
+                logger.warning(
+                    "AI provider %s fully exhausted (all models/keys), falling through: %s",
+                    provider_name, last_error,
+                )
+                continue
+
             except Exception as exc:
                 provider_duration = time.monotonic() - provider_start
                 last_error = str(exc)[:200]
                 providers_failed.append(provider_name)
-
-                # Record failure in health monitor
                 monitor.record_failure(provider_name)
-
-                # Provider request failure (B13 metrics).
                 ai_metrics.record_provider_request(
                     provider=provider_name,
                     status="failure",
@@ -196,7 +211,6 @@ class ProviderRouter:
                 )
                 logger.warning("AI provider %s failed: %s", provider_name, last_error)
 
-        # Record chain depth even when all providers failed.
         ai_metrics.record_provider_chain_depth(chain_depth, status="exhausted")
 
         none_provider = self._providers["none"]

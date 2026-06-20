@@ -80,25 +80,58 @@ stop-all: ## Stop ALL services across all profiles
 	docker compose --profile dev --profile prod --profile monitoring --profile logging down
 	@echo "✅ All stopped"
 
-# ─── Docker Swarm (AWS EC2) ──────────────────────────────────────────────────
+# ─── Docker Swarm (AWS EC2 Multi-Node) ───────────────────────────────────────
 
 .PHONY: swarm-deploy
-swarm-deploy: ## Deploy to Docker Swarm (builds images, then deploys stack)
+swarm-deploy: ## Build images, push to local registry, and deploy Swarm stack
 	bash scripts/deploy_aws_swarm.sh
 
 .PHONY: swarm-deploy-quick
-swarm-deploy-quick: ## Deploy to Docker Swarm (skip image build)
+swarm-deploy-quick: ## Deploy Swarm stack (skip image build, push existing)
 	bash scripts/deploy_aws_swarm.sh --skip-build
 
+.PHONY: swarm-push
+swarm-push: ## Build and push images to local registry only (no deploy)
+	bash scripts/deploy_aws_swarm.sh --registry-only
+
 .PHONY: swarm-status
-swarm-status: ## Show Swarm stack services and tasks
-	@docker stack services lmview 2>/dev/null || echo "Stack 'lmview' not deployed."
+swarm-status: ## Show Swarm services, tasks, and node health
+	@echo "═══ Swarm Nodes ═══"
+	@docker node ls 2>/dev/null || echo "  Not in Swarm mode."
 	@echo ""
-	@docker stack ps lmview --format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}" 2>/dev/null | head -40 || true
+	@echo "═══ Stack Services ═══"
+	@docker stack services lmview 2>/dev/null || echo "  Stack 'lmview' not deployed."
+	@echo ""
+	@echo "═══ Running Tasks ═══"
+	@docker stack ps lmview --filter "desired-state=running" \
+		--format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}\t{{.Error}}" 2>/dev/null | head -50 || true
+	@echo ""
+	@echo "═══ Failed Tasks (last 10) ═══"
+	@docker stack ps lmview --filter "desired-state=shutdown" \
+		--format "table {{.Name}}\t{{.Node}}\t{{.CurrentState}}\t{{.Error}}" 2>/dev/null | head -11 || true
+
+.PHONY: swarm-logs
+swarm-logs: ## Tail logs for a Swarm service (usage: make swarm-logs SVC=fastapi-prod)
+	@if [ -z "$(SVC)" ]; then \
+		echo "Usage: make swarm-logs SVC=<service-name>"; \
+		echo "Available services:"; \
+		docker stack services lmview --format '  {{.Name}}' 2>/dev/null | sed "s/lmview_//" || true; \
+	else \
+		docker service logs lmview_$(SVC) --tail 50 -f; \
+	fi
+
+.PHONY: swarm-restart
+swarm-restart: ## Rolling restart a Swarm service (usage: make swarm-restart SVC=fastapi-prod)
+	@if [ -z "$(SVC)" ]; then \
+		echo "Usage: make swarm-restart SVC=<service-name>"; \
+	else \
+		docker service update --force lmview_$(SVC); \
+	fi
 
 .PHONY: swarm-down
-swarm-down: ## Remove the Swarm stack
+swarm-down: ## Remove the Swarm stack (keeps registry and volumes)
 	docker stack rm lmview
+
 
 # ─── Jobs ────────────────────────────────────────────────────────────────────
 
@@ -129,6 +162,19 @@ status: ## Show status and RAM usage of all containers
 	@echo ""
 	@echo "💾 RAM Usage (Top 20):"
 	@docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" | head -20
+
+.PHONY: docs-version
+docs-version: ## Sync version string across all .md files (usage: make docs-version V=0.25.42)
+	@if [ -z "$(V)" ]; then \
+		echo "Usage: make docs-version V=<version> (e.g. V=0.25.42)"; \
+		python3 scripts/sync_docs_version.py --dry-run; \
+	else \
+		python3 scripts/sync_docs_version.py --version $(V); \
+	fi
+
+.PHONY: docs-version-check
+docs-version-check: ## Show which version would be synced (dry-run)
+	python3 scripts/sync_docs_version.py --dry-run
 
 .PHONY: clean
 clean: ## Remove all containers, volumes, and networks (DANGEROUS)

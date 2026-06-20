@@ -32,13 +32,13 @@ import websocket
 from common.config import (
     DEPTH_LEVEL,
     DEPTH_UPDATE_MS,
-    ENABLE_DIRECT_REDIS,
     ENABLE_OKX,
     KAFKA_TOPIC_DEPTH,
     KAFKA_TOPIC_KLINES,
     KAFKA_TOPIC_TICKER,
     KAFKA_TOPIC_TRADES,
     KLINE_INTERVAL_WS,
+    KLINE_SYMBOLS_PER_CONN,
     MAX_SYMBOLS,
     SCHEMA_REGISTRY_URL,
     SYMBOLS_PER_CONNECTION,
@@ -213,6 +213,11 @@ def run_ticker_stream(client: ExchangeClient) -> None:
     attempt = 0
     worker_name = threading.current_thread().name
     exchange_name = getattr(client, "name", "unknown")
+
+    def on_message(ws, msg):
+        _heartbeat(worker_name)  # Heartbeat on every message
+        handle_ticker_message(msg, client)
+
     while True:
         _heartbeat(worker_name)
         try:
@@ -222,7 +227,7 @@ def run_ticker_stream(client: ExchangeClient) -> None:
                     log.info("[TICKER] WebSocket opened."),
                     record_exchange_ws_state(exchange=exchange_name, stream="ticker", connected=True),
                 ),
-                on_message=lambda ws, msg: handle_ticker_message(msg, client),
+                on_message=on_message,
                 on_error=lambda ws, err: log.error("[TICKER] Error: %s", err),
                 on_close=lambda ws, code, msg: (
                     log.warning("[TICKER] Closed. code=%s msg=%s", code, msg),
@@ -283,18 +288,12 @@ def _handle_combined_message(
     if not symbol.endswith("USDT"):
         return
 
-    try:
-        send_to_kafka(topic, mapper(payload), avro_serializer)
-        KAFKA_MESSAGES_SENT.labels(topic=topic).inc()
-    except Exception as e:
-        KAFKA_SEND_ERRORS.labels(topic=topic).inc()
-        log.error("[%s] Kafka send error: %s", tag, e)
+    mapped = mapper(payload)
 
-    # Direct Redis bypass
-    if ENABLE_DIRECT_REDIS:
+    # Direct Redis write first (fast path, <1ms)
+    if health_monitor.is_direct_redis_active():
         try:
             direct_writer = get_direct_writer()
-            mapped = mapper(payload)
             if event_type == "aggTrade":
                 direct_writer.write_trade("binance", symbol, mapped)
             elif event_type == "kline":
@@ -311,8 +310,19 @@ def _handle_combined_message(
                 direct_writer.write_kline("binance", symbol, interval, mapped)
             elif event_type == "depth":
                 direct_writer.write_depth("binance", symbol, payload)
+            elif event_type == "24hrTicker":
+                direct_writer.write_ticker("binance", symbol, mapped)
         except Exception as e:
             log.error("[DirectRedis/%s] write error: %s", tag, e)
+
+    # Kafka send (async, may block if broker down)
+    if topic:
+        try:
+            send_to_kafka(topic, mapped, avro_serializer)
+            KAFKA_MESSAGES_SENT.labels(topic=topic).inc()
+        except Exception as e:
+            KAFKA_SEND_ERRORS.labels(topic=topic).inc()
+            log.error("[%s] Kafka send error: %s", tag, e)
 
     log.debug("[%s] %s processed", tag, symbol)
 
@@ -368,8 +378,8 @@ def _handle_okx_message(
                 KAFKA_SEND_ERRORS.labels(topic=KAFKA_TOPIC_TICKER).inc()
                 log.error("[OKX/TICKER] Kafka send error: %s", e)
 
-            # Direct Redis bypass
-            if ENABLE_DIRECT_REDIS:
+            # Direct Redis bypass (auto-failover)
+            if health_monitor.is_direct_redis_active():
                 try:
                     direct_writer = get_direct_writer()
                     mapped = client.map_ticker(item)
@@ -387,8 +397,8 @@ def _handle_okx_message(
                 KAFKA_SEND_ERRORS.labels(topic=KAFKA_TOPIC_TRADES).inc()
                 log.error("[OKX/TRADES] Kafka send error: %s", e)
 
-            # Direct Redis bypass
-            if ENABLE_DIRECT_REDIS:
+            # Direct Redis bypass (auto-failover)
+            if health_monitor.is_direct_redis_active():
                 try:
                     direct_writer = get_direct_writer()
                     mapped = client.map_trade(item)
@@ -400,6 +410,10 @@ def _handle_okx_message(
         for item in data:
             mapped = client.map_kline(item)
             mapped["symbol"] = symbol
+            # Set interval from channel name (e.g., candle1m → 1m)
+            okx_interval = channel.replace("candle", "")
+            if okx_interval:
+                mapped["interval"] = okx_interval
             try:
                 send_to_kafka(KAFKA_TOPIC_KLINES, mapped, avro_serializer)
                 KAFKA_MESSAGES_SENT.labels(topic=KAFKA_TOPIC_KLINES).inc()
@@ -407,8 +421,8 @@ def _handle_okx_message(
                 KAFKA_SEND_ERRORS.labels(topic=KAFKA_TOPIC_KLINES).inc()
                 log.error("[OKX/KLINES] Kafka send error: %s", e)
 
-            # Direct Redis bypass
-            if ENABLE_DIRECT_REDIS:
+            # Direct Redis bypass (auto-failover)
+            if health_monitor.is_direct_redis_active():
                 try:
                     direct_writer = get_direct_writer()
                     interval = channel.replace("candle", "")
@@ -434,8 +448,8 @@ def _handle_okx_message(
                 KAFKA_SEND_ERRORS.labels(topic=KAFKA_TOPIC_DEPTH).inc()
                 log.error("[OKX/DEPTH] Kafka send error: %s", e)
 
-            # Direct Redis bypass
-            if ENABLE_DIRECT_REDIS:
+            # Direct Redis bypass (auto-failover)
+            if health_monitor.is_direct_redis_active():
                 try:
                     direct_writer = get_direct_writer()
                     direct_writer.write_depth("okx", symbol, item)
@@ -551,8 +565,17 @@ def run_combined_batch(
     mapper,
     topic: str,
     tag: str,
+    ping_timeout: int = 30,
+    reconnect_count: int = 5,
 ) -> None:
-    """Run a combined-stream WebSocket with auto-reconnect."""
+    """Run a combined-stream WebSocket with auto-reconnect.
+
+    Args:
+        ping_timeout: Seconds to wait for pong before connection considered dead.
+                      Increased from 30 to 60 to avoid false timeout with many streams.
+        reconnect_count: Number of auto-reconnect attempts at WS level before
+                         the outer retry loop (with backoff) kicks in.
+    """
     url_preview = stream_url[:120] + "..." if len(stream_url) > 120 else stream_url
     attempt = 0
     while True:
@@ -570,7 +593,7 @@ def run_combined_batch(
                 ),
             )
             log.info("[%s] Batch #%d connecting: %s", tag, batch_idx, url_preview)
-            ws.run_forever(ping_interval=40, ping_timeout=30, reconnect=0)
+            ws.run_forever(ping_interval=40, ping_timeout=ping_timeout, reconnect=reconnect_count)
             attempt += 1
             delay = _compute_backoff(1.0 + batch_idx, attempt)
             log.warning("[%s] Batch #%d dropped. Reconnecting in %.1fs...", tag, batch_idx, delay)
@@ -640,6 +663,37 @@ def run_streams(client: ExchangeClient) -> None:
     ticker_target = run_ticker_stream_subscription if is_subscription else run_ticker_stream
     _register_thread(ticker_name, ticker_target, client)
 
+    # ── Stream A2: Individual @ticker (all USDT symbols, 5 combined WS) ───
+    # Each symbol gets pushed on every trade (real-time, <100ms).
+    # 671 / 5 ≈ 134 symbols/connection (well under Binance 200 limit).
+    if not is_subscription:
+        try:
+            all_usdt = client.fetch_symbols("USDT")
+            if all_usdt:
+                n_con = 5
+                ticker_batches = [
+                    all_usdt[i * len(all_usdt) // n_con : (i + 1) * len(all_usdt) // n_con]
+                    for i in range(n_con)
+                ]
+                log.info("[TICKER-V2] Spawning %d @ticker streams for %d USDT symbols",
+                         n_con, len(all_usdt))
+                for idx, batch in enumerate(ticker_batches):
+                    streams = [f"{s.lower()}@ticker" for s in batch]
+                    url = client.build_combined_stream_url(streams)
+                    _register_thread(
+                        f"{client.__class__.__name__.lower()}-ws-ticker-v2-{idx + 1}",
+                        run_combined_batch,
+                        url,
+                        idx + 1,
+                        "24hrTicker",
+                        client.map_ticker,
+                        KAFKA_TOPIC_TICKER,
+                        "TICKER-V2",
+                    )
+                    time.sleep(1.0)
+        except Exception as e:
+            log.warning("[TICKER-V2] Failed to start individual @ticker streams: %s", e)
+
     # ── Stream B: Aggregate trades ───────────────────────────────────────────
     batches = [
         symbols[i : i + SYMBOLS_PER_CONNECTION]
@@ -674,9 +728,14 @@ def run_streams(client: ExchangeClient) -> None:
             )
         time.sleep(1.0)
 
-    # ── Stream C: Kline candles ──────────────────────────────────────────────
-    log.info("Spawning %d kline thread(s) (interval=%s).", len(batches), kline_interval)
-    for idx, batch in enumerate(batches):
+    # ── Stream C: Kline candles (separate batch size for fewer connections) ───
+    kline_batches = [
+        symbols[i : i + KLINE_SYMBOLS_PER_CONN]
+        for i in range(0, len(symbols), KLINE_SYMBOLS_PER_CONN)
+    ]
+    log.info("Spawning %d kline thread(s) (interval=%s, %d symbols/conn).",
+             len(kline_batches), kline_interval, KLINE_SYMBOLS_PER_CONN)
+    for idx, batch in enumerate(kline_batches):
         streams = [client.kline_stream_name(s, kline_interval) for s in batch]
         url = client.build_combined_stream_url(streams)
         if is_subscription:
@@ -738,6 +797,64 @@ def run_streams(client: ExchangeClient) -> None:
             time.sleep(1.0)
 
 
+def run_change24h_poller(client: ExchangeClient) -> None:
+    """
+    Poll REST API every 60s for 24h price change and update Redis directly.
+    Supplements miniTicker (which lacks change24h field) with accurate 24h stats.
+    """
+    import requests
+    import redis
+
+    worker_name = threading.current_thread().name
+    exchange_name = getattr(client, "name", "binance")
+
+    # Connect to Redis
+    redis_host = os.getenv("REDIS_HOST", "redis-master")
+    redis_port = int(os.getenv("REDIS_PORT", "6379"))
+    redis_db = int(os.getenv("REDIS_DB", "0"))
+    redis_client = redis.Redis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
+
+    log.info("[CHANGE24H] Starting REST API poller (60s interval)")
+
+    while True:
+        _heartbeat(worker_name)
+        try:
+            # Fetch 24hr ticker from REST API
+            url = "https://api.binance.com/api/v3/ticker/24hr"
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            tickers = resp.json()
+
+            # Update only change24h field in Redis ticker keys
+            updated = 0
+            for ticker in tickers:
+                symbol = ticker.get("symbol", "")
+                if not symbol.endswith("USDT"):
+                    continue
+
+                change_pct = float(ticker.get("priceChangePercent", 0))
+
+                # Update Redis key with change24h only (preserve other fields)
+                try:
+                    key = f"ticker:latest:{exchange_name}:{symbol}"
+                    result = redis_client.hset(key, "change24h", change_pct)
+                    if symbol == "BTCUSDT":
+                        log.info(f"[CHANGE24H] DEBUG BTCUSDT: key={key}, change={change_pct}, hset_result={result}")
+                    updated += 1
+                except Exception as e:
+                    log.error(f"[CHANGE24H] Redis update error for {symbol}: {e}")
+
+            log.info(f"[CHANGE24H] Updated {updated} tickers with 24h change data")
+
+        except Exception as e:
+            log.error(f"[CHANGE24H] Poller error: {e}")
+
+        # Sleep 60s (with heartbeat every 15s to keep health monitor happy)
+        for _ in range(4):
+            time.sleep(15)
+            _heartbeat(worker_name)
+
+
 def run() -> None:
     """Main entry point."""
     setup_logging_from_env()
@@ -771,6 +888,30 @@ def run() -> None:
 
     init_producer()
 
+    # ── Verify Kafka topics exist (DP-4) ──────────────────────────────────────
+    try:
+        from kafka.admin import KafkaAdminClient  # type: ignore
+        from common.config import KAFKA_BOOTSTRAP
+        admin = KafkaAdminClient(bootstrap_servers=KAFKA_BOOTSTRAP)
+        topic_metadata = admin.describe_topics([
+            KAFKA_TOPIC_TICKER,
+            KAFKA_TOPIC_KLINES,
+            KAFKA_TOPIC_TRADES,
+            KAFKA_TOPIC_DEPTH,
+        ])
+        missing = [t for t, meta in topic_metadata.items() if meta.get("error_code") != 0]
+        if missing:
+            log.warning(
+                "Topics missing: %s. Kafka auto-create must be enabled, "
+                "or run create_kafka_topics.sh. Messages to missing topics will be dropped.",
+                ", ".join(missing),
+            )
+        else:
+            log.info("All 4 Kafka topics confirmed.")
+        admin.close()
+    except Exception as exc:
+        log.warning("Kafka topic check skipped (non-fatal): %s", exc)
+
     # ── Register Avro schemas ────────────────────────────────────────────────
     global avro_serializer
     schema_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -786,6 +927,10 @@ def run() -> None:
     log.info("Starting Binance streams...")
     binance = BinanceClient()
     run_streams(binance)
+
+    # ── Start REST API poller for 24h change (supplements miniTicker) ────────
+    _start_thread("binanceclient-rest-change24h", run_change24h_poller, binance)
+    log.info("Started REST API poller for 24h price change data")
 
     # ── Start streams for OKX (Active-Active HA) ─────────────────────────────
     if ENABLE_OKX:

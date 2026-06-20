@@ -36,6 +36,11 @@ log = logging.getLogger(__name__)
 # All timeframes to stream simultaneously
 ALL_INTERVALS = ["1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"]
 
+# Real-time candle cache: tracks high/low for current forming candle across
+# WebSocket iterations. Reset on minute boundary or when Flink writes a new
+# candle. Key = f"{exchange}:{symbol}:{interval}"
+_rt_candle_cache: dict[str, dict] = {}
+
 
 @router.websocket("/stream/all")
 async def stream_all_first(websocket: WebSocket, symbol: str = "", exchange: str = "binance"):
@@ -299,57 +304,66 @@ def _get_stream_candle(
     live_ts: int | None,
     target_ms_map: dict[str, int],
 ) -> dict | None:
-    """Get the latest candle for an interval from real-time state or historical."""
-    target_ms = target_ms_map[interval]
+    """Get the latest candle for an interval.
 
-    # Use real-time state if available
+    OH = from Flink candle (always correct, never synthetic).
+    Close = from ticker price (realtime, updates every msg).
+    High/Low = tracked across iterations in ``_rt_candle_cache``.
+    """
+    target_ms = target_ms_map[interval]
+    cache_key = f"{exchange}:{symbol}:{interval}"
+
     if interval in rt_candles:
         return rt_candles[interval]
 
-    # Fall back to historical
     if interval == "1s":
         return candle_1s
 
-    if interval == "1m":
-        if not candle_1m_data:
-            return None
-        return {
-            "openTime": candle_1m_window,
-            "open": candle_1m_data[0]["o"],
-            "high": max(c["h"] for c in candle_1m_data),
-            "low": min(c["l"] for c in candle_1m_data),
-            "close": candle_1m_data[-1]["c"],
-            "volume": round(sum(c["v"] for c in candle_1m_data), 8),
-        }
-
-    if not candle_1m_data:
+    if not candle_1m_data or not live_price or not live_ts:
         return None
 
-    live_window = (live_ts // target_ms) * target_ms if live_ts else 0
-    flink_window = (candle_1m_window // target_ms) * target_ms
+    minute_start = (live_ts // target_ms) * target_ms
+    flink_minute = (candle_1m_window // target_ms) * target_ms
 
-    if live_window == flink_window and live_price and live_ts:
-        window_close_ms = flink_window + target_ms
-        if live_ts > int(candle_1m_data[-1]["t"]) and live_ts < window_close_ms:
-            close_p = live_price
-            high_p = max(max(c["h"] for c in candle_1m_data), live_price)
-            low_p = min(min(c["l"] for c in candle_1m_data), live_price)
-        else:
-            close_p = candle_1m_data[-1]["c"]
-            high_p = max(c["h"] for c in candle_1m_data)
-            low_p = min(c["l"] for c in candle_1m_data)
+    # Does Flink have a candle for this current minute?
+    flink_current = (flink_minute == minute_start)
+
+    if flink_current:
+        # Flink has the current minute → use its OH + live close + track HL
+        open_p = candle_1m_data[0]["o"]
+        flink_h = max(c["h"] for c in candle_1m_data)
+        flink_l = min(c["l"] for c in candle_1m_data)
     else:
-        close_p = candle_1m_data[-1]["c"]
-        high_p = max(c["h"] for c in candle_1m_data)
-        low_p = min(c["l"] for c in candle_1m_data)
+        # Flink hasn't written this minute yet → use OH from last closed candle
+        open_p = candle_1m_data[-1]["c"]
+        flink_h = open_p
+        flink_l = open_p
 
-    return {
-        "openTime": flink_window,
-        "open": candle_1m_data[0]["o"],
+    # Track high/low across iterations via cache
+    cached = _rt_candle_cache.get(cache_key)
+    if cached and cached.get("openTime") == minute_start:
+        # Same minute still forming → update from cache
+        high_p = max(cached["high"], live_price, flink_h)
+        low_p = min(cached["low"], live_price, flink_l)
+    else:
+        # New minute or first iteration → init
+        high_p = max(live_price, flink_h)
+        low_p = min(live_price, flink_l)
+
+    # Persist for next iteration
+    _rt_candle_cache[cache_key] = {
+        "openTime": minute_start,
         "high": high_p,
         "low": low_p,
-        "close": close_p,
-        "volume": round(sum(c["v"] for c in candle_1m_data), 8),
+    }
+
+    return {
+        "openTime": minute_start,
+        "open": open_p,
+        "high": high_p,
+        "low": low_p,
+        "close": live_price,
+        "volume": round(sum(c["v"] for c in candle_1m_data), 8) if candle_1m_data else 0,
     }
 
 
@@ -373,6 +387,7 @@ async def stream_interval(
     target_ms = INTERVAL_SECONDS[interval] * 1000
     last_sent = None
     connect_time = time.monotonic()
+    last_push_time = time.monotonic()
     record_ws_connection(route="/stream/interval", accepted=True)
 
     try:
@@ -404,23 +419,25 @@ async def stream_interval(
                 except (ValueError, TypeError):
                     pass
 
+            now_push = time.monotonic()
             if candle and candle != last_sent:
-                push_start = time.monotonic()
+                push_start = now_push
                 payload = json.dumps(candle, default=str).encode("utf-8")
                 try:
                     await websocket.send_bytes(payload)
+                    last_push_time = now_push
                     record_ws_message_push(
                         route="/stream/interval",
                         data_type=interval,
                         size_bytes=len(payload),
-                        duration_sec=time.monotonic() - push_start,
+                        duration_sec=now_push - push_start,
                     )
                 except Exception:
                     record_ws_message_push(
                         route="/stream/interval",
                         data_type=interval,
                         size_bytes=len(payload),
-                        duration_sec=time.monotonic() - push_start,
+                        duration_sec=now_push - push_start,
                         dropped=True,
                         drop_reason="send_failed",
                     )
@@ -428,6 +445,13 @@ async def stream_interval(
                 last_sent = candle
             else:
                 record_ws_noop(route="/stream/interval", data_type=interval)
+                # BB-3: Send heartbeat ping every 10s to prevent browser timeout
+                if (now_push - last_push_time) >= 10.0:
+                    try:
+                        await websocket.send_bytes(b'{"type":"ping"}')
+                        last_push_time = now_push
+                    except Exception:
+                        pass
 
             await asyncio.sleep(0.05)
             record_ws_loop_cycle(
@@ -469,6 +493,7 @@ async def stream_indicators(
     exchange = websocket.query_params.get("exchange", "binance").strip().lower() or "binance"
     last_sent = None
     connect_time = time.monotonic()
+    last_push_time = time.monotonic()
     record_ws_connection(route="/stream/indicators", accepted=True)
 
     try:
@@ -484,23 +509,25 @@ async def stream_indicators(
                 success=bool(payload),
             )
 
+            now_push = time.monotonic()
             if payload and payload != last_sent:
-                push_start = time.monotonic()
+                push_start = now_push
                 wire = json.dumps(payload, default=str).encode("utf-8")
                 try:
                     await websocket.send_bytes(wire)
+                    last_push_time = now_push
                     record_ws_message_push(
                         route="/stream/indicators",
                         data_type=interval,
                         size_bytes=len(wire),
-                        duration_sec=time.monotonic() - push_start,
+                        duration_sec=now_push - push_start,
                     )
                 except Exception:
                     record_ws_message_push(
                         route="/stream/indicators",
                         data_type=interval,
                         size_bytes=len(wire),
-                        duration_sec=time.monotonic() - push_start,
+                        duration_sec=now_push - push_start,
                         dropped=True,
                         drop_reason="send_failed",
                     )
@@ -508,6 +535,13 @@ async def stream_indicators(
                 last_sent = payload
             else:
                 record_ws_noop(route="/stream/indicators", data_type=interval)
+                # BB-3: Send heartbeat ping every 10s to prevent browser timeout
+                if (now_push - last_push_time) >= 10.0:
+                    try:
+                        await websocket.send_bytes(b'{"type":"ping"}')
+                        last_push_time = now_push
+                    except Exception:
+                        pass
 
             await asyncio.sleep(0.05)
             record_ws_loop_cycle(
@@ -554,7 +588,9 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
     # Build target_ms lookup
     target_ms_map = {iv: INTERVAL_SECONDS[iv] * 1000 for iv in ALL_INTERVALS}
     last_sent: dict[str, dict | None] = {iv: None for iv in ALL_INTERVALS}
+    last_ticker_ts: int = 0  # last ticker's event_time we pushed (epoch ms)
     connect_time = time.monotonic()
+    last_push_time = time.monotonic()
 
     try:
         while True:
@@ -612,6 +648,9 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
             live_price = float(ticker["price"]) if ticker.get("price") else None
             live_ts = int(ticker["event_time"]) if ticker.get("event_time") else None
 
+            # B9 fix removed: Flink now writes current event_time to Redis via
+            # @ticker WS. OH from Flink candle + close from ticker = realtime.
+
             # Parse trade qty for volume accumulation
             trade_qty: float = 0.0
             if raw_trade:
@@ -653,7 +692,7 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
             # Build candles for all intervals using pre-fetched data
             for iv in ALL_INTERVALS:
                 candle = _build_candle_from_data(
-                    iv, candle_1s, candle_1m_window, candle_1m_data,
+                    exchange, symbol, iv, candle_1s, candle_1m_window, candle_1m_data,
                     live_price, live_ts, target_ms_map[iv],
                     candle_latest,
                 )
@@ -669,28 +708,64 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
                     if candle is None:
                         record_ws_noop(route="/stream/all", data_type=iv)
 
-            # Only send if something changed
-            if any_changed:
-                push_start = time.monotonic()
+            # Add ticker metadata for frontend (full Binance @ticker fields)
+            if ticker and live_price and live_ts:
+                result["_ticker"] = {
+                    "price": live_price,
+                    "event_time": live_ts,
+                    "bid": float(ticker.get("bid", 0) or 0),
+                    "ask": float(ticker.get("ask", 0) or 0),
+                    "bid_qty": float(ticker.get("bid_qty", 0) or 0),
+                    "ask_qty": float(ticker.get("ask_qty", 0) or 0),
+                    "volume": float(ticker.get("volume", 0) or 0),
+                    "quote_volume": float(ticker.get("quote_volume", 0) or 0),
+                    "change24h": float(ticker.get("change24h", 0) or 0),
+                    "change_pct": float(ticker.get("change_pct", 0) or 0),
+                    "change_abs": float(ticker.get("change_abs", 0) or 0),
+                    "weighted_avg": float(ticker.get("weighted_avg", 0) or 0),
+                    "open_24h": float(ticker.get("open_24h", 0) or 0),
+                    "high_24h": float(ticker.get("high_24h", 0) or 0),
+                    "low_24h": float(ticker.get("low_24h", 0) or 0),
+                    "last_qty": float(ticker.get("last_qty", 0) or 0),
+                }
+
+            # Only send if something changed OR a newer ticker tick arrived.
+            # The ticker can tick faster than any interval's candle bucket
+            # rolls (e.g. 1s ticker, 1m candle) so without this the forming
+            # candle's price appears frozen between candle buckets.
+            now_push = time.monotonic()
+            ticker_updated = bool(live_ts and live_ts > last_ticker_ts)
+            if any_changed or ticker_updated:
+                if ticker_updated:
+                    last_ticker_ts = live_ts
+                push_start = now_push
                 payload = json.dumps(result, default=str).encode("utf-8")
                 try:
                     await websocket.send_bytes(payload)
+                    last_push_time = now_push
                     record_ws_message_push(
                         route="/stream/all",
                         data_type="multi",
                         size_bytes=len(payload),
-                        duration_sec=time.monotonic() - push_start,
+                        duration_sec=now_push - push_start,
                     )
                 except Exception as push_exc:
                     record_ws_message_push(
                         route="/stream/all",
                         data_type="multi",
                         size_bytes=len(payload),
-                        duration_sec=time.monotonic() - push_start,
+                        duration_sec=now_push - push_start,
                         dropped=True,
                         drop_reason=type(push_exc).__name__,
                     )
                     raise
+            elif (now_push - last_push_time) >= 10.0:
+                # BB-3: Send heartbeat ping every 10s to prevent browser timeout
+                try:
+                    await websocket.send_bytes(b'{"type":"ping"}')
+                    last_push_time = now_push
+                except Exception:
+                    pass
 
             # CRITICAL: Reduced from 0.3s to 0.05s for real-time responsiveness
             # This is the primary latency source — tighter loop = faster updates
@@ -710,6 +785,8 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
 
 
 def _build_candle_from_data(
+    exchange: str,
+    symbol: str,
     interval: str,
     candle_1s: dict | None,
     candle_1m_window: int,
@@ -719,7 +796,12 @@ def _build_candle_from_data(
     target_ms: int,
     candle_latest: dict,
 ) -> dict | None:
-    """Build candle from pre-fetched Redis data. Synchronous version for pipeline optimization."""
+    """Build candle from pre-fetched Redis data.
+
+    Phase 1: OH from Flink (always correct), close from ticker (realtime),
+    high/low tracked across iterations via _rt_candle_cache.
+    """
+    cache_key = f"{exchange}:{symbol}:{interval}"
 
     if interval == "1s":
         if candle_1s:
@@ -731,26 +813,18 @@ def _build_candle_from_data(
                 "close": candle_1s["close"],
                 "volume": candle_1s["volume"],
             }
-        if live_price and live_ts:
-            live_window = (live_ts // target_ms) * target_ms
-            return {
-                "openTime": live_window,
-                "open": live_price,
-                "high": live_price,
-                "low": live_price,
-                "close": live_price,
-                "volume": 0,
-            }
         return None
 
+    if not live_price or not live_ts:
+        return None
+
+    minute_start = (live_ts // target_ms) * target_ms
     flink_candle = None
     flink_window = 0
-    latest_source_ts = 0
 
     if candle_1m_data:
         latest_score = candle_1m_window if candle_1m_window else 0
         flink_window = (latest_score // target_ms) * target_ms
-        latest_source_ts = max(int(c["t"]) for c in candle_1m_data) if candle_1m_data else 0
         flink_candle = {
             "openTime": flink_window,
             "open": candle_1m_data[0]["o"],
@@ -760,58 +834,47 @@ def _build_candle_from_data(
             "volume": round(sum(c["v"] for c in candle_1m_data), 8),
         }
 
-    # Keep 1m responsive even when kline streams lag by folding in fresh ticker.
-    if interval == "1m":
-        if live_price and live_ts:
-            live_window = (live_ts // target_ms) * target_ms
-            if flink_candle and live_window == flink_window:
-                if live_ts > latest_source_ts:
-                    flink_candle["close"] = live_price
-                    flink_candle["high"] = max(flink_candle["high"], live_price)
-                    flink_candle["low"] = min(flink_candle["low"], live_price)
-                return flink_candle
-            if live_window > flink_window:
-                return {
-                    "openTime": live_window,
-                    "open": live_price,
-                    "high": live_price,
-                    "low": live_price,
-                    "close": live_price,
-                    "volume": 0,
-                }
-        return flink_candle
+    # ── Determine OH for current forming candle ─────────────────────────
+    if flink_candle and flink_window == minute_start:
+        # Flink has data for this minute → use its OH
+        open_p = flink_candle["open"]
+        flink_h = flink_candle["high"]
+        flink_l = flink_candle["low"]
+    elif flink_candle:
+        # Flink hasn't written this minute yet → OH from last closed candle
+        open_p = flink_candle["close"]
+        flink_h = open_p
+        flink_l = open_p
+    else:
+        # No Flink data at all → start from live price
+        open_p = live_price
+        flink_h = live_price
+        flink_l = live_price
 
-    if live_price and live_ts:
-        live_window = (live_ts // target_ms) * target_ms
-        if flink_candle and live_window == flink_window:
-            window_close_ms = flink_window + target_ms
-            if live_ts > latest_source_ts and int(time.time() * 1000) < window_close_ms:
-                flink_candle["close"] = live_price
-                flink_candle["high"] = max(flink_candle["high"], live_price)
-                flink_candle["low"] = min(flink_candle["low"], live_price)
-            return flink_candle
-        if live_window > flink_window:
-            return {
-                "openTime": live_window,
-                "open": live_price, "high": live_price,
-                "low": live_price, "close": live_price,
-                "volume": 0,
-            }
+    # ── Track high/low across iterations ───────────────────────────────
+    cached = _rt_candle_cache.get(cache_key)
+    if cached and cached.get("openTime") == minute_start:
+        high_p = max(cached["high"], live_price, flink_h)
+        low_p = min(cached["low"], live_price, flink_l)
+    else:
+        high_p = max(live_price, flink_h)
+        low_p = min(live_price, flink_l)
 
-    if flink_candle:
-        return flink_candle
+    # ── Persist for next iteration ──────────────────────────────────────
+    _rt_candle_cache[cache_key] = {
+        "openTime": minute_start,
+        "high": high_p,
+        "low": low_p,
+    }
 
-    if candle_latest:
-        kline_start = int(candle_latest.get("kline_start", 0))
-        return {
-            "openTime": (kline_start // target_ms) * target_ms,
-            "open": float(candle_latest.get("open", 0)),
-            "high": float(candle_latest.get("high", 0)),
-            "low": float(candle_latest.get("low", 0)),
-            "close": float(candle_latest.get("close", 0)),
-            "volume": float(candle_latest.get("volume", 0)),
-        }
-    return None
+    return {
+        "openTime": minute_start,
+        "open": open_p,
+        "high": high_p,
+        "low": low_p,
+        "close": live_price,
+        "volume": flink_candle["volume"] if flink_candle else 0,
+    }
 
 
 async def _build_candle(

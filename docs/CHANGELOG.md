@@ -8,6 +8,360 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.25.51] - 2026-06-20
+
+### Fixed
+
+- **Caveat IB-8: Missing healthchecks on flink-taskmanager and spark-worker-2** — Added Docker healthcheck to flink-taskmanager (TCP port 6123) and spark-worker-2 (TCP port 8085). Docker now detects stuck/flapping tasks and auto-restarts them.
+
+- **Caveat DP-1: DirectRedisWriter per-event Redis round trips** — All four write methods (ticker, kline, trade, depth) now pipeline HSET+EXPIRE / ZADD+EXPIRE into a single Redis round-trip instead of two. Reduces Redis CPU load on the failover path by ~50%.
+
+- **Caveat IB-3: Deploy script no rollback on failure** — `scripts/deploy_aws_swarm.sh` now snapshots the current stack config before deploy. If `docker stack deploy` fails, the script automatically rolls back to the previous stack state. Rollback snaphsot is updated on successful deploys.
+
+- **YAML structure: env vars leaked under healthcheck blocks** — `docker-compose.yml` had pre-existing indentation bugs on flink-jobmanager and spark-worker where environment variables were nested under `healthcheck:` instead of `environment:`. This caused Docker Compose to silently ignore those variables during validation, so they never reached the container runtime. Fixed by moving 20 env vars to their proper `environment:` section on flink-jobmanager and 8 env vars on spark-worker. All Compose profiles now validate clean.
+
+### Files
+
+- `docker-compose.yml` (healthchecks on flink-taskmanager/spark-worker-2, YAML structure fix)
+- `scripts/deploy_aws_swarm.sh` (snapshot + rollback)
+- `src/exchanges/binance/redis_writer.py` (Redis pipelining)
+
+### Changed
+
+- `src/exchanges/binance/redis_writer.py` — All 4 write methods use `self._r.pipeline()` to batch HSET+EXPIRE / ZADD+EXPIRE into one round-trip.
+- `scripts/deploy_aws_swarm.sh` — Added `BACKUP_STACK_FILE`, pre-deploy snapshot via `docker compose config`, conditional rollback on deploy failure.
+- `docker-compose.yml` — Added `healthcheck:` blocks for flink-taskmanager (TCP 6123) and spark-worker-2 (TCP 8085). Moved 28 env vars from beneath `healthcheck:` into proper `environment:` sections on flink-jobmanager and spark-worker.
+
+### Verified
+
+- `docker compose --profile dev config` — no warnings
+- `docker compose --profile prod --profile monitoring --profile logging config` — no warnings
+- `docker compose --profile prod --profile monitoring --profile logging --profile ai-api -f docker-compose.yml -f docker-compose.ai.yml -f docker-compose.swarm.yml config` — no warnings
+- `bash -n scripts/deploy_aws_swarm.sh` — syntax OK
+- `python3 -c "import ast; ast.parse(open('src/exchanges/binance/redis_writer.py').read())"` — OK
+
+---
+
+## [0.25.50] - 2026-06-20
+
+### Documentation
+
+- **Viết lại toàn bộ `docs/SYSTEM.md` bằng tiếng Việt với comment chi tiết cho sinh viên năm 1** — Thay thế phiên bản tiếng Anh 6906 dòng bằng bản tiếng Việt 6250 dòng, 219 KB, 68 sections, 296 code blocks. Toàn bộ code giữ nguyên tiếng Anh (technical terms) nhưng:
+  - Mọi giải thích bằng tiếng Việt
+  - Comment dòng-by-dòng bằng tiếng Việt trong code
+  - Bảng thuật ngữ Anh-Việt ở §6
+  - Giải thích mọi khái niệm (Kafka, Flink, Redis, WebSocket, Lambda Architecture, Sentinel, ...) từ đầu
+  - Timeline và sơ đồ có chú thích tiếng Việt chi tiết
+  - Lưu ý cho sinh viên năm 1 ở đầu mỗi phần
+
+### Cấu trúc 8 phần
+
+- Phần 1 — Nền Tảng (LMView là gì, triết lý thiết kế, Lambda Architecture, bản đồ repo, network, glossary)
+- Phần 2 — 21 services được giải thích + code đầy đủ `src/ticker_ws/` (5 files) với comment tiếng Việt
+- Phần 3 — Tầng tốc độ: Redis key schema, Flink pipeline, Avro schemas
+- Phần 4 — Tầng phục vụ: code đầy đủ `backend/api/websocket.py` với comment tiếng Việt
+- Phần 5 — Frontend: code đầy đủ `marketDataService.ts` + `parseWsData` + Blob bug + forming candle logic
+- Phần 6 — Lakehouse + PostgreSQL + AI + Docker Swarm
+- Phần 7 — Vận hành: env vars, ports, logs, health checks, failure modes, runbook, bug history
+- Phần 8 — Deep dive 8 shards: state machine, batched Redis writer, Sentinel, update frequency, capacity planning, end-to-end annotated flow
+
+### Lưu ý
+
+- Phiên bản tiếng Anh cũ được backup tại `/tmp/SYSTEM_en_backup.md`
+- Nếu cần tham khảo phiên bản tiếng Anh, dùng bản backup hoặc xem git history
+
+---
+
+## [0.25.49] - 2026-06-20
+
+### Documentation
+
+- **Part 8: Deep dive on `binance-ticker-ws` shard architecture** — Added 15 new sections (§52-§66) covering:
+  - Why 8 shards: 671 symbols ÷ Binance's ~200 streams/connection limit, with headroom math (671/8 = ~84 symbols per shard)
+  - Shard construction: `TickerConfig.load()` fetches top USDT pairs from `/api/v3/ticker/24hr`, splits into 8 chunks, builds combined-stream URLs
+  - Per-shard state machine: CONNECT → CONNECTED → HANDLE FRAME → DISCONNECT → backoff
+  - Per-message data path with timestamps: Binance event T+0ms → WS recv T+51ms → parsed T+53ms → buffer → flush (50ms) → Redis → FastAPI read → WS push → browser pixel at T+~250-700ms
+  - Batched Redis writer: 50ms flush interval, 2000-item cap, pipeline transaction=False, clear-before-execute pattern
+  - Sentinel-aware connection with direct fallback (and the gotcha: Swarm VIP `redis-master` round-robins to replicas, not just master)
+  - Update frequency by symbol class: 1Hz major / 0.5-0.8Hz mid / 0.05-0.2Hz low-vol
+  - `/healthz` per-shard stats + Prometheus metrics with healthy thresholds
+  - 10-row failure mode table with recovery behavior
+  - Capacity planning: current 700 msg/s uses 0.7% Redis throughput, can scale 4-5× without changes
+  - Comparison table: legacy producer (killed by OOM) vs binance-ticker-ws (async, auto-reconnect, sentinel-aware)
+  - Annotated end-to-end flow diagram with timestamps at each hop
+  - Operational runbook + Phase 5+ future improvements
+
+### Total doc
+
+SYSTEM.md now: **6906 lines**, **271 KB**, **69 sections** across **8 parts**.
+
+---
+
+## [0.25.48] - 2026-06-20
+
+### Documentation
+
+- **Complete SYSTEM.md rebuild (6100 lines, 240 KB)** — Replaced the previous 2776-line system doc with a from-scratch comprehensive reference covering 51 sections across 7 parts. Includes:
+  - Full source code for `src/ticker_ws/` (5 files: main, config, shard, parser, redis_writer)
+  - Full source code for `backend/api/websocket.py` (`_stream_all_impl`, `_build_candle_from_data`)
+  - Full source code for `frontend/src/services/marketDataService.ts` (`parseWsData`, `createReconnectingWebSocket`)
+  - Forming candle algorithm walkthrough with 4 cases (same bucket, boundary cross, first tick, bail)
+  - Two-ref design explained (`lastClosedCandleRef` + `formingCandleRef`)
+  - Blob parse bug root cause + Playwright verification
+  - 8-bug realtime history with lessons learned
+  - Complete env var reference, port table, runbook, failure mode recovery
+
+### Why this format
+
+Goal: an engineer who has never seen the codebase can rebuild LMView end-to-end using only this document plus Docker + Python 3.11 + Node 20. Reading order: Part 1 (foundations) → Part 3 (speed layer) → Part 4 (serving) → Part 5 (frontend) → Part 8 (operations).
+
+---
+
+## [0.25.47] - 2026-06-20
+
+### Fixed
+
+- **Forming candle not drawing in browser** — User reported chart shows only a horizontal green dot at the realtime price, no body, no wick. Backend `/stream/all` was sending the correct OHLCV forming candle with full price history, but the frontend's WebSocket `onMessage` handler called `JSON.parse(e.data as string)` directly. The backend uses `send_bytes()` which causes browsers to receive `Blob` instead of `string` — `JSON.parse(blob)` throws `Unexpected token 'o', "[object Blob]" is not valid JSON`. Every WS frame crashed, the forming candle code path (`onTicker`) never executed, and the chart stayed frozen at whatever was in the last successful `setData` call. Verified with Playwright: before fix 9+ pageerrors per second, after fix 0 pageerrors and forming candle updates correctly (open=63300.01, high=63743.9, low=63300.01, close=63700.02 with both wicks).
+
+### Changed
+
+- `frontend/src/services/marketDataService.ts`: added `parseWsData<T>()` helper that handles `string | Blob | ArrayBuffer` input. Wraps all three `JSON.parse(e.data as string)` call sites (`subscribeCandle`, `subscribeAllTimeframes`, `subscribeIndicatorStream`) with `try/catch` and async Blob→text conversion.
+
+### Files
+
+- `frontend/src/services/marketDataService.ts`
+
+### Verified (Playwright headless browser test)
+
+- 14 `/stream/all` frames received in 8s, 8 unique ticker prices.
+- 1m candle evolves correctly: open=63300.01 (last closed), high accumulates to 63743.9, low stays 63300.01, close tracks ticker price (63700.02 final).
+- 0 pageerror events.
+
+---
+
+## [0.25.46] - 2026-06-20
+
+### Fixed
+
+- **Real-time forming candle not updating in browser** — User reported chart price only updates on manual F5 reload despite WS data flowing correctly. Two root causes identified and fixed:
+
+  1. **Backend `/stream/all` only pushed when interval candle dict changed**. Non-volatile symbols (BTC) had `live_price` change less than once per 50ms poll cycle, so `candle != last_sent[iv]` returned False and the loop fell through to 10s heartbeat. Fix: track `last_ticker_ts` separately and push whenever a newer ticker tick arrives, regardless of interval candle change. Backend `/api/websocket.py` `_stream_all_impl` now sends message every ~1s for all symbols (matches Binance `@ticker` push rate).
+
+  2. **Frontend WebSocket reconnect capped at 5 retries**. After 5 failed reconnects the client gave up forever, so any idle-tab socket death stuck the chart until manual reload. Fix: `MAX_RECONNECT_RETRIES = Infinity`, exponential backoff capped at 30s + jitter, plus a 45s watchdog that force-closes the socket if no data arrives (catches silent proxy kills).
+
+### Changed
+
+- `backend/api/websocket.py`: added `last_ticker_ts` tracking in `_stream_all_impl`; push when `any_changed or ticker_updated`.
+- `frontend/src/services/marketDataService.ts`: rewrote `createReconnectingWebSocket` with unlimited retries, watchdog timer, jittered backoff.
+
+### Verified
+
+- BTCUSDT: 1.1 msg/s, latency p50=143ms p95=800ms.
+- SOLUSDT: 1.0 msg/s, latency p50=101ms p95=1453ms.
+- DOGEUSDT: 1.1 msg/s, latency p50=375ms p95=687ms.
+
+---
+
+## [0.25.45] - 2026-06-20
+
+### Added
+
+- **Phase 4 deployed: `binance-ticker-ws` Swarm service** — Replaces dead producer's WS ticker path. Connects to Binance combined WS streams across 8 shards (84 streams each, total 671 top USDT pairs). Writes 24 Binance @ticker fields + 1 legacy `exchange` field per symbol into Redis hash `ticker:latest:binance:{symbol}` via batched pipeline (50ms flush). All 8 shards connected, 0 reconnects in 13min, end-to-end latency p50 ~150ms, p95 ~600ms. New service exposes Prometheus metrics on `:9100/metrics` and HTTP health on `:9100/healthz`.
+
+### Changed
+
+- **Backend WS `_ticker` payload** — `backend/api/websocket.py` now forwards 16 Binance fields (price, bid, ask, bid_qty, ask_qty, volume, quote_volume, change24h, change_pct, change_abs, weighted_avg, open_24h, high_24h, low_24h, last_qty, event_time) in `/api/stream/all` `_ticker` instead of only 4.
+- **Frontend `StreamTickerPayload` type** — `frontend/src/services/marketDataService.ts` extended to receive the 16 fields from backend. New fields are parsed and passed to `onTicker` callback.
+- **Disabled `BinancePricePoller`** — Commented out `binance_price_poller.start()/stop()` calls in `backend/app.py` lifespan. Replaced by `binance-ticker-ws` which streams full Binance @ticker fields via WS instead of polling REST `/api/v3/ticker/price` at 1s cadence with only 3 fields.
+
+### Files
+
+- `src/ticker_ws/__init__.py` (new)
+- `src/ticker_ws/config.py` (new)
+- `src/ticker_ws/parser.py` (new)
+- `src/ticker_ws/redis_writer.py` (new)
+- `src/ticker_ws/shard.py` (new)
+- `src/ticker_ws/main.py` (new)
+- `docker/ticker-ws/Dockerfile` (new)
+- `docker/ticker-ws/requirements.txt` (new)
+- `docker-compose.yml` (added binance-ticker-ws service block)
+- `docker-compose.swarm.yml` (added binance-ticker-ws deploy overrides)
+- `backend/api/websocket.py` (extended `_ticker` payload to 16 fields)
+- `backend/app.py` (disabled BinancePricePoller)
+- `frontend/src/services/marketDataService.ts` (extended StreamTickerPayload type)
+- `docs/LATENCY_OPTIMIZATION_PLAN.md` (Phase 4 status: ✅ DEPLOYED)
+
+---
+
+## [0.25.44] - 2026-06-20
+
+### Diagnosed
+
+- **Producer dead, no realtime price feed** — `cryptoprice_producer.1` Swarm task exit 137 (OOM kill) trong 10 phút qua, logs chỉ toàn `Handshake status 403 Forbidden - awselb/2.0` trên tất cả Binance WS connections. WS pipeline chính (Producer → Kafka → Flink → Redis) đã chết hoàn toàn.
+- **`BinancePricePoller` REST fallback không đủ** — Chỉ ghi 3 fields (`price`, `event_time`, `exchange`) vào `ticker:latest:*` mỗi 1s. Thiếu `bid`, `ask`, `volume`, `change24h`, `h24_open/high/low`. Frontend chart không nhảy realtime, phải F5 mới thấy giá mới.
+- **Root cause WS 403** — Binance rate limit per-IP cho parallel WS connections. Producer cũ mở 8-15 connections cùng lúc (4 kline, 4 depth, 4 trade, 3 ticker) → trigger 403. Test thực tế xác nhận: single @ticker OK, combined 5 streams OK, combined 100 streams OK, combined 200 streams timeout, `!ticker@arr` timeout.
+
+### Planned
+
+- **Phase 4 — Multi-shard WS ticker feed** — Service Python mới `binance-ticker-ws` chạy trong Swarm, kết nối Binance WS `@ticker` qua 3 shards combined streams (≤100 symbols mỗi shard). Ghi đầy đủ 24 fields của Binance @ticker payload vào Redis hash `ticker:latest:binance:{symbol}`. End-to-end latency < 1s, không trigger 403. Xem chi tiết trong `docs/LATENCY_OPTIMIZATION_PLAN.md` Phase 4.
+
+### Files
+
+- `docs/LATENCY_OPTIMIZATION_PLAN.md` (added Phase 4 section ~290 lines)
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.25.43] - 2026-06-19
+
+### Fixed
+
+- **Candlestick source selection** — `backend/api/klines.py` now fetches both Redis and InfluxDB for live `1m` candles and selects the cleaner source using coverage, continuity, OHLC validity, non-zero volume, and freshness scoring. This prevents sparse Redis 1m data from degrading the chart when Influx has cleaner candles.
+- **Realtime forming candle logic** — `backend/api/websocket.py` now includes ticker `price` and `event_time` in `/stream/all` `_ticker` metadata. `frontend/src/services/marketDataService.ts` exposes ticker updates separately from candle updates.
+- **Frontend candle rendering** — `frontend/src/features/chart/CandlestickChart.tsx` now builds the active/forming candle from realtime ticker price: new candle open equals previous close, high/low track every live tick, close follows live price, and the candle rolls over on timeframe boundaries. Official candle stream data is used only to reconcile matching/older candles, not as the live price source.
+
+### Validated
+
+- `cd frontend && npm run typecheck`
+- `cd frontend && npm run build`
+- `PYTHONPYCACHEPREFIX=/tmp/pycache-check python3 -m py_compile backend/api/klines.py backend/api/websocket.py`
+
+
+## [0.25.42] - 2026-06-19
+
+### Fixed
+
+- **Flink Python job scheduling unblock** — Cleaned `docker/flink/flink-conf.yaml` and removed duplicated TaskManager config entries. Removed fixed `taskmanager.host: flink-taskmanager` so each Swarm TaskManager auto-advertises its own container IP. This fixed the `RUNNING but subtasks=0` blocker and allowed Python pipeline subtasks to transition `INITIALIZING -> RUNNING`.
+- **Producer Binance WS 403 mitigation** — Reduced `KLINE_SYMBOLS_PER_CONN` from 40 to 20 in `src/common/config.py`, `docker-compose.yml`, and `docker-compose.swarm.yml` to lower per-connection stream load. Fixed producer startup crash caused by an inner `from common.config import KAFKA_TOPIC_*` shadowing global topic constants inside `run()`.
+
+### Changed
+
+- **Project-wide cleanup & documentation** — Major system audit for Docker Swarm 2-node deployment:
+  - Removed 21 clutter/generated files to `trash/` for human review
+  - Created `docs/system/` with 13 detailed module docs covering architecture, serving, pipeline, lakehouse, AI, frontend, Docker, PostgreSQL, Kafka, speed layer, observability, deployment, and caveats
+  - Added `production` branch as rollback snapshot
+  - Cleaned CHANGELOG duplicate entries (removed template + stale tail)
+  - Updated SYSTEM.md, README.md, AGENTS.md for current system state
+  - All `__pycache__` directories and `*.pyc` files removed
+
+### Files
+
+- `docs/system/*.md` (13 new files)
+- `docs/SYSTEM.md`
+- `docs/CHANGELOG.md`
+- `README.md`
+- `AGENTS.md`
+- `.gitignore` (added `trash/`)
+- `trash/` (21 files moved for review)
+
+---
+
+## [0.25.41] - 2026-06-19
+
+### Fixed
+
+- **Producer crash loop 41.1** - Fixed `DirectRedisWriter.__init__()` missing `import redis` (NameError crash) in `src/exchanges/binance/redis_writer.py`. The producer would crash immediately when `ENABLE_DIRECT_REDIS=true` (swarm default) because `redis.ConnectionPool()` was called without importing the module.
+- **Kafka broker ZK NodeExists 41.2** - Added stale ZK broker node cleanup to `docker/kafka/entrypoint.sh` before Kafka starts, preventing `NodeExistsException` on container restarts. Also added shorter ZK session timeout (10s) for faster Swarm failover.
+- **Kafka client auto-reconnect 41.3** - Updated `src/common/kafka_client.py` to auto-recreate the producer when "RecordAccumulator is closed" is detected, plus added `reconnect_backoff_ms`/`reconnect_backoff_max_ms` settings for automatic broker reconnection.
+- **Auto-failover consistency 41.4** - Changed all DirectRedis bypass checks from static `ENABLE_DIRECT_REDIS` flag to dynamic `health_monitor.is_direct_redis_active()` across all stream handlers (trades, klines, depth, OKX streams). Only ticker handler used dynamic check previously.
+- **Exchange name attribute 41.5** - Added abstract `name` property to `ExchangeClient` base class and implemented in `BinanceClient` ("binance") and `OKXClient` ("okx"). Replaced `getattr(client, "name", "unknown")` with proper property access, fixing "unknown" exchange labels on metrics.
+- **OKX kline interval mapping 41.6** - Fixed `src/exchanges/okx/mappers.py` to emit empty interval string (set by caller from channel name) instead of hardcoded "1s". Updated caller in `src/producer/main.py` to set interval from channel (e.g., candle1m → 1m).
+- **Flink memory configuration 41.7** - Reduced `taskmanager.memory.process.size` from 2048m to 1536m in `docker/flink/flink-conf.yaml` to prevent OOM on 4vCPU/16GB worker node. Also cleaned up 10x duplicated config entries. Updated `docker-compose.swarm.yml` FLINK_PROPERTIES accordingly.
+- **DirectRedis connection pool 41.8** - Increased `DirectRedisWriter` connection pool from 10 to 50 (configurable via `DIRECT_REDIS_POOL_SIZE` env var) to handle 30+ concurrent WebSocket threads.
+- **Stale data cleanup 41.9** - Removed 671 stale `ticker:latest:unknown:*` Redis keys from previous unstable Flink runs.
+
+### Changed
+
+- **Swarm config 41.10** - Changed `ENABLE_DIRECT_REDIS` from "true" to "false" in `docker-compose.swarm.yml` now that Kafka/Flink are stable. Auto-failover will dynamically enable it when needed.
+
+### Operations
+
+- Rebuilt and pushed `producer:latest` (3x) and `flink:1.18.1` images
+- Ran `influx-backfill:latest --mode populate --days 90` as a one-shot Swarm service (lmview-backfill-populate) to populate 90 days of 1m candles in InfluxDB
+- Manually re-submitted Flink job after JobManager restart (auto-submit-jobs at 0 replicas)
+- Cleaned 671 stale `unknown` exchange Redis keys
+
+### Files
+
+- `src/exchanges/binance/redis_writer.py`
+- `src/common/kafka_client.py`
+- `src/producer/main.py`
+- `src/exchanges/base.py`
+- `src/exchanges/binance/client.py`
+- `src/exchanges/okx/client.py`
+- `src/exchanges/okx/mappers.py`
+- `docker/kafka/entrypoint.sh`
+- `docker/flink/flink-conf.yaml`
+- `docker-compose.swarm.yml`
+- `docs/CHANGELOG.md`
+
+---
+
+## [0.25.39] - 2026-06-17
+
+### Fixed
+
+- **Auth PostgreSQL retry 39.1** - Updated `get_pg_pool()` to retry pool initialization when startup ran before PostgreSQL was reachable, preventing persistent `AUTH_503` login failures after database recovery.
+- **Health PostgreSQL check 39.2** - Added PostgreSQL status to backend health output so auth persistence outages are visible with Redis, InfluxDB, and Trino checks.
+- **AI Interact tour tools 39.3** - Added `start_tour`/section-view action support across backend chart action validation and Interact mode prompts so Ask/Interact can trigger the guided LMView tour and step-by-step UI analysis.
+- **AI migration metadata 39.4** - Corrected multi-agent metadata migration references to the existing `ai_chat_sessions` table.
+- **News persistence upsert 39.5** - Replaced duplicate-first news inserts with `ON CONFLICT (source, url) DO UPDATE` to avoid noisy PostgreSQL duplicate-key errors during recurring RSS fetches.
+
+### Operations
+
+- Rebuilt and pushed FastAPI image tags `0.25.0` and `0.25.1` during production recovery.
+- Diagnosed Swarm bind-mount failures after task reschedule: services with `/mnt/efs/LMView` binds must run on the EFS-mounted manager node or the worker must mount EFS too.
+
+### Files
+
+- `backend/core/postgres.py`
+- `backend/api/health.py`
+- `backend/models/ai/chart_actions.py`
+- `backend/migrations/004_agents_metadata.sql`
+- `backend/tasks/news_fetcher.py`
+- `ai_service/agents/experts/chart_interaction.py`
+- `ai_service/agents/synthesis.py`
+- `ai_service/core/orchestrator.py`
+- `docs/CHANGELOG.md`
+
+## [0.25.40] - 2026-06-18
+
+### Fixed
+
+- **FastAPI crash due to missing get_api_key 40.1** - Fixed ImportError in `ai_service/config.py` where `get_api_key` was referenced but never defined, causing container exit code 255, Nginx DNS resolution failure, and frontend `[DATA_503]` candle load error.
+- **Nginx DNS refresh 40.2** - Restarted `nginx-prod` after `fastapi-prod` redeploy to force Docker embedded DNS cache refresh for `fastapi` service alias.
+
+### Operations
+
+- Updated `ai_service/config.py` to define `get_api_key()` function.
+- Updated `docker-compose.yml` to mount `./ai_service:/app/ai_service` into `fastapi-prod`.
+- Forced redeploy of `fastapi-prod` and `nginx-prod` services.
+
+### Files
+
+- `ai_service/config.py`
+- `docker-compose.yml`
+- `docs/CHANGELOG.md`
+
+## [0.25.38] - 2026-06-16
+
+### Fixed
+
+- **Swarm deploy rendering 38.1** - Updated `scripts/deploy_aws_swarm.sh` to render an expanded Compose file before `docker stack deploy`, strip Compose-only keys (`name`, `profiles`, `depends_on`, `container_name`), normalize numeric port fields, and count Swarm node labels by inspecting node specs directly.
+- **Swarm image tagging 38.2** - Added explicit image tags to the build-backed FastAPI, Flink, Spark, producer, and backfill services so the rendered stack can be deployed by Swarm without anonymous build-only services.
+
+### Tests
+
+- `docker compose --profile prod --profile monitoring --profile logging -f docker-compose.yml -f docker-compose.swarm.yml config` passes after the deploy/render fixes.
+- `bash ./scripts/deploy_aws_swarm.sh --skip-build` now deploys the stack successfully on the manager node.
+
+### Files
+
+- `scripts/deploy_aws_swarm.sh`
+- `docker-compose.swarm.yml`
+- `docker-compose.yml`
+- `docs/CHANGELOG.md`
+
 ## [0.25.37] - 2026-06-16
 
 ### Added
@@ -930,8 +1284,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Documentation
 
 - **Chart/drawing/indicator audit** - Audited the chart, drawing, settings, AI Helper, market, frontend service/type, indicator API/service, and Flink indicator writer surfaces; documented current drawing tool, indicator, chart type, data-source, and responsive-layout risks with a small-batch remediation plan and no code changes.
+## [0.25.1] - 2026-06-16
 
----
+### Fixed
+- **Docker Swarm Image Distribution**: Replaced `--resolve-image never` with a local registry-based distribution system to fix "No such image" errors when Swarm scheduled custom-built containers (like Flink, Spark, Kafka) onto the worker node.
+- **Node Configuration Script**: Created `scripts/setup_swarm_node.sh` to configure Docker daemons on all nodes to trust the insecure local registry.
+- **Kafka Deployment Stability**: Baked `entrypoint.sh` and JMX configuration into a custom Kafka image to prevent `Permission denied` errors from Swarm bind-mounting overlay directories. Fixed Kafka OOM kill (exit code 137) by explicitly reducing `KAFKA_OPTS` heap to `512m` and raising container memory limits to `1024M`.
+- **SSL Certificate Generation Loop**: Made Nginx HSTS (`Strict-Transport-Security`) conditional on the presence of a valid Let's Encrypt certificate. This prevents browsers from permanently caching an HTTPS redirect for the self-signed fallback, which previously caused ACME challenges to timeout or get rejected by HSTS cache.
 
 ---
 
@@ -2922,29 +3281,3 @@ Top 20 by 24h volume (sau khi fix):
 - **DOCUMENTATION.md** — Technical documentation (Vietnamese)
 
 - **.gitignore** — Updated exclusion list
-
-<! — TEMPLATE FOR NEW ENTRIES:
-
-## [X.Y.Z] — YYYY-MM-DD — Title
-
-### Added
-
-- **Feature name** — Description of what was added
-
-### Changed
-
-- **Component** — Description of what changed and why
-
-### Fixed
-
-- **Bug description** — What was wrong and how it was fixed
-
-### Removed
-
-- **Component** — What was removed and why
-
-### Known Issues
-
-- Description of any remaining issues
-
-— >

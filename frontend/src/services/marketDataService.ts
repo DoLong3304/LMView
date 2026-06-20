@@ -133,8 +133,9 @@ export async function fetchCandles(
   return mockDataAdapter.fetchCandles(symbol, interval, limit);
 }
 
-const MAX_RECONNECT_RETRIES = 5;
-const BASE_RECONNECT_DELAY_MS = 1000;
+const MAX_RECONNECT_DELAY_MS = 30_000;
+const BASE_RECONNECT_DELAY_MS = 1_000;
+// can be idle for hours and we want live prices the moment user comes back.
 
 function createReconnectingWebSocket(
   url: string,
@@ -148,32 +149,51 @@ function createReconnectingWebSocket(
   let ws: WebSocket | null = null;
   let retries = 0;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let watchdogTimer: ReturnType<typeof setInterval> | null = null;
   let manualClose = false;
+  let lastMessageTs = 0;
 
   function connect() {
     ws = new WebSocket(url);
 
     ws.onopen = () => {
       retries = 0;
+      lastMessageTs = Date.now();
       handlers.onOpen?.();
+
+      // Watchdog: if no message for 45s while open, force-close so we
+      // reconnect. Some proxies / browser idle paths kill the socket
+      // silently — we'd see readyState=OPEN but never receive data.
+      if (watchdogTimer) clearInterval(watchdogTimer);
+      watchdogTimer = setInterval(() => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        if (Date.now() - lastMessageTs > 45_000) {
+          console.warn('[WS] No data for 45s, forcing reconnect');
+          try { ws.close(); } catch (_) { /* ignore */ }
+        }
+      }, 15_000);
     };
 
-    ws.onmessage = handlers.onMessage;
+    ws.onmessage = (e) => {
+      lastMessageTs = Date.now();
+      handlers.onMessage(e);
+    };
 
     ws.onerror = (event) => {
       handlers.onError?.(event);
     };
 
     ws.onclose = () => {
+      if (watchdogTimer) { clearInterval(watchdogTimer); watchdogTimer = null; }
       handlers.onClose?.();
-      if (!manualClose && retries < MAX_RECONNECT_RETRIES) {
-        const delay = BASE_RECONNECT_DELAY_MS * Math.pow(2, retries);
+      if (!manualClose) {
+        // Exponential backoff capped at 30s + jitter, never stop retrying.
+        const expDelay = BASE_RECONNECT_DELAY_MS * Math.pow(2, retries);
+        const delay = Math.min(expDelay, MAX_RECONNECT_DELAY_MS)
+          + Math.floor(Math.random() * 1000);
         retries++;
-        console.log(`[WS] Reconnecting in ${delay}ms (attempt ${retries}/${MAX_RECONNECT_RETRIES})`);
+        console.log(`[WS] Reconnecting in ${delay}ms (attempt ${retries})`);
         reconnectTimer = setTimeout(connect, delay);
-      } else if (!manualClose) {
-        console.error("[WS] Max reconnect retries reached");
-        handlers.onError?.(new Event("max-retries"));
       }
     };
   }
@@ -185,6 +205,7 @@ function createReconnectingWebSocket(
     cleanup: () => {
       manualClose = true;
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      if (watchdogTimer) clearInterval(watchdogTimer);
       ws?.close();
     },
   };
@@ -192,10 +213,31 @@ function createReconnectingWebSocket(
 
 export type TimeframeCallback = (timeframe: string, candle: Candle) => void;
 
+export interface StreamTickerPayload {
+  price: number;
+  eventTime: number;
+  change24h: number;
+  change_pct?: number;
+  change_abs?: number;
+  volume: number;
+  quote_volume?: number;
+  bid?: number;
+  ask?: number;
+  bid_qty?: number;
+  ask_qty?: number;
+  weighted_avg?: number;
+  open_24h?: number;
+  high_24h?: number;
+  low_24h?: number;
+  last_qty?: number;
+  activity_score?: number;
+}
+
 interface MultiTimeframeOptions {
   symbol: string;
   exchange?: string;
   onCandle: TimeframeCallback;
+  onTicker?: (ticker: StreamTickerPayload) => void;
   onError?: (error: Event) => void;
 }
 
@@ -205,6 +247,28 @@ interface IndicatorStreamOptions {
   exchange?: string;
   onIndicator: (snapshot: IndicatorStreamSnapshot) => void;
   onError?: (error: Event) => void;
+}
+
+/**
+ * Parse a WebSocket message's `data` field which may be:
+ * - string (text frame)
+ * - Blob (binary frame from `send_bytes()`)
+ * - ArrayBuffer
+ *
+ * The backend uses `send_bytes()` so browsers receive Blob by default.
+ * `JSON.parse(blob)` throws — must convert Blob → string first.
+ */
+async function parseWsData<T = unknown>(data: MessageEvent["data"]): Promise<T> {
+  if (typeof data === "string") return JSON.parse(data) as T;
+  if (data instanceof Blob) {
+    const text = await data.text();
+    return JSON.parse(text) as T;
+  }
+  if (data instanceof ArrayBuffer) {
+    const text = new TextDecoder().decode(new Uint8Array(data));
+    return JSON.parse(text) as T;
+  }
+  return JSON.parse(String(data)) as T;
 }
 
 export function subscribeCandle(
@@ -219,9 +283,13 @@ export function subscribeCandle(
     const wsUrl = `${getWsBaseUrl()}/stream/${interval}?${buildQuery({ symbol, exchange })}`;
 
     const { cleanup } = createReconnectingWebSocket(wsUrl, {
-      onMessage: (e: MessageEvent) => {
-        const k: RawKline = JSON.parse(e.data as string);
-        onCandle(mapRawToCandle(k));
+      onMessage: async (e: MessageEvent) => {
+        try {
+          const k = await parseWsData<RawKline>(e.data);
+          onCandle(mapRawToCandle(k));
+        } catch (err) {
+          console.error("[WS candle parse error]", err);
+        }
       },
       onError: (err) => console.error("[WS candle error]", err),
     });
@@ -233,20 +301,54 @@ export function subscribeCandle(
 }
 
 export function subscribeAllTimeframes(options: MultiTimeframeOptions): () => void {
-  const { symbol, exchange = "binance", onCandle, onError } = options;
+  const { symbol, exchange = "binance", onCandle, onTicker, onError } = options;
 
   if (DATA_SOURCE === "api") {
     const wsUrl = `${getWsBaseUrl()}/stream/all?${buildQuery({ symbol, exchange })}`;
 
     const { cleanup } = createReconnectingWebSocket(wsUrl, {
-      onMessage: (e: MessageEvent) => {
-        const data: Record<string, RawKline> = JSON.parse(e.data as string);
+      onMessage: async (e: MessageEvent) => {
+        let data: Record<string, RawKline | StreamTickerPayload | string | undefined>;
+        try {
+          data = await parseWsData<Record<string, any>>(e.data);
+        } catch (err) {
+          console.error("[WS stream/all parse error]", err);
+          return;
+        }
+        const ticker = data._ticker as StreamTickerPayload | undefined;
+        if (ticker?.price != null) {
+          const price = Number(ticker.price);
+          const change24h = Number(ticker.change24h) || 0;
+          const volume = Number(ticker.volume) || 0;
+          const activity_score = Number(ticker.activity_score) || 0;
+          const eventTime = (ticker as any).event_time != null
+            ? Number((ticker as any).event_time)
+            : (ticker as any).eventTime ?? Date.now();
+          updateLivePrice(symbol, price, change24h, volume, activity_score);
+          onTicker?.({
+            price,
+            eventTime,
+            change24h,
+            volume,
+            change_pct: Number(ticker.change_pct) || 0,
+            change_abs: Number(ticker.change_abs) || 0,
+            quote_volume: Number(ticker.quote_volume) || 0,
+            bid: Number(ticker.bid) || 0,
+            ask: Number(ticker.ask) || 0,
+            bid_qty: Number(ticker.bid_qty) || 0,
+            ask_qty: Number(ticker.ask_qty) || 0,
+            weighted_avg: Number(ticker.weighted_avg) || 0,
+            open_24h: Number(ticker.open_24h) || 0,
+            high_24h: Number(ticker.high_24h) || 0,
+            low_24h: Number(ticker.low_24h) || 0,
+            last_qty: Number(ticker.last_qty) || 0,
+            activity_score,
+          });
+        }
         for (const [tf, kline] of Object.entries(data)) {
-          if (kline) {
-            onCandle(normalizeTimeframe(tf), mapRawToCandle(kline));
-            // Also update shared live price map so App.tsx/toolbar read from here
-            // instead of polling /ticker every 5s. This is the single source of truth.
-            updateLivePrice(symbol, Number(kline.close), 0, Number(kline.volume) || 0, 0);
+          if (tf.startsWith("_")) continue;
+          if (kline && typeof kline === "object") {
+            onCandle(normalizeTimeframe(tf), mapRawToCandle(kline as RawKline));
           }
         }
       },
@@ -267,9 +369,13 @@ export function subscribeIndicatorStream(options: IndicatorStreamOptions): () =>
     const wsUrl = `${getWsBaseUrl()}/stream/indicators/${interval}?${buildQuery({ symbol, exchange })}`;
 
     const { cleanup } = createReconnectingWebSocket(wsUrl, {
-      onMessage: (e: MessageEvent) => {
-        const payload: IndicatorStreamSnapshot = JSON.parse(e.data as string);
-        onIndicator(payload);
+      onMessage: async (e: MessageEvent) => {
+        try {
+          const payload = await parseWsData<IndicatorStreamSnapshot>(e.data);
+          onIndicator(payload);
+        } catch (err) {
+          console.error("[WS indicators parse error]", err);
+        }
       },
       onError: onError || ((err) => console.error("[WS indicators error]", err)),
     });

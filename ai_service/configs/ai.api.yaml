@@ -5,17 +5,68 @@
 
 mode: api
 providers:
-  - name: dashscope-qwen
+  # ── Primary: Qwen3.7-Plus (newest June 2026, best quality/price) ────────
+  - name: dashscope-qwen3.7-plus
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.7-plus
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 10
+
+  # ── Fallback 1: Qwen3.7-Max (highest quality, more expensive) ───────────
+  - name: dashscope-qwen3.7-max
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.7-max
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 20
+
+  # ── Fallback 2: Qwen3.6-Max-Preview (next-gen preview) ──────────────────
+  - name: dashscope-qwen3.6-max-preview
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.6-max-preview
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 30
+
+  # ── Fallback 3: Qwen3.6-Plus (well-tested previous gen) ─────────────────
+  - name: dashscope-qwen3.6-plus
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.6-plus
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 40
+
+  # ── Fallback 4: Qwen3.5-Plus (old but reliable) ─────────────────────────
+  - name: dashscope-qwen3.5-plus
     type: litellm
     public_provider: api
     model: openai/qwen3.5-plus
     base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
     env_key: DASHSCOPE_API_KEY
-    priority: 10
-    notes:
-      endpoint: OpenAI-compatible Chat Completions
-      usage_fields: prompt_tokens/completion_tokens/total_tokens
-      native_dashscope_usage_fields: input_tokens/output_tokens/total_tokens
+    priority: 50
+
+  # ── Fallback 5: Qwen3.6-Flash (fast, cheap, simple queries) ─────────────
+  - name: dashscope-qwen3.6-flash
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.6-flash
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 60
+
+  # ── Fallback 6: Qwen3.5-Flash (budget last resort) ──────────────────────
+  - name: dashscope-qwen3.5-flash
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.5-flash
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 70
 
   - name: none
     type: none

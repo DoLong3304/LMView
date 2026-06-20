@@ -127,12 +127,12 @@ class KeyDBKlineWriter(FlatMapFunction):
             symbol = value.get("symbol")
             if not symbol:
                 record_kafka_source_drop(topic=SOURCE_TOPIC, reason="missing_symbol")
-                return []
+                return iter([])
             exchange = value.get("exchange", "binance")
             interval = value.get("interval", "1m")
             if interval not in ("1s", "1m"):
                 record_kafka_source_drop(topic=SOURCE_TOPIC, reason="unsupported_interval")
-                return []
+                return iter([])
             kline_start = int(value["kline_start"])
 
             candle_json = json.dumps({
@@ -200,4 +200,4 @@ class KeyDBKlineWriter(FlatMapFunction):
             s = value.get("symbol") if isinstance(value, dict) else "unknown"
             log.error("[KeyDB/candles] flat_map error | symbol=%s error=%s", s, e)
             record_kafka_source_drop(topic=SOURCE_TOPIC, reason=type(e).__name__)
-        return []
+        return iter([])

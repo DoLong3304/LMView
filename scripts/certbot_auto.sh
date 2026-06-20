@@ -7,6 +7,7 @@ WEBROOT="/var/www/certbot"
 SLEEP_SECS="${CERTBOT_RENEW_INTERVAL_SECONDS:-43200}"
 LE_DIR="/etc/letsencrypt"
 RENEW_WINDOW_SECONDS="${CERTBOT_RENEW_WINDOW_SECONDS:-2592000}"
+CERT_MARKER="$LE_DIR/live/$DOMAIN/.lmview_cert_ok"
 
 if [ -z "$DOMAIN" ] || [ -z "$EMAIL" ] || [ "$DOMAIN" = "example.com" ] || [ "$EMAIL" = "you@example.com" ]; then
   echo "[certbot-auto] CERTBOT_DOMAIN or CERTBOT_EMAIL is not configured; sleeping."
@@ -41,10 +42,20 @@ cleanup_broken_state() {
   fi
 }
 
+# Create the marker file that nginx checks before enabling HSTS.
+# This ensures HSTS is only sent with a real Let's Encrypt cert.
+mark_cert_valid() {
+  marker_dir="$LE_DIR/live/$DOMAIN"
+  if [ -d "$marker_dir" ]; then
+    touch "$CERT_MARKER"
+    echo "[certbot-auto] Marked certificate as valid (HSTS will be enabled)."
+  fi
+}
+
 issue_or_renew() {
   cleanup_broken_state
   echo "[certbot-auto] Requesting/refreshing cert for $DOMAIN"
-  certbot certonly \
+  if certbot certonly \
     --webroot \
     --webroot-path "$WEBROOT" \
     --non-interactive \
@@ -53,7 +64,12 @@ issue_or_renew() {
     --email "$EMAIL" \
     --keep-until-expiring \
     --cert-name "$DOMAIN" \
-    -d "$DOMAIN"
+    -d "$DOMAIN"; then
+    mark_cert_valid
+    return 0
+  else
+    return 1
+  fi
 }
 
 cert_is_fresh() {
@@ -63,6 +79,7 @@ cert_is_fresh() {
 
 if cert_is_fresh; then
   echo "[certbot-auto] Certificate is still valid beyond renewal window; skipping initial request."
+  mark_cert_valid
 elif issue_or_renew; then
   echo "[certbot-auto] Initial certificate check completed."
 else
@@ -78,3 +95,4 @@ while true; do
     issue_or_renew || true
   fi
 done
+

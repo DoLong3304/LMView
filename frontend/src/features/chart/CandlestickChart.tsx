@@ -338,6 +338,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const symbolRef = useRef(defaultSymbol);
   const timeframeRef = useRef(timeframeProp || "1m");
   const chartTypeRef = useRef<ChartType>(chartType);
+  const lastClosedCandleRef = useRef<Candle | null>(null);
 
   const [symbol, setSymbol] = useState(symbolProp || defaultSymbol);
   const [timeframe, setTimeframe] = useState(timeframeProp || "1m");
@@ -1436,6 +1437,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     [getLiveIndicatorWindow, indSettings],
   );
 
+  const formingCandleRef = useRef<Candle | null>(null);
+
   const applyStreamedIndicatorSnapshot = useCallback(
     (snapshot: IndicatorStreamSnapshot) => {
       if (!snapshot?.timestamp) return;
@@ -1669,6 +1672,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         earliestTimestampRef.current = chartCandles[0].time;
         noMoreDataRef.current = false;
         scrollCooldownRef.current = 0;
+        lastClosedCandleRef.current = chartCandles[chartCandles.length - 1];
       }
       setNoData(chartCandles.length === 0);
       setAllPriceSeriesData(chartCandles);
@@ -1803,7 +1807,6 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
     // Use unified settings for all timeframes (no is1s branching)
     const limit = CHART_CONFIG.VISIBLE_BARS;
-    const maxBars = CHART_CONFIG.MAX_BARS_MEMORY;
 
     // Full load — fetches candles, rebuilds all series + indicators
     const loadData = async () => {
@@ -1842,114 +1845,108 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     setIsLoading(true);
     setFetchError(null);
     setNoData(false);
+    formingCandleRef.current = null;
     loadData();
 
-    // Subscribe to ALL timeframes simultaneously via a single WebSocket.
-    // This ensures all timeframes update at the same time when price changes.
-    //
-    // Logic by timeframe:
-    // - 1s  : Each tick = 1 candle (Open=High=Low=Close, no wicks)
-    // - 1m+ : Backend aggregates ticks → update in-progress candle, close & start new on period change
     const unsub = subscribeAllTimeframes({
       symbol,
+      onTicker: (ticker) => {
+        if (cancelled) return;
+        const price = ticker.price;
+        const eventTimeMs = ticker.eventTime;
+        if (!Number.isFinite(price) || price <= 0 || !candleRef.current) return;
+        const timeframeSec = getTimeframeSeconds(timeframeRef.current);
+        if (!timeframeSec) return;
+
+        const bucketTime = Math.floor(eventTimeMs / 1000 / timeframeSec) * timeframeSec;
+        const lastClosed = lastClosedCandleRef.current;
+        const forming = formingCandleRef.current;
+
+        let nextCandle: Candle;
+
+        if (forming && forming.time === bucketTime) {
+          nextCandle = {
+            time: bucketTime,
+            open: forming.open,
+            high: Math.max(forming.high, price),
+            low: Math.min(forming.low, price),
+            close: price,
+            volume: forming.volume || 0,
+          };
+          formingCandleRef.current = nextCandle;
+        } else if (forming && forming.time < bucketTime) {
+          lastClosedCandleRef.current = forming;
+          const open = forming.close;
+          nextCandle = {
+            time: bucketTime,
+            open,
+            high: Math.max(open, price),
+            low: Math.min(open, price),
+            close: price,
+            volume: 0,
+          };
+          formingCandleRef.current = nextCandle;
+        } else if (!forming && lastClosed) {
+          const open = lastClosed.close;
+          nextCandle = {
+            time: bucketTime,
+            open,
+            high: Math.max(open, price),
+            low: Math.min(open, price),
+            close: price,
+            volume: 0,
+          };
+          formingCandleRef.current = nextCandle;
+        } else {
+          return;
+        }
+
+        updateAllPriceSeries(nextCandle);
+        if (volumeRef.current) {
+          volumeRef.current.update({
+            time: nextCandle.time,
+            value: nextCandle.volume || 0,
+            color: nextCandle.close >= nextCandle.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
+          });
+        }
+        const closed = candlesRef.current.filter((c) => c.time < bucketTime);
+        const updatedCandles = [...closed, nextCandle];
+        candlesRef.current = updatedCandles;
+        syncLatestIndicatorData(updatedCandles);
+        commitCandlesState(updatedCandles);
+        setTooltip((tip) =>
+          tip ? { ...tip, ...nextCandle, timeLabel: tip.timeLabel || "" } : null,
+        );
+      },
       onCandle: (tf, candle) => {
-        // Only process the current timeframe
         if (tf !== timeframe.toLowerCase()) return;
         if (cancelled || !candleRef.current) return;
-        const normalizedCandle = sanitizeCandlesForChart([candle])[0];
-        if (!normalizedCandle) return;
-        candle = normalizedCandle;
-        const prev = candlesRef.current;
-        if (prev.length === 0) return;
+        const official = sanitizeCandlesForChart([candle])[0];
+        if (!official) return;
+        const forming = formingCandleRef.current;
+        if (!forming) return;
+        if (official.time !== forming.time) return;
 
-        const lastTime = prev[prev.length - 1].time;
-        const is1s = tf === "1s";
-
-        if (is1s) {
-          // ── 1-second mode: each tick = new candle (Open=High=Low=Close) ──
-          // Accept candles with time >= lastTime (same second updates, new second adds)
-          if (candle.time < lastTime) return; // Only skip older candles
-
-          if (candle.time === lastTime) {
-            // Same second → update existing candle
-            updateAllPriceSeries(candle);
-            if (volumeRef.current) {
-              volumeRef.current.update({
-                time: candle.time,
-                value: candle.volume,
-                color: candle.close >= candle.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
-              });
-            }
-            // Update in-place
-            const next = [...prev.slice(0, -1), candle];
-            candlesRef.current = next;
-            syncLatestIndicatorData(next);
-            commitCandlesState(next);
-          } else {
-            // New second → add new candle
-            updateAllPriceSeries(candle);
-            if (volumeRef.current) {
-              volumeRef.current.update({
-                time: candle.time,
-                value: candle.volume,
-                color: candle.close >= candle.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
-              });
-            }
-            const next = [...prev.slice(-(maxBars - 1)), candle];
-            candlesRef.current = next;
-            syncLatestIndicatorData(next);
-            commitCandlesState(next);
-          }
-          setTooltip((tip) =>
-            tip ? { ...tip, ...candle, timeLabel: tip.timeLabel } : null,
-          );
-        } else {
-          // ── 1m+ mode: update in-progress candle, new candle on period change ──
-          // Backend sends candles with correct openTime (already aggregated)
-          if (candle.time === lastTime) {
-            // Same period → update latest candle
-            updateAllPriceSeries(candle);
-            if (volumeRef.current) {
-              volumeRef.current.update({
-                time: candle.time,
-                value: candle.volume,
-                color:
-                  candle.close >= candle.open
-                    ? themeRef.current.volumeUp
-                    : themeRef.current.volumeDown,
-              });
-            }
-            const next = [...prev];
-            next[next.length - 1] = candle;
-            candlesRef.current = next;
-            syncLatestIndicatorData(next);
-            commitCandlesState(next);
-            setTooltip((tip) =>
-              tip ? { ...tip, ...candle, timeLabel: tip.timeLabel } : null,
-            );
-          } else if (candle.time > lastTime) {
-            // New period → append new candle
-            updateAllPriceSeries(candle);
-            if (volumeRef.current) {
-              volumeRef.current.update({
-                time: candle.time,
-                value: candle.volume,
-                color:
-                  candle.close >= candle.open
-                    ? themeRef.current.volumeUp
-                    : themeRef.current.volumeDown,
-              });
-            }
-            const next = [...prev.slice(-(maxBars - 1)), candle];
-            candlesRef.current = next;
-            syncLatestIndicatorData(next);
-            commitCandlesState(next);
-            setTooltip((tip) =>
-              tip ? { ...tip, ...candle, timeLabel: tip.timeLabel } : null,
-            );
-          }
-          // candle.time < lastTime → stale data, skip
+        const merged = {
+          ...forming,
+          high: Math.max(official.high, forming.high),
+          low: Math.min(official.low, forming.low),
+          volume: official.volume || forming.volume || 0,
+        };
+        formingCandleRef.current = merged;
+        updateAllPriceSeries(merged);
+        if (volumeRef.current) {
+          volumeRef.current.update({
+            time: merged.time,
+            value: merged.volume || 0,
+            color: merged.close >= merged.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
+          });
         }
+        const closed = candlesRef.current.filter((c) => c.time < merged.time);
+        const updatedCandles = [...closed, merged];
+        candlesRef.current = updatedCandles;
+        syncLatestIndicatorData(updatedCandles);
+        commitCandlesState(updatedCandles);
       },
     });
 

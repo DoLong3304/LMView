@@ -153,6 +153,21 @@ CHART_TOOLS: Dict[str, Dict[str, Any]] = {
         },
         "required": ["chart_type"],
     },
+    "start_tour": {
+        "description": "Start an interactive guided tour of the LMView workspace.",
+        "parameters": {
+            "tour_id": {
+            "type": "string",
+            "description": "Tour identifier. Use 'lmview-overview' for the full workspace tour.",
+            "default": "lmview-overview"
+            },
+            "steps": {
+            "type": "array",
+            "description": "Optional custom steps. If omitted, uses the default tour path.",
+            },
+        },
+        "required": [],
+    },
     "highlight_section": {
         "description": "Highlight a UI section for user guidance",
         "parameters": {
@@ -287,6 +302,20 @@ def _propose_actions(
                 "requires_approval": True,
             })
             break
+
+    # Tour / guided demo
+    tour_patterns = [
+        r"\b(tour|guide|demo|walkthrough|show me around|learn how|how to use)\b",
+    ]
+    for pattern in tour_patterns:
+        if re.search(pattern, query_lower):
+            actions.append({
+                "action_type": "start_tour",
+                "tool": "start_tour",
+                "params": {"tour_id": "lmview-overview"},
+                "reason": "User requested an interactive guided tour.",
+                "requires_approval": False,
+            })
 
     return actions
 

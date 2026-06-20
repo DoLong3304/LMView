@@ -35,6 +35,7 @@ volumes:
   prometheus-data:
   grafana-data:
   loki-data:
+  flink_deps:
 
 services:
   # ══════════════════════════════════════════════════════════════════════════════
@@ -57,7 +58,9 @@ services:
     volumes:
       - zookeeper-data:/var/lib/zookeeper/data
     networks:
-      - crypto-net
+      crypto-net:
+        aliases:
+          - zookeeper
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 2181 && echo ok"]
       interval: 10s
@@ -94,15 +97,15 @@ services:
       - ./config/jmx:/jmx
       - ./docker/kafka/entrypoint.sh:/entrypoint.sh:ro
     networks:
-      - crypto-net
+      crypto-net:
+        aliases:
+          - kafka-1
     deploy:
       resources:
         limits:
           memory: 512M
     healthcheck:
-      test:
-        - CMD-SHELL
-        - /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1
+      test: ["CMD-SHELL", "nc -z localhost 9092 && echo ok || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -138,17 +141,15 @@ services:
       - ./config/jmx:/jmx
       - ./docker/kafka/entrypoint.sh:/entrypoint.sh:ro
     networks:
-      - crypto-net
+      crypto-net:
+        aliases:
+          - kafka-2
     deploy:
       resources:
         limits:
           memory: 512M
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1",
-        ]
+      test: ["CMD-SHELL", "nc -z localhost 9092 && echo ok || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -184,17 +185,15 @@ services:
       - ./config/jmx:/jmx
       - ./docker/kafka/entrypoint.sh:/entrypoint.sh:ro
     networks:
-      - crypto-net
+      crypto-net:
+        aliases:
+          - kafka-3
     deploy:
       resources:
         limits:
           memory: 512M
     healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 || exit 1",
-        ]
+      test: ["CMD-SHELL", "nc -z localhost 9092 && echo ok || exit 1"]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -312,7 +311,7 @@ services:
 
   postgres:
     profiles: ["dev", "prod"]
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: postgres
     hostname: postgres
     restart: unless-stopped
@@ -438,7 +437,7 @@ services:
     restart: unless-stopped
     ports:
       - "26379:26379"
-    entrypoint: ["/sentinel-entrypoint.sh"]
+    entrypoint: ["sh", "/sentinel-entrypoint.sh"]
     volumes:
       - ./docker/redis/sentinel.conf:/etc/redis/sentinel.conf
       - ./docker/redis/sentinel-entrypoint.sh:/sentinel-entrypoint.sh
@@ -462,7 +461,7 @@ services:
     restart: unless-stopped
     ports:
       - "26380:26379"
-    entrypoint: ["/sentinel-entrypoint.sh"]
+    entrypoint: ["sh", "/sentinel-entrypoint.sh"]
     volumes:
       - ./docker/redis/sentinel.conf:/etc/redis/sentinel.conf
       - ./docker/redis/sentinel-entrypoint.sh:/sentinel-entrypoint.sh
@@ -486,7 +485,7 @@ services:
     restart: unless-stopped
     ports:
       - "26381:26379"
-    entrypoint: ["/sentinel-entrypoint.sh"]
+    entrypoint: ["sh", "/sentinel-entrypoint.sh"]
     volumes:
       - ./docker/redis/sentinel.conf:/etc/redis/sentinel.conf
       - ./docker/redis/sentinel-entrypoint.sh:/sentinel-entrypoint.sh
@@ -544,9 +543,15 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8081 && echo ok || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
     volumes:
       - ./:/app
-      - ./docker/flink/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml:ro
+      - ./docker/flink/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
       - flink-checkpoints:/tmp/flink-checkpoints
     networks:
       - crypto-net
@@ -567,7 +572,6 @@ services:
     build:
       context: ./docker/flink
     image: cryptoprice/flink:1.18.1
-    container_name: flink-taskmanager
     hostname: flink-taskmanager
     restart: unless-stopped
     command: taskmanager
@@ -577,6 +581,12 @@ services:
           memory: 4G
         reservations:
           memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/6123 && echo ok || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
     environment:
       JOB_MANAGER_RPC_ADDRESS: flink-jobmanager
       FLINK_TASKMANAGER_SLOTS: 12
@@ -601,7 +611,7 @@ services:
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
     volumes:
       - ./:/app
-      - ./docker/flink/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml:ro
+      - ./docker/flink/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
       - flink-checkpoints:/tmp/flink-checkpoints
     networks:
       - crypto-net
@@ -613,6 +623,7 @@ services:
     build:
       context: .
       dockerfile: docker/spark/Dockerfile
+    image: cryptoprice/spark:3.5.5
     container_name: spark-master
     hostname: spark-master
     restart: unless-stopped
@@ -702,6 +713,7 @@ services:
     build:
       context: .
       dockerfile: docker/spark/Dockerfile
+    image: cryptoprice/spark:3.5.5
     container_name: spark-worker
     hostname: spark-worker
     restart: unless-stopped
@@ -721,6 +733,12 @@ services:
       INFLUX_TOKEN: ${INFLUX_TOKEN}
       INFLUX_ORG: ${INFLUX_ORG}
       INFLUX_BUCKET: ${INFLUX_BUCKET}
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/${SPARK_WORKER_WEBUI_PORT:-8084} && echo ok || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
     volumes:
       - ./:/app
       - spark-events:/opt/spark-events
@@ -739,9 +757,16 @@ services:
     build:
       context: .
       dockerfile: docker/spark/Dockerfile
+    image: cryptoprice/spark:3.5.5
     container_name: spark-worker-2
     hostname: spark-worker-2
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8085 && echo ok || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
     environment:
       SPARK_MODE: worker
       SPARK_MASTER_URL: spark://spark-master:7077
@@ -798,56 +823,32 @@ services:
 
   auto-submit-jobs:
     profiles: ["dev", "prod"]
-    image: docker:27.0-cli
+    build:
+      context: ./docker/flink
+    image: cryptoprice/flink:1.18.1
     container_name: auto-submit-jobs
     restart: "no"
-    entrypoint:
-      - sh
-      - -c
-      - |
-        set -e
-        apk add --no-cache bash curl >/dev/null 2>&1
-        echo "=== Waiting for Flink ==="
-        until curl -sf http://flink-jobmanager:8081 > /dev/null; do printf '.'; sleep 5; done
-        echo " Flink ready!"
-        sleep 10
-        echo "=== Recreating deps.zip ==="
-        docker exec flink-jobmanager python3 - <<'PYEOF'
-        import zipfile, os
-        with zipfile.ZipFile('/tmp/deps.zip', 'w') as zf:
-            for root, dirs, files in os.walk('/app/src/common'):
-                for file in files:
-                    if file.endswith('.py'):
-                        filepath = os.path.join(root, file)
-                        zf.write(filepath, filepath)
-            for root, dirs, files in os.walk('/app/src/processing/writers'):
-                for file in files:
-                    if file.endswith('.py'):
-                        filepath = os.path.join(root, file)
-                        zf.write(filepath, 'writers/' + file)
-        print('deps.zip created')
-        PYEOF
-        echo "=== Submitting Flink job ==="
-        docker exec flink-jobmanager bash -c "cd /app/src/processing && flink run -d -py pipeline.py --pyFiles /tmp/deps.zip"
-        echo "Flink submitted."
-        echo "=== Waiting for Spark ==="
-        until curl -sf http://spark-master:8080 > /dev/null; do printf '.'; sleep 5; done
-        echo " Spark ready!"
-        echo "=== Submitting Spark job ==="
-        docker exec -d spark-master /opt/spark/bin/spark-submit \
-          --master spark://spark-master:7077 \
-          --total-executor-cores 2 \
-          --packages "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.5.2,org.apache.iceberg:iceberg-aws-bundle:1.5.2,org.apache.hadoop:hadoop-aws:3.3.4,org.postgresql:postgresql:42.7.2,org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.5,org.apache.spark:spark-avro_2.12:3.5.5" \
-          --conf spark.driver.memory=1g \
-          --conf spark.executor.memory=1g \
-          /app/src/lakehouse/pipeline.py
-        echo "Both jobs submitted!"
+    command: ["/bin/bash", "/app/scripts/auto_submit_jobs.sh"]
     environment:
       FLINK_HEALTH_URL: http://flink-jobmanager:8081
       SPARK_HEALTH_URL: http://spark-master:8080
+      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+      KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      INFLUX_URL: http://influxdb:8086
+      INFLUX_TOKEN: ${INFLUX_TOKEN}
+      INFLUX_ORG: ${INFLUX_ORG}
+      INFLUX_BUCKET: ${INFLUX_BUCKET}
+      REDIS_SENTINELS: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      REDIS_MASTER_NAME: mymaster
+      REDIS_HOST: redis-master
+      REDIS_PORT: 6379
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      FLINK_CHECKPOINT_DIR: s3a://flink-checkpoints/flink-checkpoints
+      FLINK_PARALLELISM: 12
     volumes:
       - ./:/app:ro
-      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - crypto-net
     depends_on:
@@ -978,6 +979,7 @@ services:
     build:
       context: .
       dockerfile: docker/fastapi/Dockerfile
+    image: cryptoprice/fastapi:0.25.0
     restart: unless-stopped
     environment:
       REDIS_SENTINELS: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
@@ -1068,6 +1070,10 @@ services:
       crypto-net:
         aliases:
           - fastapi
+    volumes:
+      - ./ai_service:/app/ai_service
+      - ./backend:/app/backend
+      - ./src:/app/src
     environment:
       CORS_ORIGINS: "https://${CERTBOT_DOMAIN:-localhost}"
       RUN_MIGRATIONS: ${RUN_MIGRATIONS:-false}
@@ -1103,7 +1109,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "wget -q --spider http://127.0.0.1/ || exit 1",
+          "wget --no-verbose --tries=1 --spider http://localhost/.well-known/acme-challenge/ || exit 0",
         ]
       interval: 15s
       timeout: 5s
@@ -1196,6 +1202,7 @@ services:
     build:
       context: .
       dockerfile: docker/backfill/Dockerfile
+    image: cryptoprice/influx-backfill:0.25.0
     container_name: influx-backfill
     restart: "no"
     environment:
@@ -1218,12 +1225,14 @@ services:
     build:
       context: .
       dockerfile: docker/producer/Dockerfile
+    image: cryptoprice/producer:0.25.0
     container_name: producer
     hostname: producer
     restart: unless-stopped
     environment:
       KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
       KLINE_INTERVAL: "1s"
+      KLINE_SYMBOLS_PER_CONN: "20"
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
       ENABLE_OKX: "false"
       ENABLE_DIRECT_REDIS: "false"
@@ -1234,6 +1243,57 @@ services:
     depends_on:
       kafka-1:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f producer/main.py || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # BINANCE WS TICKER FEED (Phase 4 — replaces dead producer's @ticker path)
+  # ══════════════════════════════════════════════════════════════════════════════
+
+  binance-ticker-ws:
+    profiles: ["dev", "prod"]
+    build:
+      context: .
+      dockerfile: docker/ticker-ws/Dockerfile
+    image: cryptoprice/binance-ticker-ws:0.1.0
+    container_name: binance-ticker-ws
+    hostname: binance-ticker-ws
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis-master
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      TICKER_WS_SHARDS: "8"
+      TICKER_WS_SYMBOLS_PER_SHARD: "100"
+      TICKER_WS_TOP_N: "671"
+      TICKER_WS_RECONNECT_BASE_MS: "1000"
+      TICKER_WS_RECONNECT_MAX_MS: "30000"
+      TICKER_WS_PING_INTERVAL_S: "30"
+      TICKER_WS_TTL_S: "300"
+      TICKER_WS_REDIS_FLUSH_MS: "50"
+      TICKER_WS_REDIS_BUFFER_MAX: "2000"
+      METRICS_HOST: "0.0.0.0"
+      METRICS_PORT: "9100"
+      LOG_LEVEL: "INFO"
+    networks:
+      - crypto-net
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; r=urllib.request.urlopen('http://localhost:9100/healthz', timeout=2); sys.exit(0 if r.status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # ══════════════════════════════════════════════════════════════════════════════
   # MONITORING STACK (opt-in via --profile monitoring)

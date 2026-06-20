@@ -235,7 +235,7 @@ def bucket_depth_snapshot(
                 addend = float(qty)
             except (TypeError, ValueError):
                 continue
-            accum[key]["quantity"] = accum_qty + addend
+            accum[key]["quantity"] = float(accum_qty + addend)
             accum[key]["order_count"] = int(accum[key].get("order_count", 0)) + 1
 
     out = []
@@ -310,8 +310,12 @@ class LiquidityHeatmapWriter(FlatMapFunction):
     def close(self):
         try:
             self._flush(trigger="close")
-            self._write_api.close()
-            self._influx.close()
+            try:
+                if self._write_api:
+                    self._write_api.close()
+            finally:
+                if self._influx:
+                    self._influx.close()
         except Exception as e:
             log.error("[LiquidityHeatmap] close error: %s", e)
 

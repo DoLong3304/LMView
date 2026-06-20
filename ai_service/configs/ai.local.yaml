@@ -11,17 +11,61 @@ providers:
     priority: 1
     is_local: true
 
-  - name: dashscope-qwen
+  - name: dashscope-qwen3.7-plus
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.7-plus
+    base_url: https://ws-wajzbpjx2ma5ao95.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 10
+
+  - name: dashscope-qwen3.7-max
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.7-max
+    base_url: https://ws-wajzbpjx2ma5ao95.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 20
+
+  - name: dashscope-qwen3.6-max-preview
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.6-max-preview
+    base_url: https://ws-wajzbpjx2ma5ao95.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 30
+
+  - name: dashscope-qwen3.6-plus
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.6-plus
+    base_url: https://ws-wajzbpjx2ma5ao95.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 40
+
+  - name: dashscope-qwen3.5-plus
     type: litellm
     public_provider: api
     model: openai/qwen3.5-plus
-    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    base_url: https://ws-wajzbpjx2ma5ao95.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
     env_key: DASHSCOPE_API_KEY
-    priority: 10
-    notes:
-      endpoint: OpenAI-compatible Chat Completions
-      usage_fields: prompt_tokens/completion_tokens/total_tokens
-      native_dashscope_usage_fields: input_tokens/output_tokens/total_tokens
+    priority: 50
+
+  - name: dashscope-qwen3.6-flash
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.6-flash
+    base_url: https://ws-wajzbpjx2ma5ao95.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 60
+
+  - name: dashscope-qwen3.5-flash
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.5-flash
+    base_url: https://ws-wajzbpjx2ma5ao95.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 70
 
   - name: none
     type: none

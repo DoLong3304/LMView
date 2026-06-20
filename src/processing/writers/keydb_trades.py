@@ -118,7 +118,7 @@ class KeyDBTradeWriter(FlatMapFunction):
             symbol = value.get("symbol")
             if not symbol:
                 record_kafka_source_drop(topic=SOURCE_TOPIC, reason="missing_symbol")
-                return []
+                return iter([])
 
             trade_json = json.dumps({
                 "p": float(value["price"]),
@@ -159,4 +159,4 @@ class KeyDBTradeWriter(FlatMapFunction):
             s = value.get("symbol") if isinstance(value, dict) else "unknown"
             log.error("[KeyDB/trades] flat_map error | symbol=%s error=%s", s, e)
             record_kafka_source_drop(topic=SOURCE_TOPIC, reason=type(e).__name__)
-        return []
+        return iter([])

@@ -19,7 +19,7 @@ RUN npm run build
 FROM nginx:1.27.5
 
 # Required by entrypoint.sh for self-signed cert (prod) + htpasswd generation
-RUN apt-get update && apt-get install -y --no-install-recommends openssl apache2-utils && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends openssl apache2-utils wget && rm -rf /var/lib/apt/lists/*
 
 # Remove default config
 RUN rm /etc/nginx/conf.d/default.conf

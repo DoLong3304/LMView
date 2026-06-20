@@ -53,7 +53,7 @@ async def get_ticker(
         if not binance_data and not okx_data:
             raise HTTPException(404, f"No ticker data for {symbol}")
 
-        # Calculate mid-price from available exchanges
+        # Calculate volume-weighted price from available exchanges (BB-6 fix)
         prices = []
         volumes = []
         event_times = []
@@ -80,8 +80,17 @@ async def get_ticker(
             if okx_event_time:
                 event_times.append(int(float(okx_event_time)))
 
-        mid_price = sum(prices) / len(prices) if prices else 0
-        total_volume = sum(volumes)
+        # BB-6: Volume-weighted average instead of simple mid-price
+        total_notional = sum(
+            p * v for p, v in zip(prices, volumes)
+        ) if prices and volumes else 0.0
+        total_volume = sum(volumes) if volumes else 0.0
+        if total_volume > 0:
+            vwap = total_notional / total_volume
+        elif prices:
+            vwap = sum(prices) / len(prices)  # fallback to simple average
+        else:
+            vwap = 0.0
         latest_event_time = max(event_times) if event_times else 0
 
         # Use binance data for other fields (bid, ask, change24h) as primary
@@ -91,7 +100,7 @@ async def get_ticker(
         return {
             "symbol": symbol_upper,
             "exchange": "aggregated",
-            "price": mid_price,
+            "price": vwap,
             "change24h": change_24h,
             "bid": float(primary_data.get("bid", 0)),
             "ask": float(primary_data.get("ask", 0)),
@@ -157,7 +166,7 @@ async def get_all_tickers(
                     all_data[symbol][exchange_name] = data
                     symbols_seen.add(symbol)
 
-        # Aggregate per symbol
+        # Aggregate per symbol (BB-6: volume-weighted)
         for symbol in sorted(symbols_seen):
             exchanges_data = all_data.get(symbol, {})
             prices = []
@@ -175,8 +184,17 @@ async def get_all_tickers(
                 if event_time:
                     event_times.append(int(float(event_time)))
 
-            mid_price = sum(prices) / len(prices) if prices else 0
-            total_volume = sum(volumes)
+            # BB-6: Volume-weighted average
+            total_notional = sum(
+                p * v for p, v in zip(prices, volumes)
+            ) if prices and volumes else 0.0
+            total_volume = sum(volumes) if volumes else 0.0
+            if total_volume > 0:
+                vwap = total_notional / total_volume
+            elif prices:
+                vwap = sum(prices) / len(prices)
+            else:
+                vwap = 0.0
             latest_event_time = max(event_times) if event_times else 0
 
             # Use first available exchange for other fields
@@ -186,7 +204,7 @@ async def get_all_tickers(
             result.append({
                 "symbol": symbol,
                 "exchange": "aggregated",
-                "price": mid_price,
+                "price": vwap,
                 "change24h": change_24h,
                 "bid": float(primary_data.get("bid", 0)),
                 "ask": float(primary_data.get("ask", 0)),

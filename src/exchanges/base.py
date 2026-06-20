@@ -5,6 +5,8 @@ To add a new exchange (e.g., OKX), create a subclass implementing
 all abstract methods under ``src/exchanges/okx/client.py``.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 
 
@@ -16,6 +18,11 @@ class ExchangeClient(ABC):
     - WS URL builders: construct WebSocket URLs for each stream type
     - Mappers: convert raw exchange-specific JSON → canonical records
     """
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """Exchange name for metrics and Redis key namespaces."""
 
     @abstractmethod
     def fetch_symbols(self, quote_asset: str = "USDT") -> list[str]:

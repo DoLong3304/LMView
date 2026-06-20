@@ -9,8 +9,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN pip3 install --no-cache-dir requests
 
-# Create spark-events dir
-RUN mkdir -p /opt/spark-events && chmod 777 /opt/spark-events
+# Create spark-events dir and work dir
+RUN mkdir -p /opt/spark-events /opt/spark/work && chmod 777 /opt/spark-events /opt/spark/work
 
 COPY docker/spark/entrypoint.sh /entrypoint.sh
 RUN dos2unix /entrypoint.sh && chmod +x /entrypoint.sh

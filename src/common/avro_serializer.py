@@ -54,8 +54,7 @@ class AvroSerializer:
                 resp = requests.post(
                     f"{self._url}/subjects/{subject}/versions",
                     json={"schema": json.dumps(schema_dict)},
-                    headers={"Content-Type":
-                             "application/vnd.schemaregistry.v1+json"},
+                    headers={"Content-Type": "application/json"},
                     timeout=10,
                 )
                 resp.raise_for_status()

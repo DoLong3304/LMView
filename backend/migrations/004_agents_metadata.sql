@@ -5,7 +5,7 @@
 -- ── Agent execution traces ───────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS ai_agent_executions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    session_id UUID REFERENCES ai_sessions(id) ON DELETE CASCADE,
+    session_id UUID REFERENCES ai_chat_sessions(id) ON DELETE CASCADE,
     user_id UUID NOT NULL,
     query TEXT NOT NULL,
     mode VARCHAR(16) DEFAULT 'ask',

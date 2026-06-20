@@ -1,16 +1,111 @@
 """
-Background task to fetch market metrics from gold layer.
-Queries Trino for aggregated market data every 5 minutes.
+Background tasks:
+1. Market metrics from gold layer (Trino, every 5 min)
+2. Real-time Binance price poller (REST, every 500ms) for low-latency ticker
 """
 import asyncio
 import logging
+import time
 from datetime import datetime
 from typing import List, Dict
+import aiohttp
 
-from backend.core.database import get_trino_connection
+from backend.core.database import get_trino_connection, get_redis_master
 from backend.services import market_service
 
 logger = logging.getLogger(__name__)
+
+# ── Real-time Binance price poller ───────────────────────────────────────
+
+class BinancePricePoller:
+    """Fetches ALL symbols price from Binance REST /ticker/price (~2s), writes to Redis.
+    
+    Protocol: Binance GET /api/v3/ticker/price (weight=2, returns ALL symbols).
+    4 workers × 1 req/2s × 2 weight = 4 weight/s = 240 weight/min << 1200 limit.
+    """
+
+    ALL_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
+    POLL_INTERVAL = 1.0  # seconds (4 workers × 2 weight = 480/min < 1200 limit)
+
+    def __init__(self):
+        self.task = None
+        self.running = False
+        self._session = None
+
+    async def start(self):
+        if self.running:
+            return
+        self.running = True
+        self.task = asyncio.create_task(self._run())
+        logger.info("[PricePoller] started (interval=%.1fs, all symbols via %s)",
+                    self.POLL_INTERVAL, self.ALL_PRICE_URL)
+
+    async def stop(self):
+        if not self.running:
+            return
+        self.running = False
+        if self.task:
+            self.task.cancel()
+            try:
+                await self.task
+            except asyncio.CancelledError:
+                pass
+        logger.info("[PricePoller] stopped")
+
+    async def _run(self):
+        await asyncio.sleep(2)
+        while self.running:
+            try:
+                await self._poll()
+            except Exception as e:
+                logger.warning("[PricePoller] error: %s", e)
+            await asyncio.sleep(self.POLL_INTERVAL)
+
+    async def _get_session(self):
+        if self._session is None or self._session.closed:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def _poll(self):
+        session = await self._get_session()
+        try:
+            async with session.get(self.ALL_PRICE_URL, timeout=5) as resp:
+                if resp.status != 200:
+                    logger.warning("[PricePoller] HTTP %s", resp.status)
+                    return
+                data = await resp.json()
+        except asyncio.TimeoutError:
+            logger.debug("[PricePoller] timeout")
+            return
+        except Exception as e:
+            logger.debug("[PricePoller] fetch error: %s", e)
+            return
+
+        now_ms = int(time.time() * 1000)
+        r = await get_redis_master()
+        pipe = r.pipeline()
+        total = written = 0
+        for item in data:
+            symbol = item.get("symbol", "")
+            if not symbol.endswith("USDT"):
+                continue
+            total += 1
+            try:
+                price = float(item["price"])
+            except (ValueError, TypeError):
+                continue
+            key = f"ticker:latest:binance:{symbol}"
+            pipe.hset(key, mapping={
+                "price": str(price),
+                "event_time": str(now_ms),
+                "exchange": "binance",
+            })
+            pipe.expire(key, 300)
+            written += 1
+        if written:
+            await pipe.execute()
+        elapsed = int((time.time() * 1000) - now_ms)
+        logger.info("[PricePoller] wrote %d USDT symbols (%.0fms)", written, elapsed)
 
 
 class MarketFetcherTask:
@@ -153,5 +248,6 @@ class MarketFetcherTask:
             conn.close()
 
 
-# Global instance
+# Global instances
 market_fetcher = MarketFetcherTask(interval_seconds=300)  # 5 minutes
+binance_price_poller = BinancePricePoller()  # 500ms real-time poller

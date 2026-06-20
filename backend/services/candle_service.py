@@ -204,6 +204,10 @@ def query_influx_candles(
     end_ms: int | None = None,
 ) -> list[dict]:
     """Query candles from InfluxDB. If end_ms is provided, queries a fixed window."""
+    # BB-7: Defense-in-depth — validate inputs before embedding in Flux query
+    # Upstream validation in API layer should also catch these.
+    symbol = validate_symbol(symbol)
+    interval, _ = validate_interval(interval)
     if end_ms:
         interval_sec = INTERVAL_SECONDS.get(interval, 60)
         start_ms = end_ms - (limit * interval_sec * 1000) - (interval_sec * 1000)
@@ -249,6 +253,8 @@ def query_influx_1m_range(
     symbol: str, start_ms: int, end_ms: int, limit: int,
 ) -> list[dict]:
     """Query 1m candles from InfluxDB within a specific time range."""
+    # BB-7: Defense-in-depth — validate symbol before embedding in Flux query
+    symbol = validate_symbol(symbol)
     start_rfc = ms_to_rfc3339(start_ms)
     stop_rfc = ms_to_rfc3339(end_ms)
     query = f'''

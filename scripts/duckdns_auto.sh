@@ -14,7 +14,16 @@ echo "[duckdns-auto] Starting dynamic DNS updates for: $SUBDOMAINS"
 while true; do
   IFS=','
   for subdomain in $SUBDOMAINS; do
-    response=$(curl -fsS "https://www.duckdns.org/update?domains=${subdomain}&token=${TOKEN}&ip=" || true)
+    # IB-5: Token in URL could leak in curl error output. Capture stderr separately
+    # and strip token before logging. Use temp file for stderr capture.
+    errfile=$(mktemp /tmp/duckdns-err-XXXXXX)
+    response=$(curl -fsS "https://www.duckdns.org/update?domains=${subdomain}&token=${TOKEN}&ip=" 2>"$errfile" || true)
+    if [ -s "$errfile" ]; then
+      # Log masked version of the error (strip token from URL in error output)
+      masked_err=$(sed 's/token=[^&[:space:]]*/token=****/g' "$errfile")
+      echo "[duckdns-auto] Error for ${subdomain}.duckdns.org: ${masked_err}"
+    fi
+    rm -f "$errfile"
     if [ "$response" = "OK" ]; then
       echo "[duckdns-auto] Updated ${subdomain}.duckdns.org"
     else

@@ -34,7 +34,7 @@ from backend.api import (
 )
 from backend.services.admin_bootstrap_service import ensure_default_admin
 from backend.tasks.news_fetcher import news_fetcher
-from backend.tasks.market_fetcher import market_fetcher
+from backend.tasks.market_fetcher import market_fetcher, binance_price_poller
 from backend.services.sentiment_service import batch_score_unscored_articles
 
 from common.logging import setup_logging_from_env
@@ -75,9 +75,39 @@ async def lifespan(app: FastAPI):
 
     await ensure_default_admin()
 
+    # Preload AI embedding model for RAG (install + load in background)
+    try:
+        from ai_service.config import load_settings
+        s = load_settings()
+        if s.rag_enabled and s.embedding_model:
+            import subprocess, threading, sys
+            def _install_and_preload():
+                try:
+                    import sentence_transformers
+                except ImportError:
+                    logger.info("Installing sentence-transformers for RAG embeddings...")
+                    subprocess.run(
+                        [sys.executable, "-m", "pip", "install", "--quiet", "sentence-transformers"],
+                        timeout=180, check=False,
+                    )
+                try:
+                    from sentence_transformers import SentenceTransformer
+                    SentenceTransformer(s.embedding_model)
+                    logger.info("AI embedding model loaded: %s", s.embedding_model)
+                except Exception as exc:
+                    logger.warning("Emb model preload failed: %s", exc)
+            threading.Thread(target=_install_and_preload, daemon=True).start()
+    except Exception as exc:
+        logger.warning("Embedding preload init failed: %s", exc)
+
     # Start background tasks
     await news_fetcher.start()
     await market_fetcher.start()
+    # binance_price_poller disabled 2026-06-20 — replaced by
+    # `binance-ticker-ws` Swarm service (Phase 4) which streams full
+    # Binance @ticker fields (24) via WebSocket instead of REST polling
+    # only 3 fields at 1s cadence. See docs/LATENCY_OPTIMIZATION_PLAN.md.
+    # await binance_price_poller.start()
     sentiment_task = asyncio.create_task(sentiment_score_loop())
 
     yield
@@ -90,6 +120,7 @@ async def lifespan(app: FastAPI):
         pass
     await news_fetcher.stop()
     await market_fetcher.stop()
+    # await binance_price_poller.stop()
     await close_all()
     await close_pg_pool()
 

@@ -18,7 +18,7 @@
 .cursorrules
 
 # Frontend (separate image)
-frontend
+frontend/node_modules
 node_modules
 *.log
 dist

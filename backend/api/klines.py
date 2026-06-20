@@ -60,6 +60,8 @@ async def get_klines(
 
     if interval == "1s":
         candles = await _fetch_1s_candles(r, symbol, limit, endTime, now_ms, exchange)
+    elif interval == "1m" and endTime is None:
+        candles = await _fetch_best_1m_candles(r, symbol, limit, now_ms, exchange)
     else:
         candles = await _fetch_1m_plus_candles(
             r, symbol, interval, target_sec, limit, endTime, now_ms, influx_cutoff_ms, exchange,
@@ -163,6 +165,61 @@ async def _fetch_1m_plus_candles(
             candles = merge_unique(candles, hourly_rows)
 
     return candles
+
+
+async def _fetch_best_1m_candles(r, symbol: str, limit: int, now_ms: int, exchange: str = "binance") -> list[dict]:
+    """Fetch 1m candles from Redis and InfluxDB, then pick the cleaner source."""
+    raw_needed = min(limit + 2, MAX_RAW_CANDLES)
+    keydb_candles = await _fetch_keydb_1m(r, symbol, raw_needed, now_ms, exchange)
+
+    live_limit = min(max(raw_needed, limit), LIVE_MAX_BASE_ROWS)
+    live_range_h = min(max((live_limit * 60) // 3600 + 2, 1), INFLUX_1M_RETENTION_DAYS * 24)
+    influx_candles = await asyncio.to_thread(
+        query_influx_candles, symbol, "1m", live_limit, live_range_h, None,
+    )
+
+    keydb_score = _score_candle_quality(keydb_candles, 60_000, limit, now_ms)
+    influx_score = _score_candle_quality(influx_candles, 60_000, limit, now_ms)
+    return influx_candles if influx_score > keydb_score else keydb_candles
+
+
+def _score_candle_quality(candles: list[dict], interval_ms: int, limit: int, now_ms: int) -> float:
+    if not candles:
+        return 0.0
+
+    candles = sorted(candles, key=lambda c: c["openTime"])[-limit:]
+    valid = 0
+    nonzero_volume = 0
+    continuous = 0
+
+    previous_time = None
+    for c in candles:
+        try:
+            o = float(c["open"])
+            h = float(c["high"])
+            l = float(c["low"])
+            close = float(c["close"])
+            v = float(c.get("volume", 0))
+        except (TypeError, ValueError, KeyError):
+            continue
+
+        if h >= max(o, close) and l <= min(o, close) and h >= l and all(x > 0 for x in (o, h, l, close)):
+            valid += 1
+        if v > 0:
+            nonzero_volume += 1
+        if previous_time is not None and int(c["openTime"]) - previous_time == interval_ms:
+            continuous += 1
+        previous_time = int(c["openTime"])
+
+    count = len(candles)
+    coverage = min(count / max(limit, 1), 1.0)
+    continuity = continuous / max(count - 1, 1)
+    validity = valid / count
+    volume_quality = nonzero_volume / count
+    age_ms = max(0, now_ms - int(candles[-1]["openTime"]))
+    freshness = max(0.0, 1.0 - (age_ms / (interval_ms * 5)))
+
+    return coverage * 40 + continuity * 25 + validity * 20 + volume_quality * 10 + freshness * 5
 
 
 async def _fetch_keydb_1m(r, symbol: str, limit: int, now_ms: int, exchange: str = "binance") -> list[dict]:

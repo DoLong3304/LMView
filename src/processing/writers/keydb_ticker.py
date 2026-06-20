@@ -88,7 +88,7 @@ class KeyDBWriter(FlatMapFunction):
                         "bid":        value["bid"],
                         "ask":        value["ask"],
                         "volume":     volume,
-                        "change24h":  value["change24h"],
+                        # change24h managed by REST API poller (not written by Flink)
                         "event_time": event_time,
                         "exchange":   exchange,
                     },
@@ -109,7 +109,7 @@ class KeyDBWriter(FlatMapFunction):
         except Exception as e:
             error_type = type(e).__name__
             log.error("[KeyDB] flush error (dropped %d records): %s",
-                      len(self._buffer), e)
+                      len(self._buffer), e, exc_info=True)
         finally:
             duration = time.monotonic() - start
             record_flush(
@@ -146,7 +146,7 @@ class KeyDBWriter(FlatMapFunction):
                 "bid":        float(value.get("bid", 0)),
                 "ask":        float(value.get("ask", 0)),
                 "volume":     float(value.get("h24_volume", 0)),
-                "change24h":  float(value.get("h24_price_change_pct", 0)),
+                # change24h managed by REST API poller (miniTicker lacks this field)
             })
             record_kafka_source(topic=SOURCE_TOPIC, partition=0, n=1)
             record_writer_event_time(

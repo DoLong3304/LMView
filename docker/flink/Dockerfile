@@ -21,7 +21,12 @@ RUN wget -q -P /opt/flink/lib/ \
     https://repo1.maven.org/maven2/org/apache/flink/flink-sql-avro-confluent-registry/1.18.1/flink-sql-avro-confluent-registry-1.18.1.jar
 
 # â”€â”€ Flink config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-COPY flink-conf.yaml /opt/flink/conf/flink-conf.yaml
+COPY docker/flink/flink-conf.yaml /opt/flink/conf/flink-conf.yaml
+
+# ── Copy source code ─────────────────────────────────────────────────────────────────
+COPY src /opt/flink/src
+COPY schemas /opt/flink/schemas
+
 # Install filesystem plugins where Flink actually loads them from.
 RUN mkdir -p /opt/flink/plugins/flink-s3-fs-hadoop \
     /opt/flink/plugins/flink-s3-fs-presto && \
@@ -31,5 +36,8 @@ RUN mkdir -p /opt/flink/plugins/flink-s3-fs-hadoop \
 
 # â”€â”€ Fix checkpoint directory permissions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 RUN mkdir -p /tmp/flink-checkpoints && chown -R flink:flink /tmp/flink-checkpoints
+
+ENV PYFLINK_PYTHON=python3
+ENV PYTHONPATH=/opt/flink/src:/opt/flink/src/processing:$PYTHONPATH
 
 ENV PYFLINK_PYTHON=python3

@@ -15,6 +15,26 @@ from ai_service.agents.types import ExpertOutput, Timer
 
 logger = logging.getLogger("ai_service.agents.synthesis")
 
+TOOL_CATALOG_TEXT = """**Chart Tool Catalog (for Interact mode proposals):**
+- `add_indicator` — add technical indicator (RSI, MACD, SMA, EMA, Bollinger, VWAP, ATR, etc.)
+- `remove_indicator` — remove an indicator from the chart
+- `set_timeframe` — switch timeframe (1s, 1m, 5m, 15m, 1h, 4h, 1d, 1w)
+- `set_chart_type` — change chart type (candles, bars, line, area, heikinAshi, renko)
+- `draw_trendline` — draw a trendline between two price/time points
+- `highlight_candles` — highlight a range of candles by index or timestamp
+- `highlight_region` — highlight a rectangular region (price + time)
+- `highlight_chart_area` — highlight by percentage coordinates
+- `create_annotation` — add a text annotation at a chart point
+- `draw_tool` — select or place a drawing tool (trendline, fibonacci, rectangle, cursor)
+- `set_visible_range` — set visible time range on the chart
+- `start_tour` — launch the interactive LMView workspace guided tour
+- `highlight_section` — highlight a UI section for guided learning
+"""
+
+
+def _build_tool_catalog_text() -> str:
+    return TOOL_CATALOG_TEXT
+
 
 SYNTHESIS_SYSTEM_PROMPT = """You are LMView AI, a bilingual (English/Vietnamese) cryptocurrency technical analysis assistant.
 
@@ -119,9 +139,15 @@ async def synthesize_response(state: AgentState) -> AgentState:
         messages.append(LLMMessage(
             role="system",
             content=(
-                "Interact mode: you may propose chart actions as tool calls. "
-                "Never execute actions directly. Return prose first; "
-                "backend normalizes action proposals for user approval."
+                "Interact mode: You may propose LMView chart actions as tool calls. "
+                "Never execute actions directly. Return prose first; backend will "
+                "normalize action proposals for user approval.\n\n"
+                "Step-by-step analysis guidance: After presenting your analysis, "
+                "propose ONE specific chart action per response that would help the user "
+                "understand the data better — e.g., adding an RSI indicator, highlighting "
+                "a support zone, switching to a 4H timeframe, or starting the guided tour. "
+                "Use the tool catalog below to select the correct action type.\n\n"
+                + _build_tool_catalog_text()
             ),
             name="interaction_policy",
         ))
@@ -183,8 +209,10 @@ async def synthesize_response(state: AgentState) -> AgentState:
             reason = a.get("reason") or f"AI proposed {act_type}"
             req_app = a.get("requires_approval")
             if req_app is None:
-                # Default requires_approval to True unless it is highlight_section or clear_ai_annotations
-                req_app = act_type not in {"highlight_section", "clear_ai_annotations"}
+                # Auto-approve safe read-only / educational actions
+                req_app = act_type not in {
+                    "highlight_section", "clear_ai_annotations", "start_tour"
+                }
             
             # Normalize actions for frontend and backend validation compatibility
             if act_type == "draw_trendline":

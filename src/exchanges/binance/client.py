@@ -5,6 +5,8 @@ Implements the ExchangeClient interface for Binance's REST and WebSocket APIs.
 All Binance-specific URLs, endpoints, and protocols are encapsulated here.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 import time
@@ -20,7 +22,7 @@ log = logging.getLogger(__name__)
 REST_EXCHANGE_INFO = "https://api.binance.com/api/v3/exchangeInfo"
 REST_TICKER_24H    = "https://api.binance.com/api/v3/ticker/24hr"
 REST_KLINES_URL    = "https://api.binance.com/api/v3/klines"
-WS_TICKER_URL      = "wss://stream.binance.com:9443/ws/!miniTicker@arr"
+WS_TICKER_URL      = "wss://stream.binance.com:9443/ws/!miniTicker@arr"  # Temporary: test if stream works
 WS_COMBINED_BASE   = "wss://stream.binance.com:9443/stream"
 EPOCH_MS           = 1_500_000_000_000  # ~2017-07-14 Binance launch
 
@@ -44,6 +46,10 @@ class BinanceClient(ExchangeClient):
     def __init__(self, max_retries: int = 5, request_delay: float = 0.12):
         self.max_retries = max_retries
         self.request_delay = request_delay
+
+    @property
+    def name(self) -> str:
+        return "binance"
 
     # ── REST: Symbols ────────────────────────────────────────────────────────
 

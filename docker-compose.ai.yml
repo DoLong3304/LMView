@@ -38,7 +38,10 @@ services:
     # TODO: Replace with actual service startup command when ai_service/app/main.py
     # is implemented as a standalone FastAPI server.
     command: ["echo", "AI service scaffolded — Phase 2 runs embedded in core backend"]
-    mem_limit: 2g
+    deploy:
+      resources:
+        limits:
+          memory: 2g
     restart: "no"
 
   # 🔗 LiteLLM Proxy ────────────────────────────────────────────────────
@@ -58,7 +61,10 @@ services:
     volumes:
       - ./ai_service/configs/litellm.yaml:/app/config.yaml:ro
     command: ["--config", "/app/config.yaml", "--port", "4000"]
-    mem_limit: 1g
+    deploy:
+      resources:
+        limits:
+          memory: 1g
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
       interval: 30s

@@ -55,7 +55,19 @@ def normalize_mode(value: Optional[str]) -> str:
     return mode
 
 
-def get_api_key(env_key: Optional[str]) -> str:
+def _patch_feedparser_compat() -> None:
+    """Feedparser 6.x removed _parse_date from package-level exports.
+
+    Patch feedparser.datetimes so internal imports in feedparser/http.py
+    (from .datetimes import _parse_date) continue to work.
+    """
+    try:
+        from feedparser.datetimes import _parse as _parse_module
+        import feedparser.datetimes as _dt
+        if not hasattr(_dt, "_parse_date"):
+            _dt._parse_date = getattr(_parse_module, "_parse_date", None)
+    except Exception:
+        pass  # feedparser not installed or already patched
     """Resolve provider key with Qwen legacy alias support."""
     if env_key == "DASHSCOPE_API_KEY":
         return os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("QWEN_API_KEY", "")
@@ -159,6 +171,49 @@ def load_settings() -> AISettings:
         orchestration_mode=orch_mode,
     )
 
+
+# ── Multi-key rotation ───────────────────────────────────────────────────────
+
+_API_KEY_INDEX: int = 0
+"""Current active key index (module-level state for rotation)."""
+
+
+def get_api_keys(env_key: str) -> list:
+    """Resolve all available API keys for a provider."""
+    if env_key == "DASHSCOPE_API_KEY":
+        multi = os.environ.get("DASHSCOPE_API_KEYS", "")
+        if multi:
+            keys = [k.strip() for k in multi.split(",") if k.strip()]
+            if keys:
+                return keys
+        single = os.environ.get("DASHSCOPE_API_KEY", "") or os.environ.get("QWEN_API_KEY", "")
+        return [single] if single else []
+    if not env_key:
+        return []
+    key = os.environ.get(env_key, "")
+    return [key] if key else []
+
+
+def get_api_key(env_key: str) -> str:
+    """Return the first (default) API key for a provider."""
+    keys = get_api_keys(env_key)
+    return keys[0] if keys else ""
+
+
+def rotate_api_key(env_key: str) -> str:
+    """Rotate to the next API key; return it. Round-robin."""
+    global _API_KEY_INDEX
+    keys = get_api_keys(env_key)
+    if not keys:
+        return ""
+    _API_KEY_INDEX = (_API_KEY_INDEX + 1) % len(keys)
+    return keys[_API_KEY_INDEX]
+
+
+def get_current_api_key(env_key: str) -> str:
+    """Get current active API key (after rotation)."""
+    keys = get_api_keys(env_key)
+    return keys[_API_KEY_INDEX % len(keys)] if keys else ""
 
 def list_available_api_models(settings: Optional[AISettings] = None) -> List[str]:
     """Return API models with available keys."""

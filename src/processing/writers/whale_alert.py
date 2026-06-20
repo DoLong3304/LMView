@@ -135,8 +135,12 @@ class WhaleAlertWriter(FlatMapFunction):
     def close(self):
         try:
             self._flush(trigger="close")
-            self._r.close()
-            self._influx.close()
+            try:
+                if self._r:
+                    self._r.close()
+            finally:
+                if self._influx:
+                    self._influx.close()
         except Exception as e:
             log.error("[WhaleAlert] close error: %s", e)
 

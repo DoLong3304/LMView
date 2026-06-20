@@ -15,6 +15,7 @@ logger = logging.getLogger("backend.core.postgres")
 
 # Lazy import: asyncpg is optional for test environments
 _pool = None
+_init_attempted = False
 
 
 def _get_pg_dsn() -> str:
@@ -61,7 +62,12 @@ async def init_pg_pool() -> None:
 
 
 async def get_pg_pool():
-    """Return the asyncpg pool, or None if unavailable."""
+    """Return the asyncpg pool, retrying initialization if pool was unavailable."""
+    global _pool, _init_attempted
+    if _pool is not None:
+        return _pool
+    # Retry initialization in case dependencies came up after first attempt
+    await init_pg_pool()
     return _pool
 
 

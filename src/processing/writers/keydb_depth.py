@@ -110,7 +110,7 @@ class DepthWriter(FlatMapFunction):
             symbol = value.get("symbol")
             if not symbol:
                 record_kafka_source_drop(topic=SOURCE_TOPIC, reason="missing_symbol")
-                return []
+                return iter([])
 
             exchange = value.get("exchange", "binance")
             event_time = int(value.get("event_time", 0))
@@ -145,4 +145,4 @@ class DepthWriter(FlatMapFunction):
             s = value.get("symbol") if isinstance(value, dict) else "unknown"
             log.error("[Depth] flat_map error | symbol=%s error=%s", s, e)
             record_kafka_source_drop(topic=SOURCE_TOPIC, reason=type(e).__name__)
-        return []
+        return iter([])

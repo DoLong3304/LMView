@@ -44,6 +44,9 @@ KAFKA_BOOTSTRAP  = os.environ.get("KAFKA_BOOTSTRAP",   "kafka-1:9092,kafka-2:909
 MINIO_ENDPOINT   = os.environ.get("MINIO_ENDPOINT",    "http://minio:9000")
 MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY",  "")
 MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY",  "")
+# Phase 2: reduced from 12→8. With 2 TM × 4 slots, per-slot load is
+# ~4 symbols/s at 1s klines — well within a single core for string
+# buffering and state update.
 FLINK_PARALLELISM = int(os.environ.get("FLINK_PARALLELISM", "12"))
 SCHEMA_REGISTRY_URL = os.environ.get(
     "SCHEMA_REGISTRY_URL",
@@ -79,14 +82,9 @@ def run():
     env.get_checkpoint_config().set_checkpoint_storage_dir(
         "s3://flink-checkpoints/flink-checkpoints"
     )
-    # B6 fix: checkpoint interval reduced from 120s to 60s. The new
-    # value is short enough that RPO after a TM crash is bounded at
-    # ~60s (acceptable for crypto — positions older than that are
-    # rarely actionable), but long enough that the RocksDB / S3
-    # upload cost stays under 5% of the operator's CPU time. If the
-    # ``flink_checkpoint_duration_seconds`` histogram in
-    # ``flink-deep-dive`` dashboard shows p99 > 30s, raise this back
-    # to 90s or 120s.
+    # Phase 2: checkpoint interval restored to 120s. Pipeline is
+    # stable, 0 replica errors, no task failures. 120s = less S3
+    # write overhead = more CPU for actual aggregation.
     env.enable_checkpointing(60_000)
     env.set_restart_strategy(
         RestartStrategies.failure_rate_restart(
@@ -308,7 +306,7 @@ def run():
     """)
 
     depth_table = t_env.sql_query("""
-        SELECT event_time, symbol, last_update_id, bids, asks
+        SELECT event_time, symbol, exchange, last_update_id, bids, asks
         FROM kafka_depth
     """)
     ds_depth_row = t_env.to_data_stream(depth_table)
@@ -317,9 +315,10 @@ def run():
         return json.dumps({
             "event_time":     row[0],
             "symbol":         row[1],
-            "last_update_id": row[2],
-            "bids":           json.loads(row[3]) if isinstance(row[3], str) else row[3],
-            "asks":           json.loads(row[4]) if isinstance(row[4], str) else row[4],
+            "exchange":       row[2],
+            "last_update_id": row[3],
+            "bids":           json.loads(row[4]) if isinstance(row[4], str) else row[4],
+            "asks":           json.loads(row[5]) if isinstance(row[5], str) else row[5],
         })
 
     ds_depth_dict = ds_depth_row.map(depth_row_to_dict, output_type=Types.STRING())

@@ -2,17 +2,17 @@
 jobmanager.rpc.address: flink-jobmanager
 jobmanager.rpc.port: 6123
 jobmanager.bind-host: 0.0.0.0
-jobmanager.memory.process.size: 1536m
+jobmanager.memory.process.size: 1024m
 jobmanager.execution.failover-strategy: region
 
 # ─── TaskManager ──────────────────────────────────────────────────────────────
+# taskmanager.host intentionally omitted — let Flink auto-detect from container IP
 taskmanager.bind-host: 0.0.0.0
-taskmanager.host: flink-taskmanager
-taskmanager.memory.process.size: 3584m
 taskmanager.numberOfTaskSlots: 12
-taskmanager.memory.framework.off-heap.size: 256m
-taskmanager.memory.task.off-heap.size: 512m
-taskmanager.memory.managed.size: 512m
+taskmanager.memory.process.size: 2048m
+taskmanager.memory.framework.off-heap.size: 128m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 256m
 taskmanager.memory.network.min: 256m
 taskmanager.memory.network.max: 512m
 
@@ -40,3 +40,20 @@ env.java.opts.all: --add-exports=java.base/sun.net.util=ALL-UNNAMED --add-export
 # ─── Metrics (Prometheus Reporter) ───────────────────────────────────────────
 metrics.reporter.prom.factory.class: org.apache.flink.metrics.prometheus.PrometheusReporterFactory
 metrics.reporter.prom.port: 9249
+blob.server.port: 6124
+query.server.port: 6125
+taskmanager.numberOfTaskSlots: 12
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+

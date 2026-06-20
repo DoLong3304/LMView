@@ -6,6 +6,7 @@ fields. LangGraph handles state merging automatically.
 """
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Optional, TypedDict
 
 from ai_service.agents.types import (

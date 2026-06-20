@@ -27,7 +27,8 @@ Real-time cryptocurrency technical-analysis platform built on Lambda Architectur
 - **Lakehouse analytics**: Spark, Iceberg on MinIO, PostgreSQL catalog, Trino.
 - **High availability**: 3 Kafka brokers, Redis Sentinel (1 master, 2 replicas, 3 sentinels).
 - **AI Ask/Interact Helper**: centralized `ai_service` orchestration, local/API/none provider routing, approved-only pgvector RAG, Markdown chat, and reusable function actions.
-- **Observability**: Prometheus, Grafana, Loki, 22 dashboards, 48 alert rules. Dedicated **Alert Center** dashboard at `/d/phase5-alert-center` shows firing alerts by severity, component, and hour-of-day.
+- **Observability**: Prometheus, Grafana, Loki, 22 dashboards, 48 alert rules.
+- **Docker Swarm deployment**: 2-node EC2 cluster with EFS shared storage.
 
 ---
 
@@ -185,6 +186,7 @@ This writes trade, ticker, candle, and orderbook data directly to Redis as a fal
 | Document | Description |
 |---|---|
 | [docs/SYSTEM.md](docs/SYSTEM.md) | Full system architecture, data flow, APIs, caveats |
+| [docs/system/](docs/system/) | Per-module detailed documentation (13 files) |
 | [docs/CHANGELOG.md](docs/CHANGELOG.md) | Project history |
 | [AGENTS.md](AGENTS.md) | AI agent workflow and coding rules |
 | [docs/ai/AI_ARCHITECTURE.md](docs/ai/AI_ARCHITECTURE.md) | AI architecture, provider routing, RAG, actions, and safety |
@@ -193,7 +195,7 @@ This writes trade, ticker, candle, and orderbook data directly to Redis as a fal
 
 ## Version
 
-Current: **v0.25.36** (see [CHANGELOG.md](docs/CHANGELOG.md))
+Current: **v0.25.41** (see [CHANGELOG.md](docs/CHANGELOG.md))
 
 ---
 
@@ -233,12 +235,11 @@ Before deploying to a public host:
 
 ## Cloud Deployment (Docker Swarm)
 
-For production deployment on AWS EC2 with Docker Swarm:
-
-**Architecture:** Multi-node cluster with service placement optimization
-- Core node (8 vCPU, 32 GB): Data storage, messaging, API, frontend, AI
-- Worker node (4 vCPU, 16 GB): Compute (Flink, Spark, Trino), monitoring, orchestration
-- Shared EFS storage for code and config sync
+**Production**: https://lmview.duckdns.org  
+**Architecture**: 2-node EC2 cluster with Docker Swarm
+- Core node (8 vCPU, 32 GB): storage, brokers, API, frontend, AI
+- Worker node (4 vCPU, 16 GB): Flink, Spark, Trino, monitoring
+- Shared EFS storage for code/config sync
 
 **Quick Start:**
 ```bash
@@ -247,16 +248,7 @@ cd /mnt/efs/LMView
 bash scripts/deploy_aws_swarm.sh
 ```
 
-**Complete guide:** [docs/DEPLOY_SWARM.md](docs/DEPLOY_SWARM.md)
-
-Covers:
-- AWS infrastructure setup (VPC, security groups, EFS)
-- Docker Swarm initialization and node labels
-- Local registry configuration
-- Volume mount strategy (absolute EFS paths)
-- Service placement constraints
-- Deployment workflow and verification
-- Troubleshooting and maintenance
+**Detail:** [docs/system/12-deployment.md](docs/system/12-deployment.md)
 
 ---
 
@@ -270,4 +262,4 @@ Built and maintained by D22 Fintech, PTIT students:
 
 ---
 
-Status: Active development | Version: **0.25.36**
+Status: Active development | Version: **0.25.42** | Deployed: Docker Swarm on AWS EC2

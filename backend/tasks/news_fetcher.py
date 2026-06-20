@@ -94,6 +94,18 @@ async def save_articles_to_postgres(articles: list[dict[str, Any]]) -> int:
                         raw_payload, raw_metadata
                     )
                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::text[], $10::jsonb, $11, $12, $13::jsonb, $14::jsonb)
+                    ON CONFLICT (source, external_id) WHERE external_id IS NOT NULL DO UPDATE
+                    SET title = EXCLUDED.title,
+                        summary = EXCLUDED.summary,
+                        published_at = EXCLUDED.published_at,
+                        fetched_at = EXCLUDED.fetched_at,
+                        symbols = EXCLUDED.symbols,
+                        symbols_mentioned = EXCLUDED.symbols_mentioned,
+                        tags = EXCLUDED.tags,
+                        language = EXCLUDED.language,
+                        content_snippet = EXCLUDED.content_snippet,
+                        raw_payload = EXCLUDED.raw_payload,
+                        raw_metadata = EXCLUDED.raw_metadata
                     """,
                     article["external_id"],
                     article["source"],
@@ -110,42 +122,9 @@ async def save_articles_to_postgres(articles: list[dict[str, Any]]) -> int:
                     __import__("json").dumps(article["raw_payload"]),
                     __import__("json").dumps(article["raw_metadata"]),
                 )
-                if result != "INSERT 0 0":
+                if result == "INSERT 0 1":
                     inserted += 1
             except Exception as exc:
-                if article.get("url"):
-                    dedupe_result = await conn.execute(
-                        """
-                        UPDATE news_articles
-                        SET title = $1,
-                            summary = $2,
-                            published_at = $3,
-                            fetched_at = $4,
-                            symbols = $5::jsonb,
-                            symbols_mentioned = $6::text[],
-                            tags = $7::jsonb,
-                            language = $8,
-                            content_snippet = $9,
-                            raw_payload = $10::jsonb,
-                            raw_metadata = $11::jsonb
-                        WHERE source = $12 AND url = $13
-                        """,
-                        article["title"],
-                        article["summary"],
-                        article["published_at"],
-                        article["fetched_at"],
-                        __import__("json").dumps(article["symbols"]),
-                        article["symbols_mentioned"],
-                        __import__("json").dumps(article["tags"]),
-                        article["language"],
-                        article["content_snippet"],
-                        __import__("json").dumps(article["raw_payload"]),
-                        __import__("json").dumps(article["raw_metadata"]),
-                        article["source"],
-                        article["url"],
-                    )
-                    if dedupe_result != "UPDATE 0":
-                        continue
                 logger.warning("Failed to persist article %s: %s", article.get("url") or article.get("title"), exc)
     return inserted
 

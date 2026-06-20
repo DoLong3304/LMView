@@ -440,6 +440,11 @@ def record_provider_mode_active(mode: str) -> None:
         AI_PROVIDER_MODE_ACTIVE.labels(provider=provider, mode=mode).set(1.0)
 
 
+def record_rag_vector_search(duration_sec: float = 0.0, success: bool = True) -> None:
+    """Record RAG vector search timing."""
+    pass  # Metrics placeholder
+
+
 def record_rag_retrieval(
     duration_sec: float,
     n_results: int,

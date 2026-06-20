@@ -86,16 +86,42 @@ class FlinkRedisSentinel:
 
 # Global instance (created once per Flink task)
 _flink_sentinel = None
+_redis_pool = None
 
 
 def get_flink_redis():
     """
-    Get Redis master connection for Flink writers
+    Get Redis master connection with pooling
 
     Returns:
-        redis.Redis: Master connection
+        redis.Redis: Pooled master connection
     """
-    global _flink_sentinel
+    global _flink_sentinel, _redis_pool
     if _flink_sentinel is None:
         _flink_sentinel = FlinkRedisSentinel()
-    return _flink_sentinel.get_master()
+
+    if _redis_pool is None:
+        if _flink_sentinel._mode == 'sentinel':
+            # Get master address from sentinel
+            master_address = _flink_sentinel.sentinel.discover_master(_flink_sentinel.master_name)
+            _redis_pool = redis.ConnectionPool(
+                host=master_address[0],
+                port=master_address[1],
+                max_connections=500,
+                socket_connect_timeout=5,
+                socket_keepalive=True,
+                decode_responses=True
+            )
+        else:
+            # Direct mode
+            _redis_pool = redis.ConnectionPool(
+                host=_flink_sentinel._redis_host,
+                port=_flink_sentinel._redis_port,
+                db=_flink_sentinel._redis_db,
+                max_connections=500,
+                socket_connect_timeout=5,
+                socket_keepalive=True,
+                decode_responses=True
+            )
+
+    return redis.Redis(connection_pool=_redis_pool)

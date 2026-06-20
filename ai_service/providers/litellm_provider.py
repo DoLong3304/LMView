@@ -15,12 +15,22 @@ from backend.models.ai.providers import (
     ProviderType,
 )
 from ai_service.providers.base import BaseProvider
+from ai_service.config import get_api_keys, rotate_api_key, get_current_api_key
 
 logger = logging.getLogger("ai_service.providers.litellm_provider")
 
 
+class QuotaExhaustedError(Exception):
+    """Raised when all API keys for a provider/model are exhausted."""
+    pass
+
+
 class LiteLLMProvider(BaseProvider):
-    """LiteLLM-based provider for online API models."""
+    """LiteLLM-based provider for online API models with model fallback chain.
+
+    Supports multiple models in priority order. If the primary model
+    exhausts quota, the next model in the chain is tried automatically.
+    """
 
     def __init__(
         self,
@@ -30,12 +40,14 @@ class LiteLLMProvider(BaseProvider):
         api_key: Optional[str] = None,
         is_local: bool = False,
         priority: int = 10,
+        fallback_models: Optional[list] = None,
     ):
         super().__init__(provider_name=provider_name, model_name=model_name)
         self.base_url = base_url or os.environ.get("LITELLM_BASE_URL", "http://litellm:4000")
         self.api_key = api_key or os.environ.get("LITELLM_MASTER_KEY", "")
         self.is_local = is_local
         self.priority = priority
+        self.fallback_models = fallback_models or []
         self._litellm = None
 
     def _get_litellm(self):
@@ -49,72 +61,144 @@ class LiteLLMProvider(BaseProvider):
                 raise
         return self._litellm
 
+    @staticmethod
+    def _is_quota_error(exc: Exception) -> bool:
+        """Check if an exception indicates quota exhaustion or rate limiting.
+
+        Matches:
+        - ``AllocationQuota.FreeTierOnly`` (Alibaba Cloud — free quota exhausted)
+        - HTTP 429 (rate limit)
+        - HTTP 401/402/403 with quota/exhausted wording
+        - LiteLLM's built-in rate limit detection
+        """
+        msg = str(exc).lower()
+
+        # Alibaba Cloud ModelStudio: free quota exhausted per model
+        if "allocationquota" in msg or "freetieronly" in msg:
+            return True
+
+        # HTTP status code + keyword matching
+        if any(code in msg for code in ["429", "401", "402", "403"]):
+            if any(kw in msg for kw in ["quota", "exhaust", "rate", "limit", "insufficient", "token", "credit"]):
+                return True
+
+        # LiteLLM-specific rate limit
+        if "rate_limit_error" in msg or "rate limit" in msg:
+            return True
+
+        # Content policy / safety violations are NOT quota errors
+        if "content_filter" in msg or "safety" in msg:
+            return False
+        return False
+
     async def generate_chat_completion(
         self,
         request: LLMCompletionRequest,
     ) -> LLMCompletionResponse:
-        """Generate completion via LiteLLM."""
+        """Generate completion via LiteLLM with automatic key + model rotation.
+
+        Fallback chain:
+        1. Try primary model with current API key
+        2. On quota error: rotate key and retry same model
+        3. All keys exhausted for model: try next fallback model
+        4. All models exhausted: raise ``QuotaExhaustedError``
+        """
         litellm = self._get_litellm()
-
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
-        model = request.model or self.model_name
 
-        if not model:
+        models_to_try = [self.model_name] + self.fallback_models if self.model_name else self.fallback_models
+        if not models_to_try:
             raise ValueError(f"No model specified for provider {self.provider_name}")
 
-        start_ms = time.monotonic_ns() // 1_000_000
+        env_key = "DASHSCOPE_API_KEY"
+        keys = get_api_keys(env_key) if not self.is_local else []
 
-        try:
-            kwargs = {
-                "model": model,
-                "messages": messages,
-                "temperature": request.temperature,
-                "max_tokens": request.max_tokens,
-                "top_p": request.top_p,
-            }
+        last_error: Optional[Exception] = None
 
-            if self.base_url:
-                kwargs["api_base"] = self.base_url
-            if self.api_key:
-                kwargs["api_key"] = self.api_key
-            if request.stop:
-                kwargs["stop"] = request.stop  # type: ignore
+        for model_idx, model in enumerate(models_to_try):
+            max_key_attempts = max(len(keys), 1) if not self.is_local else 1
 
-            response = await litellm.acompletion(**kwargs)
+            for key_attempt in range(max_key_attempts):
+                start_ms = time.monotonic_ns() // 1_000_000
 
-            elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
-            content = response.choices[0].message.content or ""
-            usage = getattr(response, "usage", None)
-            prompt_tokens = getattr(usage, "prompt_tokens", None) if usage else None
-            completion_tokens = getattr(usage, "completion_tokens", None) if usage else None
-            total_tokens = getattr(usage, "total_tokens", None) if usage else None
+                try:
+                    kwargs: dict = {
+                        "model": model,
+                        "messages": messages,
+                        "temperature": request.temperature,
+                        "max_tokens": request.max_tokens,
+                        "top_p": request.top_p,
+                    }
 
-            return LLMCompletionResponse(
-                content=content,
-                provider=self.provider_name,
-                model_name=model,
-                is_mock=False,
-                finish_reason=getattr(response.choices[0], "finish_reason", "stop"),
-                token_input=prompt_tokens,
-                token_output=completion_tokens,
-                latency_ms=elapsed_ms,
-                metadata={
-                    "provider_type": "litellm",
-                    "usage": {
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": total_tokens,
-                    },
-                },
-            )
+                    if self.base_url:
+                        kwargs["api_base"] = self.base_url
 
-        except Exception as exc:
-            elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
-            logger.error(
-                "LiteLLM completion failed for %s/%s: %s",
-                self.provider_name, model, exc,
-            )
-            raise
+                    active_key = get_current_api_key(env_key) if not self.is_local else self.api_key
+                    if active_key:
+                        kwargs["api_key"] = active_key
+                    elif self.api_key:
+                        kwargs["api_key"] = self.api_key
+
+                    if request.stop:
+                        kwargs["stop"] = request.stop
+
+                    response = await litellm.acompletion(**kwargs)
+
+                    elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
+                    content = response.choices[0].message.content or ""
+                    usage = getattr(response, "usage", None)
+
+                    return LLMCompletionResponse(
+                        content=content,
+                        provider=self.provider_name,
+                        model_name=model,
+                        is_mock=False,
+                        finish_reason=getattr(response.choices[0], "finish_reason", "stop"),
+                        token_input=getattr(usage, "prompt_tokens", None),
+                        token_output=getattr(usage, "completion_tokens", None),
+                        latency_ms=elapsed_ms,
+                        metadata={
+                            "provider_type": "litellm",
+                            "model_fallback_used": model_idx > 0,
+                            "key_fallback_used": key_attempt > 0,
+                            "usage": {
+                                "prompt_tokens": getattr(usage, "prompt_tokens", None),
+                                "completion_tokens": getattr(usage, "completion_tokens", None),
+                                "total_tokens": getattr(usage, "total_tokens", None),
+                            },
+                        },
+                    )
+
+                except Exception as exc:
+                    last_error = exc
+                    elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
+
+                    if self._is_quota_error(exc) and len(keys) > 1:
+                        rotate_api_key(env_key)
+                        logger.warning(
+                            "Quota exhausted for %s — key %d/%d, rotating",
+                            model, key_attempt + 1, max_key_attempts,
+                        )
+                        continue
+
+                    if self._is_quota_error(exc):
+                        logger.warning(
+                            "All keys exhausted for %s — trying next model (%d/%d)",
+                            model, model_idx + 1, len(models_to_try),
+                        )
+                        break  # All keys tried, move to next model
+
+                    logger.error(
+                        "LiteLLM completion failed for %s: %s",
+                        model, exc,
+                    )
+                    raise
+
+        # All models + keys exhausted
+        raise QuotaExhaustedError(
+            f"All models/keys exhausted for {self.provider_name}: "
+            f"{models_to_try}"
+        ) from last_error
 
     async def health_check(self) -> ProviderHealthStatus:
         """Check provider health by attempting a minimal completion."""

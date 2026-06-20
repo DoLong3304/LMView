@@ -11,15 +11,29 @@ export function buildQuery(params: Record<string, string | number | undefined | 
   return query.toString();
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json" },
-  });
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({}));
-    throw createApiError("market", response.status, payload, { endpoint: path });
+export async function apiGet<T>(path: string, timeoutMs: number = 30000): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: { "Content-Type": "application/json" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw createApiError("market", response.status, payload, { endpoint: path });
+    }
+    return response.json() as Promise<T>;
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw createApiError("market", 408, { detail: "Request timeout" }, { endpoint: path });
+    }
+    throw error;
   }
-  return response.json() as Promise<T>;
 }
 
 export function getWsBaseUrl(): string {

@@ -190,6 +190,37 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
             </span>
           )}
         </div>
+        {/* Model badge — visible for all users after first response */}
+        {(() => {
+          const last = [...messages].reverse().find(m => m.role === "assistant");
+          const modelName: string | undefined = last?.model_name ?? undefined;
+          const providerName: string | undefined = last?.provider ?? undefined;
+          const pm = last?.provider_metadata;
+          if (!modelName && !providerName) return null;
+          const shortModel = modelName ? modelName.replace("openai/", "") : null;
+          const fallbackUsed = (pm as Record<string, unknown>)?.model_fallback_used || (pm as Record<string, unknown>)?.key_fallback_used;
+          const latencyMs = (pm as Record<string, unknown>)?.latency_ms;
+          return (
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              {shortModel && (
+                <span className="inline-flex items-center gap-1 rounded border border-purple-500/30 bg-purple-500/10 px-1.5 py-0.5 text-[9px] font-medium text-purple-300" title={String(modelName || "")}>
+                  <Bot size={9} />
+                  {shortModel}
+                </span>
+              )}
+              {isAdmin && providerName && (
+                <span className="inline-flex items-center gap-1 rounded border border-gray-600 bg-gray-800 px-1.5 py-0.5 text-[9px] font-medium text-gray-400">
+                  {providerName}{fallbackUsed ? " (fallback)" : ""}
+                </span>
+              )}
+              {isAdmin && latencyMs != null && (
+                <span className="inline-flex items-center gap-1 rounded border border-gray-600 bg-gray-800 px-1.5 py-0.5 text-[9px] font-medium text-gray-400">
+                  {String(latencyMs)}ms
+                </span>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {/* AI Context Quality Chips — shown after first assistant message */}

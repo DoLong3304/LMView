@@ -37,6 +37,10 @@ class OKXClient(ExchangeClient):
         self.max_retries = max_retries
         self.request_delay = request_delay
 
+    @property
+    def name(self) -> str:
+        return "okx"
+
     # ── REST: Symbols ────────────────────────────────────────────────────────
 
     def fetch_symbols(self, quote_asset: str = "USDT") -> list[str]:
