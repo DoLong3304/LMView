@@ -18,6 +18,7 @@ Detailed, auto-audited documentation for every subsystem of LMView.
 | [12-deployment.md](12-deployment.md) | Docker Swarm 2-node EC2 deployment | 2026-06-19 |
 | [13-caveats.md](13-caveats.md) | Complete bug inventory (CI, BB, DP, IB, AI series), performance bottlenecks | 2026-06-19 |
 | [14-scripts.md](14-scripts.md) | Scripts reference — deploy, certbot, duckdns, watchdog, audit | 2026-06-19 |
+| [swarm-worker-image-recovery.md](swarm-worker-image-recovery.md) | Runbook: recover worker node when Swarm tasks fail with "No such image" | 2026-06-21 |
 
 ## How to Use These Docs
 

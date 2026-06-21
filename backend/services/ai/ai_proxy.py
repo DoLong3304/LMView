@@ -1,0 +1,57 @@
+"""AI service proxy client.
+
+Provides thin async HTTP wrapper around standalone AI service.
+If ``AI_SERVICE_EMBEDDED`` env var is ``true`` (default), calls local
+``ai_service.core.orchestrator.run_chat`` directly.  Otherwise performs
+HTTP request to ``AI_SERVICE_URL``.
+
+The proxy forwards the caller's JWT (``Authorization: Bearer ...``) to the
+standalone AI service so that ``get_current_user`` on the ai-service side
+can authenticate the same way it did in-process. ``X-User-ID`` is also
+sent for belt-and-braces (some deployments strip the Authorization header
+at the edge).
+"""
+from __future__ import annotations
+
+import os
+from typing import Optional
+
+import httpx
+from fastapi import Request
+
+from backend.models.ai.chat import AIChatRequest, AIChatResponse
+from ai_service.core.orchestrator import run_chat as embedded_run_chat
+
+AI_SERVICE_EMBEDDED = os.getenv("AI_SERVICE_EMBEDDED", "true").lower() == "true"
+AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://ai-service:8100")
+
+
+async def chat(
+    body: AIChatRequest,
+    user_id: str,
+    request: Optional[Request] = None,
+) -> AIChatResponse:
+    """Send chat request.
+
+    Embedded mode: direct call to ``ai_service.core.orchestrator.run_chat``.
+    Proxy mode: POST to ``{AI_SERVICE_URL}/ai/chat`` with the same payload
+    and the caller's Authorization header forwarded.
+    """
+    if AI_SERVICE_EMBEDDED:
+        return await embedded_run_chat(body=body, user_id=user_id)
+
+    forward_headers: dict[str, str] = {"X-User-ID": user_id}
+    if request is not None:
+        auth = request.headers.get("authorization")
+        if auth:
+            forward_headers["Authorization"] = auth
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            f"{AI_SERVICE_URL}/ai/chat",
+            json=body.dict(),
+            headers=forward_headers,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return AIChatResponse(**data)

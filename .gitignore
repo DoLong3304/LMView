@@ -50,6 +50,12 @@ test_router.py
 add_aliases.py
 update_swarm.py
 
+# Personal / academic drafts (NOT part of the deployment story)
+docs/Khóa luận*.md
+docs/KẾ HOẠCH*.md
+docs/NOTE*
+docs/temp-fact-sheet.md
+
 .vscode
 .idea
 .claude

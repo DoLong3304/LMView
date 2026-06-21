@@ -10,8 +10,8 @@ Project rules for AI coding agents.
 - **Purpose:** Real-time cryptocurrency technical-analysis platform
 - **Architecture:** Lambda Architecture: speed, batch/lakehouse, serving, frontend
 - **Core stack:** Kafka, Flink, Spark, Redis Sentinel, InfluxDB, PostgreSQL, Iceberg/MinIO, Trino, FastAPI, React 19
-- **Current release:** `0.25.53` in `docs/CHANGELOG.md`
-- **Deployment:** 2-node Docker Swarm on AWS EC2 (core: 8/32, worker: 4/16, EFS shared)
+- **Current release:** `0.25.59` in `docs/CHANGELOG.md`
+- **Deployment:** 2-node Docker Swarm on AWS EC2 (core: 4/32, worker: 4/16, EFS shared)
 - **Current focus:** Production stability, Docker Swarm migration;
 
 ---

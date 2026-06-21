@@ -658,10 +658,42 @@ def run_streams(client: ExchangeClient) -> None:
             kline_interval = "1m"
         log.info("OKX filtered to %d well-known symbols, using %s kline interval", len(symbols), kline_interval)
 
-    # ── Stream A: All-ticker ─────────────────────────────────────────────────
-    ticker_name = f"{client.__class__.__name__.lower()}-ws-ticker"
-    ticker_target = run_ticker_stream_subscription if is_subscription else run_ticker_stream
-    _register_thread(ticker_name, ticker_target, client)
+    # ── Stream A: Combined ticker (single WS) ───────────────────────────────────────
+    # For Binance use a combined stream containing all @ticker symbols.
+    if not is_subscription:
+        # Primary combined ticker (all symbols)
+        all_ticker_streams = [f"{s.lower()}@ticker" for s in symbols]
+        ticker_url = client.build_combined_stream_url(all_ticker_streams)
+        _register_thread(
+            f"{client.__class__.__name__.lower()}-ws-ticker-combined",
+            run_combined_batch,
+            ticker_url,
+            0,
+            "24hrTicker",
+            client.map_ticker,
+            KAFKA_TOPIC_TICKER,
+            "TICKER-COMBINED",
+        )
+        # Fallback per‑shard combined streams (5 shards) for resilience if primary 403
+        n_shards = 5
+        for shard_idx, shard in enumerate([symbols[i::n_shards] for i in range(n_shards)], start=1):
+            shard_streams = [f"{s.lower()}@ticker" for s in shard]
+            shard_url = client.build_combined_stream_url(shard_streams)
+            _register_thread(
+                f"{client.__class__.__name__.lower()}-ws-ticker-fallback-{shard_idx}",
+                run_combined_batch,
+                shard_url,
+                shard_idx,
+                "24hrTicker",
+                client.map_ticker,
+                KAFKA_TOPIC_TICKER,
+                f"TICKER-FALLBACK-{shard_idx}",
+            )
+            time.sleep(random.random() * 1.0)  # slight jitter
+    else:
+        ticker_name = f"{client.__class__.__name__.lower()}-ws-ticker"
+        ticker_target = run_ticker_stream_subscription if is_subscription else run_ticker_stream
+        _register_thread(ticker_name, ticker_target, client)
 
     # ── Stream A2: Individual @ticker (all USDT symbols, 5 combined WS) ───
     # Each symbol gets pushed on every trade (real-time, <100ms).
@@ -726,7 +758,8 @@ def run_streams(client: ExchangeClient) -> None:
                 KAFKA_TOPIC_TRADES,
                 "TRADES",
             )
-        time.sleep(1.0)
+        # jitter up to 2 s between aggTrade thread starts
+        time.sleep(random.random() * 2.0)
 
     # ── Stream C: Kline candles (separate batch size for fewer connections) ───
     kline_batches = [

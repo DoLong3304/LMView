@@ -9,7 +9,7 @@
 #   docker node update --label-add role=core  <manager-node>
 #   docker node update --label-add role=worker <worker-node>
 #
-# Machine 1 (role=core):   8 vCPU, 32 GB RAM
+# Machine 1 (role=core):   4 vCPU, 32 GB RAM
 #   Storage, databases, brokers, API, frontend, nginx, AI services
 #   Memory budget: ~25 GB services + ~5 GB OS/buffers
 #
@@ -17,7 +17,10 @@
 #   Flink, Spark, Trino, Dagster, monitoring, logging
 #   Memory budget: ~13 GB services + ~3 GB OS/buffers
 #
-# Shared EFS mount: /mnt/efs/lmview (code + config sync across nodes)
+# Shared EFS mount (configurable via AWS_EFS_MOUNT_PATH env var).
+# Default: /mnt/efs/LMView (current AWS deployment).
+# For a fresh cluster, set AWS_EFS_MOUNT_PATH to wherever the shared
+# filesystem is mounted on both nodes (must be identical paths).
 # ─────────────────────────────────────────────────────────────────────────────
 
 networks:
@@ -242,10 +245,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
       POSTGRES_LMVIEW_DB: ${POSTGRES_LMVIEW_DB:-iceberg_catalog}
     volumes:
-      - /mnt/efs/LMView/ai_service:/app/ai_service
-      - /mnt/efs/LMView/backend:/app/backend
-      - /mnt/efs/LMView/src:/app/src
-      - /mnt/efs/LMView/docs:/app/docs
+      - ${AWS_EFS_MOUNT_PATH:-/mnt/efs/LMView}/ai_service:/app/ai_service
+      - ${AWS_EFS_MOUNT_PATH:-/mnt/efs/LMView}/backend:/app/backend
+      - ${AWS_EFS_MOUNT_PATH:-/mnt/efs/LMView}/src:/app/src
+      - ${AWS_EFS_MOUNT_PATH:-/mnt/efs/LMView}/docs:/app/docs
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -351,12 +354,21 @@ services:
       placement:
         constraints: [node.labels.role == core]
       restart_policy:
-        condition: none
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
       resources:
         limits:
-          memory: 512M
+          memory: 4G
 
   litellm:
+    image: ghcr.io/berriai/litellm:main-latest
+    container_name: lmview-litellm
+    environment:
+      - LITELLM_BASE_URL=${LITELLM_BASE_URL:-http://litellm:4000}
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-}
+    volumes:
+      - ${AWS_EFS_MOUNT_PATH:-/mnt/efs/LMView}/ai_service/configs/litellm.yaml:/app/config.yaml:ro
     deploy:
       placement:
         constraints: [node.labels.role == core]
@@ -372,7 +384,7 @@ services:
     image: python:3.11-slim
     working_dir: /app
     volumes:
-      - /mnt/efs/LMView:/app:ro
+      - ${AWS_EFS_MOUNT_PATH:-/mnt/efs/LMView}:/app:ro
     environment:
       FINBERT_DEVICE: cpu
       FINBERT_PROCESS_INTERVAL: 300
@@ -495,7 +507,7 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 512M
+          memory: 4G
 
   spark-worker-2:
     deploy:
@@ -507,7 +519,7 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 512M
+          memory: 4G
 
   job-watchdog:
     deploy:

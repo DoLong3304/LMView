@@ -37,7 +37,7 @@ RUN_MIGRATIONS = os.environ.get("RUN_MIGRATIONS", "false")
 #   none  - generic LMView/system answers only
 AI_MODE = os.environ.get("AI_MODE", "auto")
 AI_CONFIG_PATH = os.environ.get("AI_CONFIG_PATH", "")
-AI_SERVICE_URL = os.environ.get("AI_SERVICE_URL", "http://ai-service:8001")
+AI_SERVICE_URL = os.environ.get("AI_SERVICE_URL", "http://ai-service:8100")
 AI_REQUEST_TIMEOUT_SECONDS = int(os.environ.get("AI_REQUEST_TIMEOUT_SECONDS", "60"))
 AI_MAX_CONTEXT_TOKENS = int(os.environ.get("AI_MAX_CONTEXT_TOKENS", "12000"))
 AI_ENABLE_RAG = os.environ.get("AI_ENABLE_RAG", "true").lower() in ("1", "true", "yes")

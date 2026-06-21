@@ -1,12 +1,26 @@
-# AI/ML heavy dependencies — OPTIONAL.
-# These together pull in ~5GB (torch 1.2GB, triton 700MB, nvidia
-# 2.7GB, transformers 119MB, scikit-learn 50MB, scipy 113MB).
+# ─────────────────────────────────────────────────────────────────────────────
+# AI Orchestration — heavy ML / LLM dependencies
+# ─────────────────────────────────────────────────────────────────────────────
+# Installed ONLY in the ai-service image (docker/ai-service/Dockerfile).
+# The backend FastAPI gateway does NOT install these — it proxies chat
+# requests to ``ai-service`` via HTTP instead. This keeps the gateway
+# image small (~500 MB vs ~3 GB) and avoids pulling torch / transformers
+# / vader into every backend pod.
 #
-# Only install when AI_ENABLE_REAL_LLM=true is set (production
-# deployments with a real LLM provider, e.g. OpenAI, Qwen, etc.).
-# Default deployments use the mock provider and do NOT need these.
-#
-# To install in the running container:
-#   docker exec fastapi-prod pip install -r /app/docker/fastapi/requirements-ai.txt
-# Or rebuild the image with the env var set so the layer is cached.
-sentence-transformers==3.3.1
+# If you need to run the AI pipeline embedded in the backend (the legacy
+# ``AI_SERVICE_EMBEDDED=true`` mode), install this file on top of
+# ``requirements.txt`` in the backend image.
+
+# LLM proxy / router
+litellm==1.52.0
+
+# RAG embeddings (sentence-transformers pulls torch ~2GB)
+sentence-transformers==5.6.0
+numpy==2.4.6
+
+# LangGraph orchestration framework
+langgraph==1.2.6
+langchain-core==1.4.8
+
+# DashScope (Qwen / Alibaba Cloud) provider
+dashscope==1.25.23

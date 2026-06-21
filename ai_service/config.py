@@ -42,7 +42,7 @@ class AISettings:
     max_tokens: int
     top_p: float
     timeout_seconds: int
-    orchestration_mode: str = "legacy"
+    orchestration_mode: str = "langgraph"
 
 
 def normalize_mode(value: Optional[str]) -> str:
@@ -68,13 +68,19 @@ def _patch_feedparser_compat() -> None:
             _dt._parse_date = getattr(_parse_module, "_parse_date", None)
     except Exception:
         pass  # feedparser not installed or already patched
-    """Resolve provider key with Qwen legacy alias support."""
+
+
+def _resolve_provider_key(env_key: str) -> str:
+    """Resolve provider key with Qwen legacy alias support.
+
+    Handles DASHSCOPE_API_KEY aliasing to QWEN_API_KEY.
+    Returns empty string if env_key falsy.
+    """
     if env_key == "DASHSCOPE_API_KEY":
         return os.environ.get("DASHSCOPE_API_KEY") or os.environ.get("QWEN_API_KEY", "")
     if not env_key:
         return ""
     return os.environ.get(env_key, "")
-
 
 def _default_config_path(mode: str) -> Path:
     root = Path(__file__).resolve().parent

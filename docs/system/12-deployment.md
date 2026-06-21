@@ -8,7 +8,7 @@
 
 | Node | Role | Spec | Services |
 |---|---|---|---|
-| ip-172-31-21-135 | Manager (Leader) | 8 vCPU, 32 GB RAM | Core: storage, brokers, API, frontend, AI, registry |
+| ip-172-31-21-135 | Manager (Leader) | 4 vCPU, 32 GB RAM | Core: storage, brokers, API, frontend, AI, registry |
 | ip-172-31-9-171 | Worker | 4 vCPU, 16 GB RAM | Compute: Flink, Spark, Trino, monitoring |
 
 ### Node Labels

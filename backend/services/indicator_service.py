@@ -148,6 +148,12 @@ SERIES_SUPPORTED_NAMES = {
     "volume",
     "volumeMa",
     "atr",
+    "vwap",
+    "stochastic",
+    "mfi",
+    "ichimoku",
+    "supertrend",
+    "psar",
 }
 
 SERIES_NAME_ALIASES = {
@@ -170,6 +176,12 @@ INDICATOR_REQUIRED_CANDLES = {
     "volume": 1,
     "volumeMa": 20,
     "atr": 15,
+    "vwap": 1,
+    "stochastic": 15,
+    "mfi": 15,
+    "ichimoku": 53,
+    "supertrend": 15,
+    "psar": 3,
 }
 
 DEFAULT_SERIES_INDICATORS = [
@@ -183,6 +195,12 @@ DEFAULT_SERIES_INDICATORS = [
     "volume",
     "volumeMa",
     "atr",
+    "vwap",
+    "stochastic",
+    "mfi",
+    "ichimoku",
+    "supertrend",
+    "psar",
 ]
 
 WARN_NOT_ENOUGH = "not_enough_candle_data"
@@ -747,6 +765,10 @@ async def get_indicator_snapshot(
             "bb_middle", "bb_upper", "bb_lower", "bb_width",
             "volume_sma20", "atr14",
             "close", "high", "low", "volume",
+            # New fields (v0.25.54+)
+            "vwap", "stoch_k", "stoch_d", "mfi",
+            "ichi_conversion", "ichi_base", "ichi_span_a", "ichi_span_b",
+            "supertrend", "psar",
         ):
             if field in data:
                 try:
@@ -788,6 +810,10 @@ async def get_indicator_snapshot(
     if indicators.get("bb_middle") is not None:
         indicators.setdefault("bb", indicators["bb_middle"])
         indicators.setdefault("bollinger_bands", indicators["bb_middle"])
+    if indicators.get("stoch_k") is not None:
+        indicators.setdefault("stochastic", indicators["stoch_k"])
+    if indicators.get("ichi_conversion") is not None:
+        indicators.setdefault("ichimoku", indicators["ichi_conversion"])
 
     # Mark still-uncomputed indicators explicitly unavailable
     for ind in ("rsi", "rsi14", "bollinger_bands", "bb", "vwap", "atr", "atr14", "volume_ma", "volumeMa"):

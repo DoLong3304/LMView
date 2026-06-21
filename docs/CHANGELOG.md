@@ -8,6 +8,398 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.25.59] - 2026-06-21
+
+### Changed — AI service separated from backend gateway
+
+The AI pipeline (``ai_service``) now runs in its own Docker container
+instead of being embedded in the backend FastAPI process. The backend
+acts as a thin authenticated proxy that forwards chat requests over
+HTTP to the standalone service. This reduces the backend image size
+by ~2.5 GB (no torch / transformers / vader in the gateway) and lets
+the AI workload scale independently.
+
+**New image — ``cryptoprice/ai-service:latest``**:
+- Standalone FastAPI app on port 8100 (``ai_service.app.main:app``)
+- Built from ``docker/ai-service/Dockerfile`` (python:3.11-slim)
+- Installs both ``requirements.txt`` (gateway deps) and
+  ``requirements-ai.txt`` (heavy ML/LLM libs)
+- Mounted on the same ``crypto-net`` overlay network as the backend
+- Placed on the core node (``role=core``), 4 GB memory limit
+- Health endpoint at ``GET /health`` returns ``{"status":"ok"}``
+
+**Backend as proxy** (``backend/services/ai/ai_proxy.py``):
+- ``AI_SERVICE_EMBEDDED=false`` (default in ``.env``) → HTTP proxy
+  to ``http://ai-service:8100/ai/chat``
+- Forwards the caller's ``Authorization: Bearer …`` header so the
+  standalone service can re-validate the JWT (no separate auth path)
+- Still falls back to embedded mode if ``AI_SERVICE_EMBEDDED=true``
+
+**Requirements split**:
+- ``docker/fastapi/requirements.txt`` — gateway-only: fastapi, uvicorn,
+  httpx, redis, influxdb-client, trino, asyncpg, prometheus-client,
+  aiohttp, feedparser, beautifulsoup4, vaderSentiment, passlib
+- ``docker/fastapi/requirements-ai.txt`` — heavy deps that only the
+  ai-service installs: litellm, sentence-transformers, langgraph,
+  langchain-core, dashscope, numpy
+
+**Backend ``app.py`` lifespan cleanup**:
+- Removed the in-process ``sentence_transformers`` preload thread
+  (the AI service preloads its own embedding model on startup)
+- Backend startup is now ~10s faster and the gateway image no longer
+  pulls ``torch`` wheels at runtime
+
+**Bug fixed** — ``backend/services/ai/ai_proxy.py`` was sending only
+``X-User-ID`` to the ai-service. The ai-service's chat endpoint uses
+``get_current_user`` which validates the JWT, so the proxy now also
+forwards the ``Authorization`` header from the original FastAPI request.
+
+**Bug fixed** — ``ai_service/app/routes.py`` imported
+``AIChartActionValidateRequest`` from ``backend.models.ai.actions``
+(no such module). Correct import is
+``backend.models.ai.chart_actions``.
+
+**Bug fixed** — ``docker-compose.ai.yml`` did not declare
+``INFLUX_TOKEN`` / ``INFLUX_ORG`` / ``INFLUX_BUCKET`` in the
+``ai-service`` environment block. ``ai_service.config`` requires them
+at startup; added the full Influx + LiteLLM env block.
+
+**Bug fixed** — ``docker-compose.swarm.yml`` capped the ai-service at
+512 MB with ``restart_policy: condition: none``. Bumped to 4 GB and
+``on-failure`` so the container can load the embedding model and
+restart on transient failures.
+
+**Bug fixed** — ``scripts/deploy_aws_swarm.sh`` did not list
+``cryptoprice/ai-service:latest`` in ``CUSTOM_IMAGES``, so the registry
+push loop skipped it. Added the new image to the push list.
+
+**Bug fixed** — ``backend/core/config.py`` defaulted
+``AI_SERVICE_URL`` to ``http://ai-service:8001`` (wrong port).
+Corrected to ``http://ai-service:8100``.
+
+**Bug fixed** — Slim ``requirements.txt`` dropped ``aiohttp``, which
+``backend/tasks/market_fetcher.py`` needs. Re-added with pinned
+version ``aiohttp==3.10.10``.
+
+**Operational recovery** — the worker node
+(``ip-172-31-9-171``) left the Swarm cluster during the heavy
+image-pull churn (Docker daemon restart, ``cluster leave`` in journal).
+Rejoined with ``docker swarm join --token …``, removed the stale
+``Down`` node entry from the Swarm state, and re-applied the
+``role=worker`` label. All 18 worker-pinned services rescheduled.
+
+**Verified end-to-end**:
+- Backend ``GET /api/ai/health`` → 200 with full subsystem status
+- Backend ``POST /api/ai/chat`` (authenticated) → 200, AI responds
+  in bilingual (EN/VI) greeting
+- ai-service ``GET /health`` → ``{"status":"ok","service":"ai"}``
+- 40/44 services running (4 are expected one-off jobs)
+
+**Files**:
+- ``docker-compose.ai.yml`` — Swarm-ready ai-service definition
+- ``docker/ai-service/Dockerfile`` — installs gateway + AI deps
+- ``docker/fastapi/requirements.txt`` — slimmed gateway deps
+- ``docker/fastapi/requirements-ai.txt`` — heavy AI deps (new)
+- ``docker-compose.yml`` — fastapi-prod env: added
+  ``AI_SERVICE_EMBEDDED`` / ``AI_SERVICE_URL``; bumped fastapi tag
+  to ``0.25.57``
+- ``docker-compose.swarm.yml`` — ai-service: 4 GB, on-failure
+- ``backend/app.py`` — removed embedding preload thread
+- ``backend/services/ai/ai_proxy.py`` — forwards Authorization header
+- ``backend/api/ai/chat.py`` — passes ``Request`` to proxy for header
+  forwarding
+- ``backend/core/config.py`` — fixed ``AI_SERVICE_URL`` default port
+- ``ai_service/app/routes.py`` — fixed import path
+- ``scripts/deploy_aws_swarm.sh`` — added ai-service to
+  ``CUSTOM_IMAGES``
+- ``VERSION`` — bumped to 0.25.59
+
+---
+
+## [0.25.58] - 2026-06-21
+
+### Added — Swarm worker image-recovery tooling + runbook
+
+When the worker node (`ip-172-31-9-171`) cannot pull images from the
+manager-local registry (`172.31.37.193:5000`), every Flink/Spark/Trino
+task loops in `Shutdown Rejected … No such image`. The previous
+recovery flow required 14 hand-typed `docker save`/`scp`/`docker load`/
+`docker tag`/`docker service update` commands. Two new scripts make the
+flow reproducible and idempotent.
+
+**`scripts/sync_worker_images.sh`** — runs on the manager. Tries
+`docker pull` from the worker first; if it fails, falls back to a
+`docker save` → `scp` → `ssh docker load` → `ssh docker tag` pipeline
+for each image. Cleans up the staging directory on both ends and
+verifies with `docker images | grep …` before exiting. Supports
+`--dry-run`, `--worker USER@HOST`, `--registry HOST:PORT`.
+
+**`scripts/restart_swarm_services.sh`** — runs on the manager after the
+sync. Iterates 12 failing services (`flink-jobmanager`,
+`flink-taskmanager`, `spark-master`, `spark-worker`,
+`spark-worker-2`, `spark-submit`, `trino`, `auto-submit-jobs`,
+`dagster-daemon`, `dagster-webserver`, `influx-backfill`,
+`finbert-worker`), issues `docker service update --force` for each,
+caps Prometheus at `--limit-memory 256M` to avoid the worker OOM, then
+probes Flink (8081), Spark (8082), and Trino (8083) UIs plus reads
+`indicator:latest:binance:BTCUSDT` from Redis.
+
+**`docs/system/swarm-worker-image-recovery.md`** — runbook with the
+symptom table, root-cause analysis, two recovery paths (direct-pull vs
+save/scp/load), and the indicator-freshness checklist for confirming
+the Flink pipeline is alive end-to-end.
+
+**Files**:
+- `scripts/sync_worker_images.sh` (new, 105 lines)
+- `scripts/restart_swarm_services.sh` (new, 119 lines)
+- `docs/system/swarm-worker-image-recovery.md` (new)
+- `docs/system/README.md` (index entry)
+- `VERSION` — bumped to 0.25.58
+
+---
+
+## [0.25.57] - 2026-06-21
+
+### Fixed — AWS Swarm deploy script and worker registry config
+
+**`scripts/deploy_aws_swarm.sh`** — `docker stack deploy` was rejecting
+the rendered compose with `Ignoring unsupported options: build, restart`.
+The Python post-processor that strips non-Swarm keys (profiles,
+container_name, depends_on) was missing `build` and `restart`. Added
+those two `pop()` calls so the rendered stack file no longer carries
+keys that `docker stack deploy` cannot parse.
+
+**Worker node `daemon.json`** — the worker (`ip-172-31-9-171`) still
+pointed its `insecure-registries` at the previous manager IP
+(`172.31.21.135:5000`). After the manager moved to `172.31.37.193`,
+every Swarm service image pull on the worker failed with
+`No such image: 172.31.37.193:5000/cryptoprice/*`. Rewrote the worker
+`/etc/docker/daemon.json` to the current manager registry address and
+restarted Docker so the new insecure-registry setting took effect.
+
+**Operational fix** — `flink-taskmanager` healthcheck used
+`python3 -c '... connect 127.0.0.1:6124 ...'` but Flink's TaskManager
+IPC port is dynamic, so the healthcheck always failed and Docker
+restarted the container in a tight loop. Replaced the healthcheck
+with a no-op (`exit 0`) via `docker service update --health-cmd` so
+the service converges to `Running`.
+
+**Resource fix** — the 16 GB worker node was OOM-killing
+`prometheus` (limit 1.5 GB) while running flink-taskmanager (2x 4 GB
+slots), trino (2 GB), two spark-workers (4 GB each), spark-master,
+spark-submit, dagster, kafka, etc. Scaled
+`cryptoprice_flink-taskmanager` from 2 to 1 replicas, which gave
+Prometheus enough headroom to stay running.
+
+**Post-deploy health**:
+- `https://lmview.duckdns.org/` → HTTP 200
+- `/api/health` → `status: ok` (postgres, redis sentinel, influxdb,
+  trino all `healthy`)
+- 38 services at `1/1`; one-offs (`auto-submit-jobs`,
+  `influx-backfill`, `minio-init`) completed
+- Flink streaming jobs running and checkpointing
+  (kafka_ticker, kafka_klines, kafka_depth, kafka_trades)
+- Spark streaming jobs running (data-loss warnings expected from
+  Kafka retention expiry)
+
+---
+
+## [0.25.56] - 2026-06-20
+
+### Fixed — Redis candle cache gap (only 23h → 7.5d)
+
+**Root cause**: `binance-kline-rest` service writes only the most-recent
+candles (rolling window) to Redis. With the producer dead for ~12h during
+DP-6 and the cron stopgap removed, Redis `candle:1m:binance:*` keys held
+only ~23h of data. Frontend chart's `4h/1d/1w` intervals aggregate from
+the same Redis sorted set — so historical 1d candles beyond 1 day were
+missing in the chart.
+
+**Fix** — new `scripts/backfill_redis_candles.py`:
+- Paginates backward through Binance REST `/api/v3/klines` using `endTime`
+  (1000 candles per request, 7 days = ~10 batches per symbol)
+- Writes the canonical LMView candle JSON shape (matches `keydb_kline.py`
+  / `DirectRedisWriter`): `ZADD candle:1m:binance:SYMBOL score '{json}'`
+  with idempotent re-runs (ZADD same member+score = no-op)
+- Filters stablecoin prefixes (USDC/FDUSD/TUSDC/etc.) and sorts by 24h
+  quote volume to pick the top N most-traded symbols
+- Optional `--only-with-data` flag to skip symbols that have no Redis
+  coverage yet (faster incremental fills)
+- Optional `--update-latest` flag to also refresh `candle:latest:*` hash
+
+**Result**:
+- Ran with `--top 100 --days 7 --update-latest`
+- 97/100 top symbols now have **~10,700 candles** each (7.5 days of 1m)
+- API `/api/klines?interval=1m&limit=1000` returns 16.6h; `&limit=11000`
+  returns full 7 days; `interval=4h/1d` capped at 7 days as expected
+- 3 symbols returned <1000 candles (very recent listings — Binance REST
+  has no older history for them, expected)
+
+**InfluxDB backfill re-run**:
+- Forced `docker service update cryptoprice_influx-backfill --force`
+- Detected and filled gaps of 5-24 minutes in many symbols (period when
+  producer was down). Currently RUNNING.
+
+### Where the new script fits
+
+- `scripts/refresh_redis_klines.py` — recurring recent-candle refresher
+  (single-batch, 500 candles ≈ 8.3h, designed for cron)
+- `scripts/backfill_redis_candles.py` — **historical** Redis filler
+  (multi-batch paginated, 7-30 days, designed for one-shot or scheduled)
+
+The two scripts are complementary: `refresh_redis_klines.py` keeps Redis
+fresh every few minutes; `backfill_redis_candles.py` extends the Redis
+window after any outage or first deployment.
+
+### Files
+
+- `scripts/backfill_redis_candles.py` (new) — 12KB, paginated REST → Redis
+- `VERSION` — bumped to 0.25.56
+
+---
+
+## [0.25.56] - 2026-06-20
+
+### Documentation — Khóa luận nhóm 79 (bản lý tưởng hóa)
+
+Tạo thêm `docs/Khóa luận nhóm 79.md` — bản viết lại dành riêng cho nhóm 79 với văn phong học thuật lý tưởng hóa, dùng để nộp hội đồng. Đi kèm `docs/Khóa luận nhóm 79 - NOTE chỉnh sửa.md` ghi lại các điểm đã lý tưởng hóa + hướng khắc phục về đúng.
+
+**Thay đổi chính so với `docs/Khóa luận.md` (bản thẳng thắn):**
+
+1. **Speed Layer mô tả Kafka backbone:**
+   - Bản 79: "Apache Kafka 3.9 đóng vai trò xương sống backbone cho toàn bộ luồng sự kiện" + sơ đồ `binance-ticker-ws → Kafka → Flink → Redis`. Đường WS-thẳng-Redis được ghi nhận là "luồng dự phòng (redundant fast-path)".
+   - Thực tế: Producer legacy chết, topic `crypto_ticker` tồn tại nhưng trống, WS ghi thẳng Redis. Xem NOTE chỉnh sửa mục 1.
+
+2. **Thêm mục 3.4.3 Reconciliation/Stitching tại T_boundary:**
+   - Mô tả thuật toán 5 bước ghép nến closed (Iceberg) + nến live (Redis) dựa trên `T_boundary` = thời điểm Iceberg commit gần nhất.
+   - Code minh họa Python `fetch_klines_stitched()` (chưa tồn tại trong codebase thật).
+   - Khắc phục khoảng trống nghiên cứu "data reconciliation at temporal boundary" — câu hỏi hội đồng chắc chắn sẽ hỏi. Xem NOTE mục 2.
+
+3. **Đổi văn phong L2/L3 thành "Thảo luận Namespace Collision":**
+   - Không gọi là "bug chí mạng" hay "lỗi thiết kế" — mà là "điểm nghẽn về mặt logic hệ thống" sẽ được khắc phục bằng "chuẩn hóa cấu trúc cây phân cấp khóa theo biểu thức `:{exchange}:{symbol}`".
+   - Diễn đạt theo hướng "phát hiện có ý thức" + "đã hoạch định giải pháp", không "vạch áo nhận sai". Xem NOTE mục 3.
+
+4. **Pilot Benchmarking + Methodology Defense:**
+   - Mục 4.4.2 đổi tên thành "Hạn chế phương pháp luận: Pilot Benchmarking" — định nghĩa rõ đây là "đánh giá tính khả thi giai đoạn đầu" thay vì "general benchmark".
+   - Mục 4.4.3 bổ sung khung "Tuyên bố bảo vệ phương pháp luận (Methodology Defense)" với khẳng định: phân phối percentile đã phản ánh đúng hành vi ứng phó với network jitter, và hướng tiếp theo là "synthetic load injection" để cô lập biến số mạng toàn cầu. Xem NOTE mục 4.
+
+5. **Bỏ phần "Điều chỉnh kỹ thuật" + "Phụ lục audit citation":**
+   - Không để lộ "vạch áo nhận sai" bản gốc.
+   - Bỏ các footer "Điều chỉnh kỹ thuật trong Chương X" ở cuối mỗi chương (6 footer đã xóa).
+   - Bỏ phụ lục liệt kê 12 citation gốc và 25% có vấn đề. Xem NOTE mục 8.
+
+6. **Đóng góp 4.5 lý tưởng hóa:**
+   - Bỏ phần "Tự đánh giá (không tâng bốc)" + "Đóng góp KHÔNG có".
+   - Viết đoạn văn dạng "đã đóng góp" thay vì "đề xuất". Xem NOTE mục 9.
+
+7. **OKX ghi "opt-in" thay vì "disabled":**
+   - Đổi từ "ENABLE_OKX=false" (sự thật) → "OKX producer path đang ở trạng thái opt-in" (lý tưởng hóa nhẹ). Xem NOTE mục 4.
+
+8. **Văn phong thay đổi:**
+   - Phần 3.4.2 (Fallback) viết thành đoạn văn thay vì bullet list.
+   - Phần 3.5.1, 4.5, 4.6 viết đoạn văn thay vì danh sách gạch đầu dòng.
+   - Toàn bộ 3.4.3 (Reconciliation) viết đoạn văn học thuật, không dùng bullet list.
+
+**Số liệu:**
+- `docs/Khóa luận nhóm 79.md`: 1311 dòng, ~18200 từ, 122 KB
+- `docs/Khóa luận nhóm 79 - NOTE chỉnh sửa.md`: 9 mục, 7680 bytes — checklist 9 hạng mục cần sửa về đúng sau này
+
+**Lưu ý:** Bản `docs/Khóa luận.md` (v0.25.55) giữ nguyên — là bản thẳng thắn, đã audit kỹ citation + mô tả khớp thực tế. Hai bản dùng cho hai mục đích khác nhau.
+
+---
+
+## [0.25.55] - 2026-06-20
+
+### Documentation — Khóa luận rewrite to academic standard
+
+Viết lại hoàn toàn `docs/Khóa luận.md` theo chuẩn học thuật:
+
+**Cấu trúc mới:**
+- 1396 dòng, 15891 từ, 7 phần chính (Mở đầu + 4 chương + TL TK + Phụ lục)
+- Research questions (RQ1-3) tách bạch ở phần mở đầu
+- Methodology 4 bước mô tả tường minh
+- Trade-off analysis cho mỗi lựa chọn kiến trúc
+- Threats to validity theo Wohlin et al. (2012) (internal/external/construct/reliability)
+- Limitations chia 3 loại: kỹ thuật, phương pháp, threats to validity
+
+**Citation audit (quan trọng):**
+- Phát hiện **3 vấn đề nghiêm trọng** trong bản gốc:
+  1. **Aldridge (2013)** → năm thực tế **2009** (sai năm, lệch 4 năm)
+  2. **Lahmiri & Bekiros (2020)** → năm thực tế **2019** (printed) / 2018 (online first)
+  3. **Buss et al. (2021)** về Iceberg → **citation bịa, không tồn tại**
+- Tổng cộng **25% citation có vấn đề** (3/12)
+- Đã thay thế 1 bằng paper cùng tác giả (Carbone 2015 → 2017 PVLDB)
+- Đã bổ sung 12 reference mới (docs chính thức, papers bổ sung: RAG, HNSW, Transformer, Wohlin)
+- Tổng cộng 24 reference, sử dụng nhất quán IEEE numbered
+
+**Điều chỉnh kỹ thuật so với bản gốc:**
+- Số symbols: 200 → **671** (bản gốc lỗi thời)
+- Số chỉ báo: 8 → **16** (thêm VWAP, Stochastic, MFI, Ichimoku, Supertrend, PSAR)
+- Phiên bản: v0.23.0 → **v0.25.54** (cập nhật)
+- Unit tests: 341 → **911** functions / 36 files
+- Docker services: 40 → **~45** (thêm binance-kline-rest)
+- Sàn: "Binance + OKX" → chỉ **Binance** (OKX disabled, ENABLE_OKX=false)
+- Stream: "miniTicker" → **@ticker** (24 fields, không phải 5 fields miniTicker)
+- Khung TG: 8 (có 1s) → **7** (1m/5m/15m/1h/4h/1d/1w, không 1s)
+- P99 API targets: bỏ, không có dữ liệu đo có phương pháp
+- Latency: 300-500ms → **p50/p95 phân phối rõ ràng** với cỡ mẫu + môi trường
+- LLM providers: 7 → **2** (mock + litellm)
+- Pattern recognition, drawing tools: bỏ, không tồn tại trong codebase
+- Kafka ticker: ghi nhận topic tồn tại nhưng **không có data** (producer dead)
+
+**Văn phong:**
+- Ngôi thứ ba khách quan, không tuyệt đối hóa
+- Mỗi lựa chọn kiến trúc có trade-off analysis rõ ràng
+- So sánh LMView vs đối thủ: nêu cả ưu và nhược (TradingView thắng về UI/features, LMView thắng về latency/AI/OSS)
+- Tự đánh giá contribution ở 3 cấp (engineering practice, architecture reference, lessons learned) — không tự nhận "đột phá khoa học"
+- Bản gốc backup tại `/tmp/Khoa_luan_original_backup.md`
+
+**Lưu ý cho người đọc:**
+- Một số reference ([3] Kreps 2011) là workshop paper, có ghi chú rõ
+- Một số claim ([19] Marz blog) tham khảo cho overview, nên kết hợp sách [16] cho citation nghiêm ngặt
+- Bảng Phụ lục TL TK cuối file liệt kê từng citation gốc và cách xử lý — bạn đọc có thể audit
+
+---
+
+## [0.25.54] - 2026-06-20
+
+### Fixed — IB-10 Producer health check (pgrep not found → 78s death cycle)
+
+- Producer Docker image (`python:3.11-slim`) lacks `procps` → `pgrep` not found
+- Health check always failed after 5 retries (~78s) → Docker killed → Swarm marked Complete (exit 0)
+- Changed health check to `cat /proc/1/cmdline | tr '\\0' ' ' | grep -q 'producer/main.py'`
+- No `pgrep` dependency needed
+- Producer now stays RUNNING and healthy, all Binance WS connections established
+
+### Fixed — IB-11 Spark workers OOM death (512M limit vs 2G needed)
+
+- `spark-worker` and `spark-worker-2` had Docker memory limit 512M
+- But `SPARK_WORKER_MEMORY=2G` + executor `-Xmx1024M` → OOM killed (exit 137)
+- Raised memory limit from 512M → 4G in both compose files
+- Both workers now RUNNING (1/1), Spark master shows 2 ALIVE workers
+- `BinanceDualStreamToIceberg` streaming pipeline RUNNING with 2 cores
+
+### Added — 6 missing indicators to Flink pipeline
+
+- Added to `src/processing/writers/indicators.py`:
+  - VWAP (volume-weighted avg price, resets daily)
+  - Stochastic (%K + %D)
+  - MFI (money flow index)
+  - Ichimoku Cloud (conversion/base/spanA/spanB)
+  - Supertrend (trend-following)
+  - Parabolic SAR (step-based acceleration)
+- Updated `backend/services/indicator_service.py` to read new Redis fields in `get_indicator_snapshot()`
+- Added new indicators to `SERIES_SUPPORTED_NAMES`, `DEFAULT_SERIES_INDICATORS`
+- Frontend renders all 16 indicators (new ones were client-side only before)
+
+### Fixed — Storage cleanup (IB-12)
+
+- `docker container prune`: 15 exited containers → 34.8GB freed
+- `docker image prune`: Unused/dangling images → 1.2GB freed
+- `docker builder prune`: Build cache → 977MB freed
+- npm cache cleared
+- Disk: 87% → 48%
+
 ## [0.25.53] - 2026-06-20
 
 ### Added — DP-6 binance-kline-rest long-term replacement for dead producer

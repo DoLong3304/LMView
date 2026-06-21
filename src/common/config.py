@@ -49,7 +49,7 @@ ICEBERG_TABLE_KLINES = f"{ICEBERG_CATALOG}.{ICEBERG_DB}.coin_klines"
 KLINE_INTERVAL_WS      = os.environ.get("KLINE_INTERVAL", "1m")
 DEPTH_LEVEL            = os.environ.get("DEPTH_LEVEL", "20")
 DEPTH_UPDATE_MS        = os.environ.get("DEPTH_UPDATE_MS", "100")
-SYMBOLS_PER_CONNECTION = int(os.environ.get("SYMBOLS_PER_CONNECTION", "25"))
+SYMBOLS_PER_CONNECTION = int(os.environ.get("SYMBOLS_PER_CONNECTION", "84"))
 SYMBOLS_PER_DEPTH_CONN = int(os.environ.get("SYMBOLS_PER_DEPTH_CONN", "15"))
 KLINE_SYMBOLS_PER_CONN  = int(os.environ.get("KLINE_SYMBOLS_PER_CONN", "20"))
 MAX_SYMBOLS            = int(os.environ.get("MAX_SYMBOLS", "200"))
@@ -72,7 +72,7 @@ KLINE_BATCH_INFLUX   = 1000
 KLINES_PER_REQ       = 1000
 MIN_GAP_SEC          = 300
 MAX_BACKFILL_DAYS    = 7
-MAX_WORKERS          = 5
+MAX_WORKERS          = 8
 FLUSH_THRESHOLD      = int(os.environ.get("BACKFILL_FLUSH_THRESHOLD", "10000"))
 RETENTION_1M_DAYS    = int(os.environ.get("RETENTION_1M_DAYS", "90"))
 

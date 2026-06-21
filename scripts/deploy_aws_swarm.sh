@@ -13,11 +13,14 @@
 #
 # Usage:
 #   bash scripts/deploy_aws_swarm.sh [--build] [--skip-build] [--registry-only]
+#                                    [--registry-port=5000] [--no-color]
 #
 # Options:
-#   --build         Force rebuild all images before deploy (default)
-#   --skip-build    Skip image build, deploy with existing images
-#   --registry-only Just push images to the local registry, don't deploy
+#   --build                Force rebuild all images before deploy (default)
+#   --skip-build           Skip image build, deploy with existing images
+#   --registry-only        Just push images to the local registry, don't deploy
+#   --registry-port=N      Override the local registry port (default 5000)
+#   --no-color             Disable ANSI colors (also via NO_COLOR env var)
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -31,6 +34,11 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
+
+# Respect NO_COLOR (https://no-color.org) and non-tty output (CI logs)
+if [ -n "${NO_COLOR:-}" ] || [ ! -t 1 ]; then
+  RED=''; GREEN=''; YELLOW=''; CYAN=''; NC=''
+fi
 
 log()  { printf "${CYAN}[deploy]${NC} %s\n" "$*"; }
 ok()   { printf "${GREEN}[deploy]${NC} ✅ %s\n" "$*"; }
@@ -46,10 +54,16 @@ MANAGER_IP=""
 # ── Parse arguments ──────────────────────────────────────────────────────────
 for arg in "$@"; do
   case "$arg" in
-    --skip-build)    DO_BUILD=false ;;
-    --build)         DO_BUILD=true ;;
-    --registry-only) REGISTRY_ONLY=true; DO_BUILD=true ;;
-    *)               warn "Unknown argument: $arg" ;;
+    --skip-build)        DO_BUILD=false ;;
+    --build)             DO_BUILD=true ;;
+    --registry-only)     REGISTRY_ONLY=true; DO_BUILD=true ;;
+    --registry-port=*)   REGISTRY_PORT="${arg#*=}" ;;
+    --no-color)          RED=''; GREEN=''; YELLOW=''; CYAN=''; NC='' ;;
+    -h|--help)
+      sed -n '2,20p' "$0"
+      exit 0
+      ;;
+    *)                   warn "Unknown argument: $arg" ;;
   esac
 done
 
@@ -156,6 +170,7 @@ CUSTOM_IMAGES=(
   "cryptoprice/influx-backfill:0.25.0"
   "cryptoprice/trino:442"
   "cryptoprice/dagster:1.8.10"
+  "cryptoprice/ai-service:latest"
 )
 
 log "Pushing ${#CUSTOM_IMAGES[@]} custom images to local registry (${REGISTRY_ADDR})..."
@@ -237,6 +252,8 @@ if isinstance(data, MutableMapping):
       service_config.pop('profiles', None)
       service_config.pop('container_name', None)
       service_config.pop('depends_on', None)
+      service_config.pop('build', None)
+      service_config.pop('restart', None)
 
       # Rewrite custom image tags to point at the local registry
       image = service_config.get('image', '')

@@ -10,7 +10,7 @@ import asyncio
 import json
 import time
 
-from fastapi import APIRouter, HTTPException, Query
+from typing import List
 
 from backend.core.constants import INTERVAL_SECONDS, INFLUX_1M_RETENTION_DAYS, MAX_RAW_CANDLES, LIVE_MAX_BASE_ROWS, MAX_BACKFILL_PAGES
 from backend.core.database import get_redis
@@ -25,7 +25,13 @@ from backend.services.candle_service import (
     query_trino_hourly,
 )
 
+from fastapi import APIRouter, Query
 router = APIRouter(prefix="/api", tags=["klines"])
+
+# New merged endpoint
+from fastapi import Depends
+from typing import Dict
+from backend.core.database import get_redis
 
 
 @router.get("/klines")
@@ -91,6 +97,82 @@ async def get_klines(
         await pipe.execute()
 
     return result
+
+# Merged endpoint
+from fastapi import Depends
+from typing import Dict, List
+from redis.asyncio import Redis
+
+@router.get("/merged/{symbol}")
+async def get_merged_klines(
+    symbol: str,
+    interval: str = "1m",
+    limit: int = Query(100, ge=1, le=1000),
+    redis: Redis = Depends(get_redis),
+) -> List[Dict]:
+    """Return merged candles: closed candles from Redis zset + live forming candle."""
+    # 1. Get closed candles (most recent first)
+    zset_key = f"candle:{interval}:binance:{symbol.lower()}"
+    raw = await redis.zrevrangebyscore(zset_key, "+inf", "-inf", withscores=True, start=0, num=limit)
+    closed: List[Dict] = []
+    for item_bytes, ts_ms in raw:
+        item = json.loads(item_bytes)
+        item["isClosed"] = True
+        item["timestamp"] = int(ts_ms)
+        closed.append(item)
+
+    # 2. Get live ticker
+    ticker_key = f"ticker:latest:binance:{symbol.lower()}"
+    ticker = await redis.hgetall(ticker_key)
+    if not ticker:
+        return closed
+    current_price = float(ticker.get(b"price", 0) or 0)
+    current_ts = int(ticker.get(b"event_time", int(time.time() * 1000)))
+    if current_price <= 0:
+        return closed
+    forming_ts = (current_ts // 60000) * 60000
+    # 3. Build forming candle
+    if closed and closed[0]["timestamp"] == forming_ts:
+        last = closed[0]
+        forming = {
+            "timestamp": forming_ts,
+            "open": last["open"],
+            "high": max(last["high"], current_price),
+            "low": min(last["low"], current_price),
+            "close": current_price,
+            "volume": last["volume"],
+            "quote_volume": last.get("quote_volume", 0),
+            "trade_count": last.get("trade_count", 0),
+            "isClosed": False,
+        }
+        merged = [forming] + closed[1:]
+    elif closed:
+        forming = {
+            "timestamp": forming_ts,
+            "open": current_price,
+            "high": current_price,
+            "low": current_price,
+            "close": current_price,
+            "volume": 0,
+            "quote_volume": 0,
+            "trade_count": 0,
+            "isClosed": False,
+        }
+        merged = [forming] + closed
+    else:
+        forming = {
+            "timestamp": forming_ts,
+            "open": current_price,
+            "high": current_price,
+            "low": current_price,
+            "close": current_price,
+            "volume": 0,
+            "quote_volume": 0,
+            "trade_count": 0,
+            "isClosed": False,
+        }
+        merged = [forming]
+    return merged
 
 
 async def _fetch_1s_candles(r, symbol: str, limit: int, end_time: int | None, now_ms: int, exchange: str = "binance") -> list[dict]:

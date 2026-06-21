@@ -2,7 +2,9 @@
 Technical indicator writer for Flink stream processing.
 
 Receives closed 1m klines, maintains rolling close-price buffers per symbol,
-computes SMA20, SMA50, EMA12, EMA26, and writes results to Redis Sentinel + InfluxDB.
+computes SMA20, SMA50, EMA12, EMA26, RSI14, Bollinger Bands, MACD, ATR14,
+VWAP, Stochastic, MFI, Ichimoku Cloud, Supertrend, Parabolic SAR,
+and writes results to Redis Sentinel + InfluxDB.
 """
 
 import json
@@ -45,18 +47,17 @@ SOURCE_TOPIC = "crypto_klines_indicators"
 
 
 class IndicatorWriter(FlatMapFunction):
-    """Computes SMA/EMA indicators from closed 1m klines.
+    """Computes technical indicators from closed 1m klines.
 
     Outputs:
         - ``indicator:latest:{exchange}:{symbol}`` hash in Redis Sentinel
         - ``indicators`` measurement in InfluxDB
 
-    State retention note (B7):
-        The EMA / MACD signal state lives in this in-process dict
-        (``self._ema_state``). On Flink restart this state is
-        re-warmed by replaying recent klines. The warmup duration
-        is recorded via :func:`record_indicator_warmup` so that
-        operators can see how long the post-restart hydration takes.
+    Computed indicators (v0.25.54+):
+        Trend: SMA20, SMA50, EMA12, EMA26, VWAP, Ichimoku Cloud (conv/base/spanA/spanB), Supertrend, PSAR
+        Momentum: RSI14, MACD (line/signal/histogram), Stochastic (%K/%D), MFI
+        Volatility: Bollinger Bands (upper/middle/lower/width), ATR14
+        Volume: Volume SMA20
     """
 
     SMA_PERIODS = (20, 50)
@@ -125,6 +126,150 @@ class IndicatorWriter(FlatMapFunction):
             true_ranges.append(tr)
         return sum(true_ranges) / len(true_ranges) if true_ranges else None
 
+    # ── New indicators (v0.25.54+) ────────────────────────────────────────
+
+    def _vwap(self, state_key, typical_price, volume, timestamp_ms):
+        """Volume-Weighted Average Price — resets daily (UTC midnight)."""
+        state = self._vwap_state.get(state_key, {"tpv": 0.0, "vol": 0.0, "day": 0})
+        day = timestamp_ms // 86400000  # ms → UTC day number
+        if day != state["day"]:
+            state = {"tpv": 0.0, "vol": 0.0, "day": day}
+        state["tpv"] += typical_price * volume
+        state["vol"] += volume
+        self._vwap_state[state_key] = state
+        if state["vol"] == 0:
+            return None
+        return state["tpv"] / state["vol"]
+
+    def _stochastic(self, state_key, close, high, low, period=14):
+        """Stochastic %K — rolling window high/low."""
+        sym_highs = self._highs.setdefault(state_key, deque(maxlen=self.MAX_HISTORY))
+        sym_lows = self._lows.setdefault(state_key, deque(maxlen=self.MAX_HISTORY))
+        sym_highs.append(high)
+        sym_lows.append(low)
+        if len(sym_highs) < period:
+            return None
+        window_highs = list(sym_highs)[-period:]
+        window_lows = list(sym_lows)[-period:]
+        highest = max(window_highs)
+        lowest = min(window_lows)
+        if highest == lowest:
+            return 50.0
+        return ((close - lowest) / (highest - lowest)) * 100.0
+
+    def _stochastic_d(self, state_key, k_value, period=3):
+        """Stochastic %D — SMA of last 3 %K values."""
+        state = self._stoch_d_state.setdefault(state_key, deque(maxlen=period))
+        state.append(k_value)
+        if len(state) < period:
+            return None
+        return sum(state) / period
+
+    def _mfi(self, state_key, candles, period=14):
+        """Money Flow Index — typical_price × volume flow ratio."""
+        rows = list(candles)
+        if len(rows) < period + 1:
+            return None
+        window = rows[-(period + 1):]
+        pos_flow = 0.0
+        neg_flow = 0.0
+        for i in range(1, len(window)):
+            tp = (window[i]["high"] + window[i]["low"] + window[i]["close"]) / 3.0
+            prev_tp = (window[i - 1]["high"] + window[i - 1]["low"] + window[i - 1]["close"]) / 3.0
+            mf = tp * window[i]["volume"]
+            if tp > prev_tp:
+                pos_flow += mf
+            else:
+                neg_flow += mf
+        if neg_flow == 0.0:
+            return 100.0
+        ratio = pos_flow / neg_flow
+        return 100.0 - (100.0 / (1.0 + ratio))
+
+    @staticmethod
+    def _ichimoku(candles, conv_period=9, base_period=26, span_period=52):
+        """Ichimoku Cloud — conversion, base, spanA, spanB lines."""
+        rows = list(candles)
+        if len(rows) < base_period:
+            return None, None, None, None
+        conv_window = rows[-conv_period:]
+        conv = (max(c["high"] for c in conv_window) + min(c["low"] for c in conv_window)) / 2.0
+        base_window = rows[-base_period:]
+        base = (max(c["high"] for c in base_window) + min(c["low"] for c in base_window)) / 2.0
+        span_a = (conv + base) / 2.0
+        span_b_window = rows[-span_period:] if len(rows) >= span_period else rows
+        span_b = (max(c["high"] for c in span_b_window) + min(c["low"] for c in span_b_window)) / 2.0
+        return conv, base, span_a, span_b
+
+    def _supertrend(self, state_key, candles, atr_val, period=10, multiplier=3.0):
+        """Supertrend — trend-following with state."""
+        rows = list(candles)
+        if atr_val is None or len(rows) < 2:
+            return None
+        cur = rows[-1]
+        prev = rows[-2]
+        hl2 = (cur["high"] + cur["low"]) / 2.0
+        basic_upper = hl2 + multiplier * atr_val
+        basic_lower = hl2 - multiplier * atr_val
+        state = self._supertrend_state.get(state_key)
+        if state is None:
+            state = {"final_upper": basic_upper, "final_lower": basic_lower, "in_uptrend": cur["close"] > basic_upper}
+            self._supertrend_state[state_key] = state
+        else:
+            st_upper = basic_upper if basic_upper < state["final_upper"] or prev["close"] > state["final_upper"] else state["final_upper"]
+            st_lower = basic_lower if basic_lower > state["final_lower"] or prev["close"] < state["final_lower"] else state["final_lower"]
+            state["final_upper"] = st_upper
+            state["final_lower"] = st_lower
+            if cur["close"] > st_upper:
+                state["in_uptrend"] = True
+            elif cur["close"] < st_lower:
+                state["in_uptrend"] = False
+            self._supertrend_state[state_key] = state
+        return state["final_lower"] if state["in_uptrend"] else state["final_upper"]
+
+    def _psar(self, state_key, close, high, low):
+        """Parabolic SAR — step-based with acceleration."""
+        if state_key not in self._highs or len(self._highs[state_key]) < 2:
+            return None
+        state = self._psar_state.get(state_key)
+        if state is None:
+            prev_high = list(self._highs[state_key])[-2]
+            rising = close >= prev_high
+            state = {
+                "rising": rising,
+                "acceleration": 0.02,
+                "extreme_point": high if rising else low,
+                "sar": low if rising else high,
+            }
+            self._psar_state[state_key] = state
+        prev_sar = state["sar"]
+        sar = prev_sar + state["acceleration"] * (state["extreme_point"] - prev_sar)
+        prev_high = self._highs[state_key][-2] if len(self._highs[state_key]) >= 2 else high
+        prev_low = self._lows[state_key][-2] if state_key in self._lows and len(self._lows[state_key]) >= 2 else low
+        if state["rising"]:
+            sar = min(sar, prev_high, high)
+            if low < sar:
+                state["rising"] = False
+                state["sar"] = state["extreme_point"]
+                state["extreme_point"] = low
+                state["acceleration"] = 0.02
+            elif high > state["extreme_point"]:
+                state["extreme_point"] = high
+                state["acceleration"] = min(state["acceleration"] + 0.02, 0.2)
+        else:
+            sar = max(sar, prev_low, low)
+            if high > sar:
+                state["rising"] = True
+                state["sar"] = state["extreme_point"]
+                state["extreme_point"] = high
+                state["acceleration"] = 0.02
+            elif low < state["extreme_point"]:
+                state["extreme_point"] = low
+                state["acceleration"] = min(state["acceleration"] + 0.02, 0.2)
+        state["sar"] = sar
+        self._psar_state[state_key] = state
+        return sar
+
     def open(self, runtime_context):
         # Get Redis master connection via Sentinel
         self._r = get_flink_redis()
@@ -135,6 +280,13 @@ class IndicatorWriter(FlatMapFunction):
         self._candles: dict[str, deque] = {}
         self._ema_state: dict[str, dict[int, float]] = {}
         self._macd_signal_state: dict[str, float] = {}
+        # New indicator states (v0.25.54+)
+        self._vwap_state: dict[str, dict] = {}
+        self._stoch_d_state: dict[str, deque] = {}
+        self._supertrend_state: dict[str, dict] = {}
+        self._psar_state: dict[str, dict] = {}
+        self._highs: dict[str, deque] = {}
+        self._lows: dict[str, deque] = {}
         self._buffer = []
         self._last_flush = time.time()
         self._history_ttl_sec = int(os.environ.get("INDICATOR_HISTORY_TTL_SEC", "604800"))
@@ -146,43 +298,27 @@ class IndicatorWriter(FlatMapFunction):
         # needing a Kafka replay.
         from writers.indicator_state import IndicatorStateStore
         self._state_store = IndicatorStateStore(self._r)
-        # Hydrate from Redis. We don't know the exchange here yet
-        # (Flink assigns subtasks per-key later) so the first emit
-        # will trigger a per-exchange hydrate.
         self._hydrated_exchanges: set[str] = set()
 
-        # Track warmup timing (B7 visibility). _open_time is the moment
-        # this subtask becomes ready to process; we mark warmup complete
-        # once we've emitted indicators for the first new candle for
-        # every previously-known key (or after the first minute of work).
         self._open_time = time.monotonic()
         self._first_candles_seen: set[str] = set()
         self._warmup_recorded = False
         init_metrics()
 
     def _record_state_keys(self) -> None:
-        """Snapshot the in-memory state-key gauges.
-
-        These gauges make the in-memory indicator dict (B7) visible
-        to operators. We update the gauge lazily on each emit rather
-        than maintaining a separate counter, so the value is always
-        consistent with the current process state.
-        """
+        """Snapshot the in-memory state-key gauges."""
         try:
             closes = len(self._closes)
             volumes = len(self._volumes)
             candles = len(self._candles)
             ema = len(self._ema_state)
             macd = len(self._macd_signal_state)
-            # Use the closes count as the "active symbol" gauge and
-            # expose the per-state breakdown as separate labels
             INDICATOR_STATE_KEYS.labels(state_type="candle_deque").set(candles)
             INDICATOR_STATE_KEYS.labels(state_type="closes_deque").set(closes)
             INDICATOR_STATE_KEYS.labels(state_type="volumes_deque").set(volumes)
             INDICATOR_STATE_KEYS.labels(state_type="ema_state").set(ema)
             INDICATOR_STATE_KEYS.labels(state_type="macd_signal").set(macd)
         except Exception as e:
-            # Never let metric emission break the main pipeline
             log.debug("[Indicators] state-keys gauge update failed: %s", e)
 
     def _flush_influx(self, trigger: str = "time"):
@@ -266,6 +402,7 @@ class IndicatorWriter(FlatMapFunction):
             high_price = float(value["high"])
             low_price = float(value["low"])
             volume = float(value.get("volume", 0.0))
+            typical_price = (high_price + low_price + close_price) / 3.0
 
             # First-time-encountered key → record new key + start warmup
             if state_key not in self._closes:
@@ -281,12 +418,14 @@ class IndicatorWriter(FlatMapFunction):
                 "low": low_price,
                 "close": close_price,
                 "volume": volume,
+                "kline_start": kline_start,
             })
 
             prices = self._closes[state_key]
             volumes = self._volumes[state_key]
             candles = self._candles[state_key]
 
+            # ── Core indicators ────────────────────────────────────────────
             sma20 = self._sma(prices, 20)
             sma50 = self._sma(prices, 50)
             ema12 = self._ema(state_key, close_price, 12)
@@ -299,7 +438,23 @@ class IndicatorWriter(FlatMapFunction):
             macd_histogram = macd - macd_signal
             atr14 = self._atr(candles, 14)
 
-            # Record indicator recomputations (B7 + observability)
+            # ── New indicators (v0.25.54+) ────────────────────────────────
+            vwap = self._vwap(state_key, typical_price, volume, kline_start)
+
+            stoch_k = self._stochastic(state_key, close_price, high_price, low_price, 14)
+            stoch_d = self._stochastic_d(state_key, stoch_k, 3) if stoch_k is not None else None
+
+            mfi = self._mfi(state_key, candles, 14)
+
+            ichi_conv, ichi_base, ichi_span_a, ichi_span_b = None, None, None, None
+            if len(candles) >= 26:
+                ichi_conv, ichi_base, ichi_span_a, ichi_span_b = self._ichimoku(candles, 9, 26, 52)
+
+            supertrend = self._supertrend(state_key, candles, atr14, 10, 3.0)
+
+            psar = self._psar(state_key, close_price, high_price, low_price)
+
+            # Record indicator recomputations
             record_indicator_recompute(indicator="sma20", trigger="new_candle")
             record_indicator_recompute(indicator="sma50", trigger="new_candle")
             record_indicator_recompute(indicator="ema12", trigger="new_candle")
@@ -308,8 +463,14 @@ class IndicatorWriter(FlatMapFunction):
             record_indicator_recompute(indicator="bollinger", trigger="new_candle")
             record_indicator_recompute(indicator="macd", trigger="new_candle")
             record_indicator_recompute(indicator="atr14", trigger="new_candle")
+            record_indicator_recompute(indicator="vwap", trigger="new_candle")
+            record_indicator_recompute(indicator="stochastic", trigger="new_candle")
+            record_indicator_recompute(indicator="mfi", trigger="new_candle")
+            record_indicator_recompute(indicator="ichimoku", trigger="new_candle")
+            record_indicator_recompute(indicator="supertrend", trigger="new_candle")
+            record_indicator_recompute(indicator="psar", trigger="new_candle")
 
-            # Write to KeyDB
+            # ── Write to Redis (KeyDB) ────────────────────────────────────
             mapping = {
                 "timestamp": kline_start,
                 "interval": interval,
@@ -338,6 +499,25 @@ class IndicatorWriter(FlatMapFunction):
             mapping["macd"] = round(macd, 8)
             mapping["macd_signal"] = round(macd_signal, 8)
             mapping["macd_histogram"] = round(macd_histogram, 8)
+
+            # New indicator fields (v0.25.54+)
+            if vwap is not None:
+                mapping["vwap"] = round(vwap, 8)
+            if stoch_k is not None:
+                mapping["stoch_k"] = round(stoch_k, 8)
+            if stoch_d is not None:
+                mapping["stoch_d"] = round(stoch_d, 8)
+            if mfi is not None:
+                mapping["mfi"] = round(mfi, 8)
+            if ichi_conv is not None:
+                mapping["ichi_conversion"] = round(ichi_conv, 8)
+                mapping["ichi_base"] = round(ichi_base, 8)
+                mapping["ichi_span_a"] = round(ichi_span_a, 8)
+                mapping["ichi_span_b"] = round(ichi_span_b, 8)
+            if supertrend is not None:
+                mapping["supertrend"] = round(supertrend, 8)
+            if psar is not None:
+                mapping["psar"] = round(psar, 8)
 
             latest_key = f"indicator:latest:{exchange}:{symbol}:{interval}"
             legacy_key = f"indicator:latest:{exchange}:{symbol}"
@@ -371,8 +551,6 @@ class IndicatorWriter(FlatMapFunction):
                 raise
             finally:
                 redis_duration = time.monotonic() - redis_start
-                # Log every write as a single-record flush so we can
-                # see per-symbol Redis write latency in dashboards.
                 record_flush(
                     writer=WRITER_NAME,
                     sink=SINK_NAME_REDIS,
@@ -382,7 +560,7 @@ class IndicatorWriter(FlatMapFunction):
                     error=redis_error,
                 )
 
-            # Write to InfluxDB
+            # ── Write to InfluxDB ─────────────────────────────────────────
             point = Point("indicators").tag("symbol", symbol).tag("exchange", exchange)
             if sma20 is not None:
                 point = point.field("sma20", round(sma20, 8))
@@ -412,25 +590,40 @@ class IndicatorWriter(FlatMapFunction):
                 .field("close", close_price)
                 .time(kline_start, WritePrecision.MS)
             )
+            # New InfluxDB fields
+            if vwap is not None:
+                point = point.field("vwap", round(vwap, 8))
+            if stoch_k is not None:
+                point = point.field("stoch_k", round(stoch_k, 8))
+            if stoch_d is not None:
+                point = point.field("stoch_d", round(stoch_d, 8))
+            if mfi is not None:
+                point = point.field("mfi", round(mfi, 8))
+            if ichi_conv is not None:
+                point = (
+                    point
+                    .field("ichi_conversion", round(ichi_conv, 8))
+                    .field("ichi_base", round(ichi_base, 8))
+                    .field("ichi_span_a", round(ichi_span_a, 8))
+                    .field("ichi_span_b", round(ichi_span_b, 8))
+                )
+            if supertrend is not None:
+                point = point.field("supertrend", round(supertrend, 8))
+            if psar is not None:
+                point = point.field("psar", round(psar, 8))
             self._buffer.append(point)
+
             record_kafka_source(topic=SOURCE_TOPIC, partition=0, n=1)
             record_writer_event_time(
                 writer=WRITER_NAME, exchange=exchange, symbol=symbol,
                 event_ts=kline_start / 1000.0,
             )
             record_buffer_size(WRITER_NAME, SINK_NAME_INFLUX, len(self._buffer))
-
-            # Snapshot state-key gauges on every emit (cheap; one set call)
             self._record_state_keys()
 
-            # B7 warmup tracking: record the warmup duration once we've
-            # seen the first new candle for a key after open(). This is a
-            # proxy for the EMA / MACD state warmup cost.
+            # B7 warmup tracking
             if not self._warmup_recorded:
                 self._first_candles_seen.add(state_key)
-                # We consider warmup "complete" once we've seen at least
-                # one new candle for any key (Flink re-hydrates the rest
-                # asynchronously from Kafka offsets).
                 if len(self._first_candles_seen) >= 1:
                     warmup_duration = time.monotonic() - self._open_time
                     record_indicator_warmup(state_type="ema", duration_sec=warmup_duration)
@@ -440,8 +633,6 @@ class IndicatorWriter(FlatMapFunction):
 
             if len(self._buffer) >= 200 or (time.time() - self._last_flush) >= 5.0:
                 self._flush_influx(trigger="size" if len(self._buffer) >= 200 else "time")
-                # B7 — persist the in-process state to Redis so a
-                # restart can pick up where we left off.
                 self._persist_state(exchange)
 
         except Exception as e:
@@ -450,22 +641,12 @@ class IndicatorWriter(FlatMapFunction):
             try:
                 record_kafka_source_drop(topic=SOURCE_TOPIC, reason=type(e).__name__)
             except Exception as metric_exc:
-                # Never let a metric hiccup hide the real error.
-                # We log at DEBUG because the parent ``log.error``
-                # already carries the user-facing information.
                 log.debug("[Indicators] metric record failed: %s", metric_exc)
         return iter([])
 
     def _persist_state(self, exchange: str) -> None:
-        """Snapshot the writer's in-process dicts to Redis (B7).
-
-        Called after every flush_influx. The snapshot is small
-        (≤256KB per symbol) and the write is fire-and-forget: a
-        Redis hiccup does not block the indicator pipeline.
-        """
         if not hasattr(self, "_state_store"):
             return
-        # Lazy first-touch hydrate (B7).
         if exchange not in self._hydrated_exchanges:
             self._state_store.hydrate_writer(self, exchange)
             self._hydrated_exchanges.add(exchange)

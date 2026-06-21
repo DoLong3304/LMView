@@ -1,34 +1,41 @@
-# Core API dependencies (always installed)
-# (which together pull in ~5GB) live in requirements-ai.txt and are
-# only installed when AI_ENABLE_REAL_LLM=true. By default the system
-# uses the mock provider (per docs/CHANGELOG.md v0.24.3) so these
-# heavy ML libraries are not needed.
+# ─────────────────────────────────────────────────────────────────────────────
+# Backend (FastAPI gateway) — minimal dependencies
+# ─────────────────────────────────────────────────────────────────────────────
+# After the v0.25.57 AI overhaul, the backend only acts as a thin gateway
+# that proxies AI requests to the standalone ``ai-service``. The heavy ML
+# / AI libraries (litellm, sentence-transformers, langgraph, dashscope)
+# live in ``requirements-ai.txt`` and are installed ONLY in the ai-service
+# image. By default (``AI_SERVICE_EMBEDDED=false``) the backend never
+# touches them at runtime, so we keep the gateway image small and fast.
+#
+# If you ever flip ``AI_SERVICE_EMBEDDED=true`` to run AI in-process again,
+# install ``requirements-ai.txt`` on top of this file.
+
+# Core API stack
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
+pydantic==2.10.4
+httpx==0.28.1
+PyYAML==6.0.2
+
+# Data store clients (used by gateway endpoints)
 redis[hiredis]==5.2.1
 influxdb-client==1.46.0
 trino==0.330.0
-pydantic==2.10.4
-httpx==0.28.1
-prometheus-fastapi-instrumentator==6.1.0
 asyncpg==0.30.0
+
+# Prometheus metrics for the gateway
+prometheus-fastapi-instrumentator==6.1.0
+prometheus-client==0.21.1
+
+# Auth
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
-litellm==1.52.0
-PyYAML==6.0.2
 
-# News scraping dependencies
+# News scraping (RSS feeds, HTML parsing, sentiment)
 feedparser==6.0.11
 beautifulsoup4==4.14.3
 vaderSentiment==3.3.2
 
-# RAG embedding model (pulls torch, ~2GB)
-
-# AI Orchestration dependencies
-langgraph==1.2.6
-langchain-core==1.4.8
-dashscope==1.25.23
-
-# RAG embedding model (heavy, pulls torch ~2GB)
-sentence-transformers==5.6.0
-numpy==2.4.6
+# Async HTTP client for background market fetcher tasks
+aiohttp==3.10.10

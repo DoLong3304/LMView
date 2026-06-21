@@ -75,30 +75,8 @@ async def lifespan(app: FastAPI):
 
     await ensure_default_admin()
 
-    # Preload AI embedding model for RAG (install + load in background)
-    try:
-        from ai_service.config import load_settings
-        s = load_settings()
-        if s.rag_enabled and s.embedding_model:
-            import subprocess, threading, sys
-            def _install_and_preload():
-                try:
-                    import sentence_transformers
-                except ImportError:
-                    logger.info("Installing sentence-transformers for RAG embeddings...")
-                    subprocess.run(
-                        [sys.executable, "-m", "pip", "install", "--quiet", "sentence-transformers"],
-                        timeout=180, check=False,
-                    )
-                try:
-                    from sentence_transformers import SentenceTransformer
-                    SentenceTransformer(s.embedding_model)
-                    logger.info("AI embedding model loaded: %s", s.embedding_model)
-                except Exception as exc:
-                    logger.warning("Emb model preload failed: %s", exc)
-            threading.Thread(target=_install_and_preload, daemon=True).start()
-    except Exception as exc:
-        logger.warning("Embedding preload init failed: %s", exc)
+    # AI embedding model is preloaded by the standalone ai-service container.
+    # Backend is now a thin gateway — see AI_SERVICE_EMBEDDED in .env.
 
     # Start background tasks
     await news_fetcher.start()

@@ -1,4 +1,7 @@
-"""Compatibility wrapper for centralized AI safety guard."""
+"""Compatibility wrapper for AI output guard.
 
-from ai_service.safety.output_guard import *  # noqa: F401,F403
+Re-exports ``ai_service.safety.output_guard`` functions.
+"""
+from ai_service.safety.output_guard import guard_output
 
+__all__ = ["guard_output"]

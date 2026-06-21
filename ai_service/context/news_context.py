@@ -492,11 +492,19 @@ def _generate_caveats(
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _normalize_symbol(symbol: Optional[str]) -> Optional[str]:
-    """Normalize symbol to base form (e.g., 'BTCUSDT' -> 'BTC')."""
+    """Normalize symbol to base form.
+
+    Strips known quote currencies (USDT, USDC, BUSD, USD) **only** from the end of the symbol.
+    Prevents accidental removal from middle (e.g., SHIBUSDT -> SHIB).
+    """
     if not symbol:
         return None
-    cleaned = symbol.upper().replace("USDT", "").replace("USD", "")
-    return cleaned or None
+    sym = symbol.upper()
+    # Order matters: longer suffixes first
+    for suffix in ("USDT", "USDC", "BUSD", "USD"):
+        if sym.endswith(suffix):
+            sym = sym.removesuffix(suffix)
+    return sym or None
 
 
 def _deduplicate_articles(

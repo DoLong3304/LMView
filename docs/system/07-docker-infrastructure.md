@@ -61,7 +61,7 @@ Deployment: `docker stack deploy -c docker-compose.yml -c docker-compose.swarm.y
 
 | Service | Image | Replicas | Status |
 |---|---|---|---|
-| ai-service | python:3.11-slim | 0/1 | Scaffolded (echo only) |
+| ai-service | python:3.11-slim | 0/1 | FastAPI service for AI |
 | litellm | ghcr.io/berriai/litellm | 0/1 | Opt-in |
 
 ### Monitoring & Logging (Worker Node, opt-in)

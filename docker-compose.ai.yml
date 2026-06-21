@@ -1,162 +1,72 @@
-# Docker Compose AI Services Override
-# Usage: docker compose -f docker-compose.yml -f docker-compose.ai.yml --profile ai-api up
+version: "3.9"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# AI SERVICE — standalone FastAPI service
 #
-# Profiles:
-#   ai-api:   AI service using online APIs through LiteLLM (no GPU required)
-#   ai-local: AI service using local vLLM (GPU required)
-#   ai-nlp:   FinBERT sentiment analysis worker (GPU optional, CPU fallback)
+# Runs on the core node, exposes port 8100, and is reachable from the
+# backend (FastAPI) on the same `crypto-net` overlay network. The backend
+# proxies AI chat requests here instead of running AI logic in-process.
 #
-# Core LMView runs without GPU. GPU is only required by ai-local profile.
+# Image tag follows the `cryptoprice/<name>:<tag>` convention so the
+# deploy script's registry rewrite (`cryptoprice/*` → `${REGISTRY_ADDR}/cryptoprice/*`)
+# rewrites it to the Swarm registry address automatically.
+# ══════════════════════════════════════════════════════════════════════════════
 
 services:
-  # 🤖 AI Service (API mode) ─────────────────────────────────────────────
-  # Connects to core FastAPI backend for AI inference using online APIs.
-  # No GPU required.
   ai-service:
-    image: python:3.11-slim
-    profiles: ["ai-api", "ai-local"]
-    container_name: lmview-ai-service
-    working_dir: /app
-    volumes:
-      - .:/app:ro
+    profiles: ["dev", "prod", "ai-api"]
+    build:
+      context: .
+      dockerfile: docker/ai-service/Dockerfile
+    image: cryptoprice/ai-service:latest
+    hostname: ai-service
     environment:
       - AI_MODE=${AI_MODE:-api}
+      - AI_CONFIG_PATH=${AI_CONFIG_PATH:-/app/ai_service/configs/ai.api.yaml}
       - AI_ORCHESTRATION=${AI_ORCHESTRATION:-langgraph}
-      - AI_ENABLE_RAG=${AI_ENABLE_RAG:-true}
+      - AI_ENABLE_REAL_LLM=${AI_ENABLE_REAL_LLM:-true}
+      - AI_SERVICE_EMBEDDED=false
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - LITELLM_BASE_URL=${LITELLM_BASE_URL:-http://litellm:4000}
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-}
-      - VLLM_BASE_URL=${VLLM_BASE_URL:-http://vllm:8000/v1}
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
-      - POSTGRES_USER=${POSTGRES_USER:-iceberg}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
-      - POSTGRES_HOST=postgres
-      - POSTGRES_LMVIEW_DB=${POSTGRES_LMVIEW_DB:-iceberg_catalog}
-    # TODO: Replace with actual service startup command when ai_service/app/main.py
-    # is implemented as a standalone FastAPI server.
-    command: ["echo", "AI service scaffolded — Phase 2 runs embedded in core backend"]
-    deploy:
-      resources:
-        limits:
-          memory: 2g
-    restart: "no"
-
-  # 🔗 LiteLLM Proxy ────────────────────────────────────────────────────
-  # Unified LLM API proxy. Routes to configured providers with fallback.
-  litellm:
-    image: ghcr.io/berriai/litellm:main-latest
-    profiles: ["ai-api"]
-    container_name: lmview-litellm
-    ports:
-      - "4000:4000"
-    environment:
-      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-sk-litellm-master}
-      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-    volumes:
-      - ./ai_service/configs/litellm.yaml:/app/config.yaml:ro
-    command: ["--config", "/app/config.yaml", "--port", "4000"]
-    deploy:
-      resources:
-        limits:
-          memory: 1g
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:4000/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-
-  # 🧠 vLLM Local Inference ─────────────────────────────────────────────
-  # Local model inference server. Requires NVIDIA GPU.
-  vllm:
-    image: vllm/vllm-openai:latest
-    profiles: ["ai-local"]
-    container_name: lmview-vllm
-    ports:
-      - "8000:8000"
-    environment:
-      - VLLM_MODEL=${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}
-    command:
-      - "--model"
-      - "${VLLM_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
-      - "--host"
-      - "0.0.0.0"
-      - "--port"
-      - "8000"
-      - "--gpu-memory-utilization"
-      - "${VLLM_GPU_MEMORY_UTILIZATION:-0.85}"
-      - "--max-model-len"
-      - "16384"
-      - "--served-model-name"
-      - "qwen-local"
-      - "--trust-remote-code"
-      - "--enable-auto-tool-choice"
-      - "--tool-call-parser"
-      - "hermes"
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    mem_limit: 16g
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 120s
-    restart: unless-stopped
-    volumes:
-      - vllm-cache:/root/.cache
-
-  # 📰 FinBERT NLP Worker ───────────────────────────────────────────────
-  # Background worker that processes news articles with FinBERT sentiment
-  # analysis. GPU optional — auto-detects and falls back to CPU.
-  finbert-worker:
-    image: python:3.11-slim
-    profiles: ["ai-nlp"]
-    container_name: lmview-finbert-worker
-    working_dir: /app
-    volumes:
-      - .:/app:ro
-      - finbert-cache:/root/.cache/huggingface
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-iceberg}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-}
+      - REDIS_HOST=redis-master
+      - REDIS_MASTER_NAME=${REDIS_MASTER_NAME:-mymaster}
+      - REDIS_PORT=6379
+      - REDIS_SENTINELS=redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - POSTGRES_LMVIEW_DB=${POSTGRES_LMVIEW_DB:-iceberg_catalog}
-      - FINBERT_DEVICE=${FINBERT_DEVICE:-auto}
-      - FINBERT_PROCESS_INTERVAL=${FINBERT_PROCESS_INTERVAL:-300}
-      - FINBERT_BATCH_SIZE=${FINBERT_BATCH_SIZE:-32}
-    command:
-      - "bash"
-      - "-c"
-      - |
-        pip install --quiet asyncpg transformers torch --extra-index-url https://download.pytorch.org/whl/cpu &&
-        python -m ai_service.nlp.news_processor
-    mem_limit: 4g
+      - INFLUX_URL=http://influxdb:8086
+      - INFLUX_TOKEN=${INFLUX_TOKEN}
+      - INFLUX_ORG=${INFLUX_ORG}
+      - INFLUX_BUCKET=${INFLUX_BUCKET}
+      - LITELLM_BASE_URL=http://litellm:4000
+      - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-}
+    ports:
+      - target: 8100
+        published: 8100
+        protocol: tcp
+        mode: ingress
     healthcheck:
-      test: ["CMD-SHELL", "test -f /tmp/finbert_healthy || exit 1"]
-      interval: 60s
-      timeout: 5s
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8100/health', timeout=3)\""]
+      interval: 30s
+      timeout: 10s
       retries: 3
-      start_period: 120s
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
+      start_period: 60s
+    networks:
+      - crypto-net
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          memory: 4G
 
-volumes:
-  vllm-cache:
-    driver: local
-  finbert-cache:
-    driver: local
+networks:
+  crypto-net:
+    name: cryptoprice_crypto-net
+    external: true

@@ -1443,6 +1443,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     (snapshot: IndicatorStreamSnapshot) => {
       if (!snapshot?.timestamp) return;
       const time = Math.floor(snapshot.timestamp / 1000);
+      // Skip stale indicator snapshots — local ticker-driven calc is ahead
+      const candles = candlesRef.current;
+      const lastTime = candles[candles.length - 1]?.time;
+      if (lastTime != null && time < lastTime) return;
       const values = snapshot.indicators || {};
 
       const updateLine = (series: any, key: string) => {
@@ -1972,6 +1976,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       timeframe,
       onIndicator: (snapshot) => {
         if (cancelled) return;
+        if (!snapshot || !snapshot.interval) return;
         if (normalizeTimeframe(snapshot.interval) !== normalizeTimeframe(timeframe)) return;
         applyStreamedIndicatorSnapshot(snapshot);
       },
