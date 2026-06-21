@@ -22,8 +22,9 @@ COPY --from=builder /install /usr/local
 
 WORKDIR /app
 
-# Copy source code
+# Copy source code + Avro schemas (needed for Schema Registry registration)
 COPY src/ /app/src/
+COPY schemas/ /app/schemas/
 
 # Healthcheck — /healthz returns 503 if last 1m sweep is stale (> 2x poll interval).
 # Match the compose healthcheck so either can fail the task.

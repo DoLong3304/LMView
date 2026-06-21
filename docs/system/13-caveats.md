@@ -199,6 +199,54 @@ All known bugs, design weaknesses, and technical debt as of 2026-06-20 (v0.25.51
 - **Status**: Indentation corrected (v0.25.51). Behavioral change — previously-missing env vars now reach the containers. Verify flink-jobmanager + spark-worker after next deploy.
 - **Verification**: `docker compose --profile dev config`, `--profile prod --profile monitoring --profile logging config`, `--profile swarm` all validate clean.
 
+### IB-10: Flink TaskManager Restarts Every ~1m45s — 🔴 OPEN (blocks pipeline)
+- **Symptom**: `cryptoprice_flink-taskmanager` tasks live ~105s, then receive
+  SIGTERM. New task starts ~14s later. Slots never accumulate — Flink
+  `/overview` reports `taskmanagers: 0, slots-total: 0` permanently.
+- **Root cause** (confirmed 2026-06-21):
+  - Docker reports each kill as
+    `task: non-zero exit (143): dockerexec: unhealthy container`.
+  - The service has a healthcheck configured (`TCP 6123` per IB-8 fix in
+    v0.25.51), but Flink 1.18.1 binds the TaskManager IPC port to a
+    *dynamic* port when `taskmanager.rpc.port: 0` (default). Port 6123
+    is the **jobmanager.rpc.port**, not the taskmanager RPC.
+  - The original fix mentioned in CHANGELOG (`exit 0` no-op via
+    `docker service update --health-cmd`) was applied to an earlier
+    deployment but was lost on subsequent `docker stack deploy` because
+    the rendered compose file *re-introduced* the `healthcheck:` block.
+  - Result: every `stack deploy` re-applies a broken TCP healthcheck
+    and the loop restarts.
+- **Fix** (apply on manager):
+  ```bash
+  sudo docker service update \
+    --health-cmd "exit 0" \
+    --health-interval 30s \
+    --health-timeout 5s \
+    --health-retries 3 \
+    --health-start-period 60s \
+    cryptoprice_flink-taskmanager
+  sudo docker service update \
+    --health-cmd "exit 0" \
+    --health-interval 30s \
+    --health-timeout 5s \
+    --health-retries 3 \
+    --health-start-period 60s \
+    cryptoprice_spark-worker
+  sudo docker service update \
+    --health-cmd "exit 0" \
+    --health-interval 30s \
+    --health-timeout 5s \
+    --health-retries 3 \
+    --health-start-period 60s \
+    cryptoprice_spark-worker-2
+  ```
+- **Permanent fix**: remove the broken healthcheck blocks from
+  `docker-compose.yml` (TCP 6123 for flink-taskmanager) and the two
+  spark-worker entries. They were never correct.
+- **Impact**: Kafka → Flink → Redis indicator pipeline is **fully
+  blocked** as long as this loop runs. All services report
+  `healthy` to the manager, but Flink has 0 taskmanagers, 0 jobs.
+
 ---
 
 ## AI Service Issues

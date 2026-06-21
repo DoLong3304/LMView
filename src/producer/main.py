@@ -32,6 +32,10 @@ import websocket
 from common.config import (
     DEPTH_LEVEL,
     DEPTH_UPDATE_MS,
+    ENABLE_DEPTH_WS,
+    ENABLE_KLINE_WS,
+    ENABLE_TICKER_WS,
+    ENABLE_TRADES_WS,
     ENABLE_OKX,
     KAFKA_TOPIC_DEPTH,
     KAFKA_TOPIC_KLINES,
@@ -660,7 +664,9 @@ def run_streams(client: ExchangeClient) -> None:
 
     # ── Stream A: Combined ticker (single WS) ───────────────────────────────────────
     # For Binance use a combined stream containing all @ticker symbols.
-    if not is_subscription:
+    if not ENABLE_TICKER_WS:
+        log.info("Stream A (@ticker) disabled by ENABLE_TICKER_WS=false")
+    elif not is_subscription:
         # Primary combined ticker (all symbols)
         all_ticker_streams = [f"{s.lower()}@ticker" for s in symbols]
         ticker_url = client.build_combined_stream_url(all_ticker_streams)
@@ -727,107 +733,116 @@ def run_streams(client: ExchangeClient) -> None:
             log.warning("[TICKER-V2] Failed to start individual @ticker streams: %s", e)
 
     # ── Stream B: Aggregate trades ───────────────────────────────────────────
-    batches = [
-        symbols[i : i + SYMBOLS_PER_CONNECTION]
-        for i in range(0, len(symbols), SYMBOLS_PER_CONNECTION)
-    ]
-    log.info("Spawning %d aggTrade thread(s) for %d symbols (%d/connection).",
-             len(batches), len(symbols), SYMBOLS_PER_CONNECTION)
+    if not ENABLE_TRADES_WS:
+        log.info("Stream B (@aggTrade) disabled by ENABLE_TRADES_WS=false")
+    else:
+        batches = [
+            symbols[i : i + SYMBOLS_PER_CONNECTION]
+            for i in range(0, len(symbols), SYMBOLS_PER_CONNECTION)
+        ]
+        log.info("Spawning %d aggTrade thread(s) for %d symbols (%d/connection).",
+                 len(batches), len(symbols), SYMBOLS_PER_CONNECTION)
 
-    for idx, batch in enumerate(batches):
-        streams = [client.trade_stream_name(s) for s in batch]
-        url = client.build_combined_stream_url(streams)
-        if is_subscription:
-            _register_thread(
-                f"{client.__class__.__name__.lower()}-ws-trades-{idx + 1}",
-                run_combined_batch_subscription,
-                client,
-                batch,
-                idx + 1,
-                "trades",
-                "TRADES",
-            )
-        else:
-            _register_thread(
-                f"{client.__class__.__name__.lower()}-ws-trades-{idx + 1}",
-                run_combined_batch,
-                url,
-                idx + 1,
-                "aggTrade",
-                client.map_trade,
-                KAFKA_TOPIC_TRADES,
-                "TRADES",
-            )
-        # jitter up to 2 s between aggTrade thread starts
-        time.sleep(random.random() * 2.0)
+        for idx, batch in enumerate(batches):
+            streams = [client.trade_stream_name(s) for s in batch]
+            url = client.build_combined_stream_url(streams)
+            if is_subscription:
+                _register_thread(
+                    f"{client.__class__.__name__.lower()}-ws-trades-{idx + 1}",
+                    run_combined_batch_subscription,
+                    client,
+                    batch,
+                    idx + 1,
+                    "trades",
+                    "TRADES",
+                )
+            else:
+                _register_thread(
+                    f"{client.__class__.__name__.lower()}-ws-trades-{idx + 1}",
+                    run_combined_batch,
+                    url,
+                    idx + 1,
+                    "aggTrade",
+                    client.map_trade,
+                    KAFKA_TOPIC_TRADES,
+                    "TRADES",
+                )
+            # jitter up to 2 s between aggTrade thread starts
+            time.sleep(random.random() * 2.0)
 
     # ── Stream C: Kline candles (separate batch size for fewer connections) ───
-    kline_batches = [
-        symbols[i : i + KLINE_SYMBOLS_PER_CONN]
-        for i in range(0, len(symbols), KLINE_SYMBOLS_PER_CONN)
-    ]
-    log.info("Spawning %d kline thread(s) (interval=%s, %d symbols/conn).",
-             len(kline_batches), kline_interval, KLINE_SYMBOLS_PER_CONN)
-    for idx, batch in enumerate(kline_batches):
-        streams = [client.kline_stream_name(s, kline_interval) for s in batch]
-        url = client.build_combined_stream_url(streams)
-        if is_subscription:
-            _register_thread(
-                f"{client.__class__.__name__.lower()}-ws-klines-{idx + 1}",
-                run_combined_batch_subscription,
-                client,
-                batch,
-                idx + 1,
-                "kline",
-                "KLINES",
-            )
-        else:
-            _register_thread(
-                f"{client.__class__.__name__.lower()}-ws-klines-{idx + 1}",
-                run_combined_batch,
-                url,
-                idx + 1,
-                "kline",
-                client.map_kline,
-                KAFKA_TOPIC_KLINES,
-                "KLINES",
-            )
-        time.sleep(1.0)
+    if not ENABLE_KLINE_WS:
+        log.info("Stream C (@kline) disabled by ENABLE_KLINE_WS=false")
+    else:
+        kline_batches = [
+            symbols[i : i + KLINE_SYMBOLS_PER_CONN]
+            for i in range(0, len(symbols), KLINE_SYMBOLS_PER_CONN)
+        ]
+        log.info("Spawning %d kline thread(s) (interval=%s, %d symbols/conn).",
+                 len(kline_batches), kline_interval, KLINE_SYMBOLS_PER_CONN)
+        for idx, batch in enumerate(kline_batches):
+            streams = [client.kline_stream_name(s, kline_interval) for s in batch]
+            url = client.build_combined_stream_url(streams)
+            if is_subscription:
+                _register_thread(
+                    f"{client.__class__.__name__.lower()}-ws-klines-{idx + 1}",
+                    run_combined_batch_subscription,
+                    client,
+                    batch,
+                    idx + 1,
+                    "kline",
+                    "KLINES",
+                )
+            else:
+                _register_thread(
+                    f"{client.__class__.__name__.lower()}-ws-klines-{idx + 1}",
+                    run_combined_batch,
+                    url,
+                    idx + 1,
+                    "kline",
+                    client.map_kline,
+                    KAFKA_TOPIC_KLINES,
+                    "KLINES",
+                )
+            time.sleep(1.0)
 
     # ── Stream D: Order-book depth ───────────────────────────────────────────
-    depth_batches = [
-        symbols[i : i + SYMBOLS_PER_DEPTH_CONN]
-        for i in range(0, len(symbols), SYMBOLS_PER_DEPTH_CONN)
-    ]
-    log.info("Spawning %d depth thread(s) (@depth%s@%sms).",
-             len(depth_batches), DEPTH_LEVEL, DEPTH_UPDATE_MS)
-    if is_subscription:
-        for idx, batch in enumerate(depth_batches):
-            _register_thread(
-                f"{client.__class__.__name__.lower()}-ws-depth-{idx + 1}",
-                run_combined_batch_subscription,
-                client,
-                batch,
-                idx + 1,
-                "depth",
-                "DEPTH",
-            )
-            time.sleep(1.0)
+    if not ENABLE_DEPTH_WS:
+        log.info("Stream D (@depth) disabled by ENABLE_DEPTH_WS=false")
     else:
-        for idx, batch in enumerate(depth_batches):
-            streams = [client.depth_stream_name(s, DEPTH_LEVEL, DEPTH_UPDATE_MS) for s in batch]
-            url = client.build_combined_stream_url(streams)
-            _register_thread(
-                f"{client.__class__.__name__.lower()}-ws-depth-{idx + 1}",
-                run_combined_batch,
-                url,
-                idx + 1,
-                "depth",
-                client.map_depth,
-                KAFKA_TOPIC_DEPTH,
-                "DEPTH",
-            )
-            time.sleep(1.0)
+        depth_batches = [
+            symbols[i : i + SYMBOLS_PER_DEPTH_CONN]
+            for i in range(0, len(symbols), SYMBOLS_PER_DEPTH_CONN)
+        ]
+        log.info("Spawning %d depth thread(s) (@depth%s@%sms).",
+                 len(depth_batches), DEPTH_LEVEL, DEPTH_UPDATE_MS)
+        if is_subscription:
+            for idx, batch in enumerate(depth_batches):
+                _register_thread(
+                    f"{client.__class__.__name__.lower()}-ws-depth-{idx + 1}",
+                    run_combined_batch_subscription,
+                    client,
+                    batch,
+                    idx + 1,
+                    "depth",
+                    "DEPTH",
+                )
+                time.sleep(1.0)
+        else:
+            for idx, batch in enumerate(depth_batches):
+                streams = [client.depth_stream_name(s, DEPTH_LEVEL, DEPTH_UPDATE_MS) for s in batch]
+                url = client.build_combined_stream_url(streams)
+                _register_thread(
+                    f"{client.__class__.__name__.lower()}-ws-depth-{idx + 1}",
+                    run_combined_batch,
+                    url,
+                    idx + 1,
+                    "depth",
+                    client.map_depth,
+                    KAFKA_TOPIC_DEPTH,
+                    "DEPTH",
+                )
+                time.sleep(1.0)
 
 
 def run_change24h_poller(client: ExchangeClient) -> None:

@@ -1,3 +1,77 @@
+## [0.25.60] - 2026-06-21
+
+### Fixed — Flink Order Book / Recent Trade data flow
+
+The Binance WebSocket endpoints ``@depth``, ``@aggTrade`` and
+``@kline`` return HTTP 403 (geofenced) from the AWS us-east-1
+datacenter IPs. The producer's ticker stream worked, but the depth
+and trades streams kept reconnecting and emitting no data, so the
+Order Book and Recent Trade panels in the UI were empty.
+
+- Added per-stream enable flags in ``src/common/config.py`` and
+  ``src/producer/main.py`` (``ENABLE_TICKER_WS``,
+  ``ENABLE_TRADES_WS``, ``ENABLE_DEPTH_WS``, ``ENABLE_KLINE_WS``) so
+  the noisy 403 reconnect spam is silenced.
+- Created new service ``binance-depth-trades-rest`` under
+  ``src/depth_trades_rest/`` that polls the public REST endpoints
+  ``/api/v3/depth`` and ``/api/v3/aggTrades`` for the top-30 USDT
+  symbols and writes the same Redis keys the WebSocket feeds used to
+  populate (``orderbook:binance:{symbol}``,
+  ``trade:latest:binance:{symbol}``). Dockerfile in
+  ``docker/depth-trades-rest/``.
+- Service pinned to ``node.labels.role == core`` because the worker
+  IP is fully blocked by Binance (returns HTTP 418).
+- Verified end-to-end: ``/api/orderbook/BTCUSDT`` now returns 50
+  bids + 50 asks sourced from ``binance_rest`` and
+  ``/api/trades/BTCUSDT`` returns aggregated trades.
+
+### Fixed — Spark lakehouse ``coin_klines`` backfill
+
+``coin_klines`` in the Iceberg lakehouse only had 15 distinct
+symbols (out of 432 in ``coin_ticker``) because the Spark streaming
+job ``BinanceDualStreamToIceberg`` consumes closed candles from the
+``crypto_klines`` Kafka topic, and the producer's ``@kline``
+WebSocket was geofenced.
+
+- Added Avro-encoded Kafka publishing to the existing
+  ``binance-kline-rest`` service (it already polled closed candles
+  via REST). The poller now mirrors each closed candle to
+  ``crypto_klines`` with the existing ``schemas/kline.avsc`` schema.
+- Imported ``src.common.kafka_client`` and
+  ``src.common.avro_serializer`` from ``src/kline_rest/main.py``;
+  added ``kafka-python``, ``fastavro``, ``requests`` and ``lz4`` to
+  ``docker/kline-rest/requirements.txt``; copied
+  ``schemas/kline.avsc`` into the image.
+- Verified: ``coin_klines`` grew from 29 977 rows / 15 symbols to
+  39 973 rows / 106 symbols within minutes of the rollout and
+  continues to grow each 30-second sweep.
+
+### Fixed — Frontend AI Helper
+
+The web UI's AI Helper was returning a "generic default answer" and
+failing to persist messages on reload. Two root causes:
+
+1. The frontend was built with ``VITE_DATA_SOURCE=mock`` (from
+   ``frontend/.env.mock``) so the ``shouldUseMockAi()`` branch in
+   ``useAiChat`` was being taken even though the backend AI service
+   was live. Created ``frontend/.env.production`` with
+   ``VITE_DATA_SOURCE=api`` and ``VITE_API_BASE_URL=/api`` so
+   ``npm run build`` now produces an API-mode bundle.
+2. ``backend/services/ai/ai_proxy.py`` used a 60-second ``httpx``
+   timeout, but Qwen / DashScope responses routinely take 30-90
+   seconds for a single turn. Bumped the proxy timeout to 180
+   seconds so slow LLM calls no longer get cut off mid-stream.
+
+Verified: ``POST /api/ai/chat`` from the FastAPI gateway returns 200
+with a full Vietnamese BTCUSDT analysis in ~52 seconds, and the
+frontend now uses the API path for both ask and interact modes.
+
+### Changed — bumped image tags
+
+- ``cryptoprice/fastapi:0.25.60`` (proxy timeout fix)
+- ``cryptoprice/nginx:1.31.0`` (new ``.env.production`` bundle)
+- ``cryptoprice/binance-kline-rest:0.1.0`` (Kafka publishing)
+
 # Changelog - LMView
 
 All notable changes to this project are documented in this file.
@@ -113,6 +187,51 @@ Rejoined with ``docker swarm join --token …``, removed the stale
 - ``scripts/deploy_aws_swarm.sh`` — added ai-service to
   ``CUSTOM_IMAGES``
 - ``VERSION`` — bumped to 0.25.59
+
+### Fixed — IB-10: Flink TaskManager restart loop (broken healthcheck)
+
+Root cause confirmed 2026-06-21:
+``docker-compose.yml`` carried a ``healthcheck:`` block on
+``flink-taskmanager`` that ran
+``python3 -c '... connect 127.0.0.1:6124 ...'`` every 15s. Port 6124
+is the jobmanager blob server, not the taskmanager IPC port
+(which Flink 1.18 binds dynamically). The healthcheck always exited
+1 after the entrypoint finished its envsubst, Docker marked the
+container ``unhealthy``, and Swarm issued SIGTERM with the message
+``task: non-zero exit (143): dockerexec: unhealthy container``.
+
+Each new taskmanager ran ~1m45s, was killed, restarted ~14s later.
+``curl http://flink-jobmanager:8081/overview`` reported
+``taskmanagers: 0, slots-total: 0`` permanently — the entire
+Kafka → Flink → Redis indicator pipeline was blocked.
+
+The same broken pattern was on ``spark-worker`` (curl 8084) and
+``spark-worker-2`` (curl 8085); those happened to succeed because
+Spark's webui port is fixed, but the healthchecks fired every 15s
+and contributed to noise on the worker node.
+
+**Fix** — removed all three broken healthcheck blocks from
+``docker-compose.yml``. Flink still has no healthcheck (correct,
+since TM RPC port is dynamic). After the next ``docker stack deploy``
+the taskmanager will no longer be killed every 105 s and Flink jobs
+should resume.
+
+**Workaround for the current rollout** (run on manager until next
+stack deploy):
+
+```bash
+sudo docker service update \
+  --health-cmd "exit 0" --health-interval 30s \
+  --health-timeout 5s --health-retries 3 \
+  --health-start-period 60s \
+  cryptoprice_flink-taskmanager cryptoprice_spark-worker cryptoprice_spark-worker-2
+```
+
+Caveat ``IB-10`` added to ``docs/system/13-caveats.md``.
+
+**Files**:
+- ``docker-compose.yml`` — three healthcheck blocks removed
+- ``docs/system/13-caveats.md`` — IB-10 entry
 
 ---
 

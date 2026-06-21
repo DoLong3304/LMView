@@ -208,17 +208,37 @@ async def _fetch_1m_plus_candles(
     r, symbol: str, interval: str, target_sec: int, limit: int,
     end_time: int | None, now_ms: int, influx_cutoff_ms: int, exchange: str = "binance",
 ) -> list[dict]:
-    """Fetch 1m+ candles from KeyDB → InfluxDB → Trino fallback."""
+    """Fetch 1m+ candles from KeyDB → InfluxDB → Trino fallback.
+
+    Sources, in priority order:
+      1. candle:1m:{exchange}:{symbol}      (live 7d writer)
+      2. candle:1m:90d:{exchange}:{symbol}  (90d backfill writer)
+      3. InfluxDB (90d)
+      4. Trino hourly (1h+ only, when 1m is sparse)
+    """
     candles: list[dict] = []
 
     if end_time is not None:
-        # Historical scroll-left: skip KeyDB (only 7 days), go straight to InfluxDB/Trino
-        backfilled = await asyncio.to_thread(
-            collect_base_1m_candles,
-            symbol, target_sec, limit, end_time, now_ms, influx_cutoff_ms,
-            MAX_BACKFILL_PAGES, True,
-        )
-        candles = merge_unique(candles, backfilled)
+        # Historical scroll-left: read from both 7d and 90d KeyDB namespaces,
+        # then fall back to InfluxDB/Trino if still short.
+        raw_needed = min((limit * max(target_sec // 60, 1)) + 2, MAX_RAW_CANDLES)
+
+        # Step 1: 7d namespace (newest portion of the window)
+        keydb_7d = await _fetch_keydb_1m_window(r, symbol, end_time, raw_needed, exchange)
+        candles = merge_unique(candles, keydb_7d)
+
+        # Step 2: 90d namespace (older portion of the window)
+        keydb_90d = await _fetch_keydb_90d_window(r, symbol, end_time, raw_needed, exchange)
+        candles = merge_unique(candles, keydb_90d)
+
+        # Step 3: If still not enough, fallback to InfluxDB → Trino
+        if len(candles) < limit:
+            backfilled = await asyncio.to_thread(
+                collect_base_1m_candles,
+                symbol, target_sec, limit, end_time, now_ms, influx_cutoff_ms,
+                MAX_BACKFILL_PAGES, True,
+            )
+            candles = merge_unique(candles, backfilled)
     else:
         # Live mode: Read from KeyDB first (speed layer, 7 days retention)
         raw_needed = min((limit * max(target_sec // 60, 1)) + 2, MAX_RAW_CANDLES)
@@ -247,6 +267,54 @@ async def _fetch_1m_plus_candles(
             candles = merge_unique(candles, hourly_rows)
 
     return candles
+
+
+async def _fetch_keydb_1m_window(
+    r, symbol: str, end_ms: int, limit: int, exchange: str = "binance",
+) -> list[dict]:
+    """Read up to `limit` candles from candle:1m:{exchange}:{symbol} with openTime < end_ms."""
+    if end_ms is None:
+        return []
+    raw = await r.zrevrangebyscore(
+        f"candle:1m:{exchange}:{symbol}",
+        end_ms - 1, "-inf", withscores=False, start=0, num=limit,
+    )
+    return _parse_keydb_1m(raw)
+
+
+async def _fetch_keydb_90d_window(
+    r, symbol: str, end_ms: int, limit: int, exchange: str = "binance",
+) -> list[dict]:
+    """Read up to `limit` candles from candle:1m:90d:{exchange}:{symbol} with openTime < end_ms."""
+    if end_ms is None:
+        return []
+    raw = await r.zrevrangebyscore(
+        f"candle:1m:90d:{exchange}:{symbol}",
+        end_ms - 1, "-inf", withscores=False, start=0, num=limit,
+    )
+    return _parse_keydb_1m(raw)
+
+
+def _parse_keydb_1m(raw: list[bytes] | list[str]) -> list[dict]:
+    """Parse the JSON-serialized candles stored by the live/90d writers."""
+    out: list[dict] = []
+    for item in raw or []:
+        try:
+            c = json.loads(item)
+        except (ValueError, TypeError):
+            continue
+        out.append({
+            "openTime": int(c["t"]),
+            "open": c["o"],
+            "high": c["h"],
+            "low": c["l"],
+            "close": c["c"],
+            "volume": c["v"],
+            "quote_volume": c.get("qv", 0),
+            "trade_count": c.get("n", 0),
+            "is_closed": c.get("x", True),
+        })
+    return sorted(out, key=lambda x: x["openTime"])
 
 
 async def _fetch_best_1m_candles(r, symbol: str, limit: int, now_ms: int, exchange: str = "binance") -> list[dict]:

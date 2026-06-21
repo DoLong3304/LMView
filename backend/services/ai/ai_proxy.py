@@ -46,7 +46,9 @@ async def chat(
         if auth:
             forward_headers["Authorization"] = auth
 
-    async with httpx.AsyncClient(timeout=60) as client:
+    # LLM calls to DashScope/Qwen routinely take 30–90s. Use a long
+    # timeout so a slow LLM doesn't get cut off mid-stream.
+    async with httpx.AsyncClient(timeout=180) as client:
         resp = await client.post(
             f"{AI_SERVICE_URL}/ai/chat",
             json=body.dict(),

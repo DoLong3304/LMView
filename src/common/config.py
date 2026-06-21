@@ -56,6 +56,15 @@ MAX_SYMBOLS            = int(os.environ.get("MAX_SYMBOLS", "200"))
 TICKER_HEARTBEAT_SEC   = 0.3
 ENABLE_OKX             = os.environ.get("ENABLE_OKX", "false").lower() == "true"
 
+# ── Per-stream WS gates (Binance WS is geofenced on AWS us-east-1; only
+#    the ticker stream and the REST kline poller are reliable there).
+#    Trade and depth WS will be served by a separate REST poller service
+#    (or disabled entirely) until Binance WS is reachable again. ──
+ENABLE_TICKER_WS       = os.environ.get("ENABLE_TICKER_WS", "true").lower() == "true"
+ENABLE_TRADES_WS       = os.environ.get("ENABLE_TRADES_WS", "false").lower() == "true"
+ENABLE_DEPTH_WS        = os.environ.get("ENABLE_DEPTH_WS", "false").lower() == "true"
+ENABLE_KLINE_WS        = os.environ.get("ENABLE_KLINE_WS", "false").lower() == "true"
+
 # ── Direct Redis Bypass ──
 ENABLE_DIRECT_REDIS      = os.environ.get("ENABLE_DIRECT_REDIS", "false").lower() == "true"
 

@@ -41,9 +41,41 @@ from prometheus_client import (
 )
 import redis.asyncio as redis_async
 
-# Ensure /app is on sys.path when running inside the container
+# Ensure /app and /app/src are on sys.path when running inside the
+# container. The Dockerfile copies /src to /app/src, so:
+#   /app/src/kline_rest/main.py  →  /app/src/kline_rest  →  ..  →  /app/src
+#   /app/src/kline_rest/main.py  →  /app/src/kline_rest  →  ..  →  /app/src
+#                                  →  ..  →  /app
+# Some modules (``src.common.kafka_client``) import the un-namespaced
+# ``common`` alias, so we register /app/src as well.
 sys.path.insert(
     0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+)
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) + "/src",
+)
+
+# Alias ``common`` → ``src.common`` so the un-namespaced imports in
+# ``src.common.kafka_client`` (e.g. ``from common.config import …``)
+# resolve when this service runs from /app/src.
+import importlib
+_common_pkg = importlib.import_module("src.common")
+sys.modules["common"] = _common_pkg
+sys.modules["common.config"] = importlib.import_module("src.common.config")
+sys.modules["common.kafka_client"] = importlib.import_module("src.common.kafka_client")
+sys.modules["common.avro_serializer"] = importlib.import_module("src.common.avro_serializer")
+
+from src.common.avro_serializer import AvroSerializer  # noqa: E402
+from src.common.kafka_client import init_producer, send_to_kafka  # noqa: E402
+
+KAFKA_TOPIC_KLINES = os.environ.get("KAFKA_TOPIC_KLINES", "crypto_klines")
+SCHEMA_REGISTRY_URL = os.environ.get(
+    "SCHEMA_REGISTRY_URL", "http://schema-registry:8080/apis/ccompat/v7"
+)
+
+KAFKA_TOPIC_KLINES = os.environ.get("KAFKA_TOPIC_KLINES", "crypto_klines")
+SCHEMA_REGISTRY_URL = os.environ.get(
+    "SCHEMA_REGISTRY_URL", "http://schema-registry:8080/apis/ccompat/v7"
 )
 
 from src.kline_rest.config import (  # noqa: E402
@@ -58,7 +90,13 @@ from src.kline_rest.config import (  # noqa: E402
     SYMBOL_REFRESH_SEC,
     KlineConfig,
 )
-from src.kline_rest.poller import KlinePoller, RateLimiter  # noqa: E402
+from src.common.avro_serializer import AvroSerializer  # noqa: E402
+from src.common.kafka_client import init_producer, send_to_kafka  # noqa: E402
+from src.kline_rest.poller import (  # noqa: E402
+    KlinePoller,
+    RateLimiter,
+    set_avro_serializer,
+)
 from src.kline_rest.redis_writer import KlineRedisWriter  # noqa: E402
 
 # ── Logging ───────────────────────────────────────────────────────────────
@@ -276,6 +314,29 @@ async def main() -> None:
 
     # 3. HTTP server
     await start_http()
+
+    # 3.5 Initialize Kafka producer + Avro serializer so the poller can
+    # mirror closed candles to the crypto_klines topic that feeds the
+    # Spark lakehouse (Binance @kline WS is geofenced from AWS us-east-1).
+    try:
+        import os as _os
+        # The schema file lives at <repo>/schemas/kline.avsc. The container
+        # WORKDIR is /app, so the file is at /app/schemas/kline.avsc. The
+        # repo path resolves as:
+        #   /app/src/kline_rest/main.py  →  /app/src/kline_rest  →  ..
+        #   → /app/src  →  ..  → /app  →  /app/schemas
+        schema_path = _os.path.join(
+            _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))),
+            "schemas",
+            "kline.avsc",
+        )
+        avro = AvroSerializer(SCHEMA_REGISTRY_URL)
+        avro.register(KAFKA_TOPIC_KLINES, schema_path)
+        set_avro_serializer(avro)
+        init_producer()
+        log.info("Kafka producer + Avro ready: topic=%s schema=%s", KAFKA_TOPIC_KLINES, schema_path)
+    except Exception as exc:
+        log.warning("Kafka init failed (will skip Kafka publish): %s", exc)
 
     # 4. Poller
     rate_limiter = RateLimiter()

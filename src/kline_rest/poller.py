@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
-from typing import List
+from typing import List, Optional
 
 import aiohttp
 
@@ -35,6 +36,81 @@ from src.kline_rest.config import (
 from src.kline_rest.redis_writer import KlineRedisWriter, KlineUpdate
 
 log = logging.getLogger(__name__)
+
+# Lazy import to keep the poller unit-testable without a Kafka cluster.
+_avro_serializer = None
+
+
+def _publish_to_kafka(symbol: str, interval: str, row: list, is_closed: bool) -> None:
+    """Best-effort publish of one closed kline to the Kafka crypto_klines topic.
+
+    The Spark lakehouse pipeline (``src/lakehouse/pipeline.py``) consumes
+    this topic and writes closed candles to ``iceberg.crypto_lakehouse.coin_klines``.
+    The binance-kline-rest poller is the sole producer now that the
+    producer's @kline WebSocket stream is geofenced from AWS us-east-1.
+
+    This runs synchronously in the poller thread pool; failures are
+    logged and dropped (the candle is already in Redis so the next sweep
+    will retry via the producer's idempotent ZADD with same score).
+    """
+    global _avro_serializer
+    if not is_closed:
+        # Spark only stores closed candles (its filter is `is_closed == True`),
+        # so skip the still-forming one.
+        return
+    if _avro_serializer is None:
+        return
+    try:
+        (open_time, o, h, l, c, v, qv, n) = _parse_kline_row(row, False)
+    except Exception as exc:
+        log.debug("[kafka] skip malformed row for %s/%s: %s", symbol, interval, exc)
+        return
+    import time as _time
+    record = {
+        "event_time":   int(_time.time() * 1000),
+        "symbol":       symbol,
+        "exchange":     "binance",
+        "kline_start":  int(open_time),
+        "kline_close":  int(open_time + _interval_to_ms(interval)),
+        "interval":     interval,
+        "open":         float(o),
+        "high":         float(h),
+        "low":          float(l),
+        "close":        float(c),
+        "volume":       float(v),
+        "quote_volume": float(qv),
+        "trade_count":  int(n),
+        "is_closed":    True,
+    }
+    topic = os.environ.get("KAFKA_TOPIC_KLINES", "crypto_klines")
+    try:
+        from src.common.kafka_client import send_to_kafka
+        send_to_kafka(topic, record, _avro_serializer)
+    except Exception as exc:
+        log.warning("[kafka] publish failed for %s/%s: %s", symbol, interval, exc)
+
+
+def set_avro_serializer(serializer) -> None:
+    """Inject the Avro serializer once the schema is registered."""
+    global _avro_serializer
+    _avro_serializer = serializer
+
+
+def _interval_to_ms(interval: str) -> int:
+    """Binance interval code to milliseconds."""
+    n = int(interval[:-1])
+    unit = interval[-1]
+    if unit == "m":
+        return n * 60_000
+    if unit == "h":
+        return n * 3_600_000
+    if unit == "d":
+        return n * 86_400_000
+    if unit == "w":
+        return n * 604_800_000
+    if unit == "s":
+        return n * 1_000
+    return 60_000
 
 
 class RateLimiter:
@@ -198,6 +274,12 @@ class KlinePoller:
                 is_closed=is_closed,
                 update_latest=update_latest,
             ))
+            # Mirror closed candles to the Kafka topic that feeds the
+            # Spark lakehouse. The Kafka publisher is best-effort;
+            # ZADD in Redis is idempotent so the next sweep will retry
+            # any candle that did not reach Kafka.
+            if is_closed:
+                _publish_to_kafka(symbol, interval, row, True)
         return len(rows)
 
     async def _sweep(self, interval: str, limit: int, update_latest: bool) -> int:

@@ -167,6 +167,7 @@ CUSTOM_IMAGES=(
   "cryptoprice/producer:0.25.0"
   "cryptoprice/binance-ticker-ws:0.1.0"
   "cryptoprice/binance-kline-rest:0.1.0"
+  "cryptoprice/binance-depth-trades-rest:0.1.0"
   "cryptoprice/influx-backfill:0.25.0"
   "cryptoprice/trino:442"
   "cryptoprice/dagster:1.8.10"
