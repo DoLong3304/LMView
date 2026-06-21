@@ -44,6 +44,8 @@ from common.config import (
     KLINE_INTERVAL_WS,
     KLINE_SYMBOLS_PER_CONN,
     MAX_SYMBOLS,
+    MAX_PRODUCER_WORKERS,
+    PRODUCER_403_BACKOFF_SEC,
     SCHEMA_REGISTRY_URL,
     SYMBOLS_PER_CONNECTION,
     SYMBOLS_PER_DEPTH_CONN,
@@ -86,6 +88,12 @@ import threading
 _dedup_lock = threading.Lock()
 _last_close: dict[str, float] = {}
 _last_sent_ts: dict[str, float] = {}
+
+# ── Phase 1 NOTE.MD: cap simultaneous WS connections to avoid 403 ──────────────
+# Binance rate-limits WS upgrade bursts. We use a semaphore to throttle
+# thread spawn rate; threads wait briefly on the semaphore before opening.
+_worker_sem = threading.BoundedSemaphore(MAX_PRODUCER_WORKERS)
+_sem_log = _log = logging.getLogger(__name__)
 
 avro_serializer: AvroSerializer | None = None
 health_monitor = HealthMonitor()
@@ -245,6 +253,22 @@ def run_ticker_stream(client: ExchangeClient) -> None:
             log.warning("[TICKER] Dropped. Reconnecting in %.1fs...", delay)
             WS_RECONNECT_COUNT.labels(stream="ticker").inc()
             record_reconnect_backoff(exchange=exchange_name, stream="ticker", sleep_sec=delay)
+            time.sleep(delay)
+        except websocket.WebSocketBadStatusException as e:
+            err_str = str(e)
+            if "403" in err_str:
+                log.warning(
+                    "[TICKER] 403 Forbidden from Binance. Sleeping %ds before retry.",
+                    PRODUCER_403_BACKOFF_SEC,
+                )
+                WS_RECONNECT_COUNT.labels(stream="ticker").inc()
+                record_reconnect_backoff(exchange=exchange_name, stream="ticker", sleep_sec=PRODUCER_403_BACKOFF_SEC)
+                time.sleep(PRODUCER_403_BACKOFF_SEC)
+                attempt = 0  # reset backoff
+                continue
+            attempt += 1
+            delay = _compute_backoff(1.0, attempt)
+            log.exception("[TICKER] WS handshake failed: %s. Retry in %.1fs...", e, delay)
             time.sleep(delay)
         except Exception as e:
             attempt += 1
@@ -602,6 +626,20 @@ def run_combined_batch(
             delay = _compute_backoff(1.0 + batch_idx, attempt)
             log.warning("[%s] Batch #%d dropped. Reconnecting in %.1fs...", tag, batch_idx, delay)
             time.sleep(delay)
+        except websocket.WebSocketBadStatusException as e:
+            err_str = str(e)
+            if "403" in err_str:
+                log.warning(
+                    "[%s] Batch #%d got 403 Forbidden. Sleeping %ds before retry.",
+                    tag, batch_idx, PRODUCER_403_BACKOFF_SEC,
+                )
+                time.sleep(PRODUCER_403_BACKOFF_SEC)
+                attempt = 0
+                continue
+            attempt += 1
+            delay = _compute_backoff(1.0 + batch_idx, attempt)
+            log.exception("[%s] Batch #%d WS handshake failed: %s. Retry in %.1fs...", tag, batch_idx, e, delay)
+            time.sleep(delay)
         except Exception as e:
             attempt += 1
             delay = _compute_backoff(1.0 + batch_idx, attempt)
@@ -610,7 +648,23 @@ def run_combined_batch(
 
 
 def _start_thread(name: str, target, *args) -> threading.Thread:
-    thread = threading.Thread(target=target, args=args, daemon=True, name=name)
+    def _wrapped() -> None:
+        # Phase 1 NOTE.MD: throttle WS connection bursts via semaphore.
+        acquired = _worker_sem.acquire(blocking=True, timeout=300)
+        if not acquired:
+            log.warning("[%s] semaphore acquire timed out; skipping", name)
+            return
+        try:
+            target(*args)
+        except Exception as e:
+            log.exception("[%s] thread crashed: %s", name, e)
+        finally:
+            try:
+                _worker_sem.release()
+            except ValueError:
+                pass
+
+    thread = threading.Thread(target=_wrapped, daemon=True, name=name)
     thread.start()
     health_monitor.attach_thread(name, thread)
     WS_THREADS_RUNNING.inc()
@@ -704,7 +758,10 @@ def run_streams(client: ExchangeClient) -> None:
     # ── Stream A2: Individual @ticker (all USDT symbols, 5 combined WS) ───
     # Each symbol gets pushed on every trade (real-time, <100ms).
     # 671 / 5 ≈ 134 symbols/connection (well under Binance 200 limit).
-    if not is_subscription:
+    # v0.25.60+: gated by ENABLE_TICKER_WS. The binance-ticker-ws service
+    # owns the canonical ticker feed; running this here causes 5 extra
+    # 403 reconnect loops when the AWS datacenter IP is geofenced.
+    if not is_subscription and ENABLE_TICKER_WS:
         try:
             all_usdt = client.fetch_symbols("USDT")
             if all_usdt:

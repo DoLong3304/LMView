@@ -1,0 +1,125 @@
+#!/usr/bin/env python3
+"""watchdog_flink_job.py — Pure-Python Flink pipeline supervisor.
+
+Polls Flink jobmanager every 30s. If no jobs are running but slots are
+available, submits processing/pipeline.py via the Flink REST API.
+
+Designed to run as a long-lived container with kafka-python and
+python3 available (uses the producer image which has both).
+
+Env vars:
+  FLINK_JM_URL  (default http://172.31.37.193:8081)
+  REDIS_HOST    (default redis-master)
+  PROJECT_DIR   (default /mnt/efs/LMView)
+  INTERVAL_SEC  (default 30)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import subprocess
+import time
+import urllib.error
+import urllib.request
+
+FLINK_JM_URL = os.environ.get("FLINK_JM_URL", "http://172.31.37.193:8081")
+REDIS_HOST = os.environ.get("REDIS_HOST", "redis-master")
+PROJECT_DIR = os.environ.get("PROJECT_DIR", "/mnt/efs/LMView")
+INTERVAL = int(os.environ.get("INTERVAL_SEC", "30"))
+
+
+def http_get_json(url: str, timeout: int = 5) -> dict | None:
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+        return None
+
+
+def redis_hlen(key: str) -> int:
+    s = socket.socket()
+    s.settimeout(3)
+    try:
+        s.connect((REDIS_HOST, 6379))
+        parts = ["*2", f"$4", "HLEN", f"${len(key)}", key]
+        cmd = "\r\n".join(parts) + "\r\n"
+        s.send(cmd.encode())
+        out = s.recv(64).decode(errors="replace").strip()
+        if out.startswith(":"):
+            return int(out[1:])
+    finally:
+        s.close()
+    return 0
+
+
+def submit_job() -> bool:
+    """Submit Flink pipeline via subprocess (uses flink image's flink CLI)."""
+    cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{PROJECT_DIR}:/mnt/efs/LMView:ro",
+        "172.31.37.193:5000/cryptoprice/flink:1.18.1",
+        "bash", "-c",
+        (
+            "cd /tmp && "
+            "SRC_DIR=/mnt/efs/LMView/src "
+            "bash /mnt/efs/LMView/scripts/build_deps_zip.sh && "
+            "flink run -m 172.31.37.193:8081 -d "
+            "-pyfs /mnt/efs/LMView/src/processing "
+            "--pyFiles /mnt/efs/LMView/deps.zip "
+            "--python /mnt/efs/LMView/src/processing/pipeline.py"
+        ),
+    ]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        if out.returncode == 0 and "Job has been submitted" in out.stdout:
+            print(f"[watchdog] ✅ Flink job submitted: {out.stdout.strip().splitlines()[-1]}")
+            return True
+        print(f"[watchdog] ❌ submit failed: rc={out.returncode}")
+        print(f"            stdout: {out.stdout[-300:]}")
+        print(f"            stderr: {out.stderr[-300:]}")
+        return False
+    except subprocess.TimeoutExpired:
+        print("[watchdog] ⏱️  submit timed out")
+        return False
+    except FileNotFoundError:
+        # docker not on PATH (we are inside a container without docker CLI)
+        print("[watchdog] ⚠️  docker CLI not available — cannot submit")
+        return False
+
+
+def main() -> None:
+    print(f"[watchdog] starting (flink={FLINK_JM_URL} redis={REDIS_HOST} interval={INTERVAL}s)")
+    consecutive_alive = 0
+    while True:
+        overview = http_get_json(f"{FLINK_JM_URL}/overview")
+        if overview is None:
+            print("[watchdog] ⚠️  Flink not reachable")
+            time.sleep(INTERVAL)
+            continue
+
+        tms = overview.get("taskmanagers", 0)
+        slots_avail = overview.get("slots-available", 0)
+        jobs = http_get_json(f"{FLINK_JM_URL}/jobs") or {}
+        running = sum(1 for j in jobs.get("jobs", []) if j.get("status") == "RUNNING")
+
+        print(f"[watchdog] tms={tms} slots={slots_avail} jobs_running={running}")
+
+        if running == 0 and slots_avail > 0:
+            print(f"[watchdog] ⚠️  no jobs running but {slots_avail} slots free — resubmitting")
+            if submit_job():
+                consecutive_alive = 0
+        else:
+            consecutive_alive += 1
+
+        solusdt_fields = redis_hlen("indicator:latest:binance:SOLUSDT")
+        if solusdt_fields > 0:
+            print(f"[watchdog] ✅ SOLUSDT indicator has {solusdt_fields} fields")
+
+        time.sleep(INTERVAL)
+
+
+if __name__ == "__main__":
+    main()

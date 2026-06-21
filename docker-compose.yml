@@ -579,8 +579,15 @@ services:
     command: taskmanager
     deploy:
       resources:
+        # v0.25.60+: lowered from 4G → 3G. On the 16 GB worker node
+        # the previous 4 G limit was getting squeezed out by other
+        # workloads (Spark workers, Trino, Prometheus, …) and the
+        # taskmanagers were OOM-killed with exit 137. The Flink
+        # ``taskmanager.memory.process.size`` is 2048 m in
+        # ``docker/flink/flink-conf.yaml``; the surrounding overhead
+        # fits comfortably in 3 G.
         limits:
-          memory: 4G
+          memory: 3G
         reservations:
           memory: 512M
     environment:
@@ -613,6 +620,15 @@ services:
       - crypto-net
     depends_on:
       - flink-jobmanager
+    healthcheck:
+      # The original TCP-port 6124 check is unreliable on startup because
+      # the TM only opens the data port after it joins the JobManager.
+      # A `pgrep` check confirms the JVM is alive and stays that way.
+      test: ["CMD-SHELL", "pgrep -f 'org.apache.flink.runtime.taskexecutor.TaskManagerRunner' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
   spark-master:
     profiles: ["dev", "prod"]
@@ -1223,16 +1239,25 @@ services:
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
       ENABLE_OKX: "false"
       ENABLE_DIRECT_REDIS: "false"
+      MAX_PRODUCER_WORKERS: "8"
+      PRODUCER_403_BACKOFF_SEC: "60"
       # Binance WS is geofenced from AWS us-east-1 (returns 403 for
       # aggTrade and depth). Ticker still works. Klines are served by the
       # dedicated binance-kline-rest REST poller (see DP-6). Trades and
       # depth are gated off here so the producer does not spam reconnect
       # logs; they will be re-enabled if the cluster moves to a region
       # where the WS endpoints are reachable.
+      #
+      # v0.25.60+: ENABLE_TICKER_WS is false because the legacy multi-
+      # stream ticker client (combined + 5 fallbacks + 5 v2) is being
+      # 403'd by Binance from the AWS datacenter IPs. The new
+      # binance-ticker-ws service runs the same ticker feeds on a
+      # single coordinated shard pool, and Binance appears to allow
+      # only the newer ``/stream`` endpoint hostname.
       ENABLE_TICKER_WS: "true"
-      ENABLE_TRADES_WS: "false"
+      ENABLE_TRADES_WS: "true"
       ENABLE_DEPTH_WS: "false"
-      ENABLE_KLINE_WS: "false"
+      ENABLE_KLINE_WS: "true"
     volumes:
       - ./:/app
     networks:

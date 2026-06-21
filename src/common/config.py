@@ -85,6 +85,11 @@ MAX_WORKERS          = 8
 FLUSH_THRESHOLD      = int(os.environ.get("BACKFILL_FLUSH_THRESHOLD", "10000"))
 RETENTION_1M_DAYS    = int(os.environ.get("RETENTION_1M_DAYS", "90"))
 
+# ── Producer concurrency (Phase 1 NOTE.MD: cap simultaneous WS threads to
+#    stay under Binance connection limit and avoid 403 Forbidden) ──
+MAX_PRODUCER_WORKERS = int(os.environ.get("MAX_PRODUCER_WORKERS", "8"))
+PRODUCER_403_BACKOFF_SEC = int(os.environ.get("PRODUCER_403_BACKOFF_SEC", "60"))
+
 # ── Spark ────────────────────────────────────────────────────────────────────
 BACKFILL_SPARK_CORES_MAX          = os.environ.get("BACKFILL_SPARK_CORES_MAX", "2")
 BACKFILL_SPARK_SHUFFLE_PARTITIONS = os.environ.get("BACKFILL_SPARK_SHUFFLE_PARTITIONS", "8")
