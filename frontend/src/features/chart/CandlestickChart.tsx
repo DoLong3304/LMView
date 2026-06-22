@@ -1,27 +1,13 @@
 import React, { startTransition, useCallback, useEffect, useRef, useState } from "react";
 import {
-  createChart,
-  CrosshairMode,
   LineStyle,
-  AreaSeries,
-  BarSeries,
-  CandlestickSeries,
-  HistogramSeries,
-  LineSeries,
 } from "lightweight-charts";
 import {
   Activity,
-  AreaChart,
-  BarChart3,
-  CandlestickChart as CandleIcon,
   ChevronDown,
   Download,
-  Grid3x3,
-  Layers,
-  LineChart,
   Maximize2,
   Minimize2,
-  TrendingUp,
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -29,11 +15,14 @@ import { normalizeTimeframe, TIMEFRAME_KEYS, TIMEFRAMES } from "@/constants/time
 import { useI18n } from "@/i18n";
 import { useChartZoom } from "@/hooks/useChartZoom";
 import {
+  fetchMergedCandles,
   fetchCandles,
   fetchIndicatorSeries,
   fetchHistoricalCandles,
   subscribeIndicatorStream,
   subscribeAllTimeframes,
+  fetchTicker,
+  updateLivePrice,
   TIMEFRAMES as SERVICE_TIMEFRAMES,
 } from "@/services/marketDataService";
 import DateRangePicker from "./DateRangePicker";
@@ -67,7 +56,6 @@ import IndicatorPanel, { type IndicatorPanelStatus } from "./IndicatorPanel";
 import MarketSelector from "./MarketSelector";
 import OHLCVBar from "./OHLCVBar";
 import type { AiChartActionController } from "@/features/ai/actions/AiActionProvider";
-import { CHART_TYPES } from "@/types";
 import { DEFAULT_CHART_PREFERENCES, type ChartPreferenceSettings } from "@/services/settingsService";
 import { formatNormalizedError, normalizeError, sanitizeTechnicalDetails } from "@/utils/errors";
 import type {
@@ -80,170 +68,26 @@ import type {
   TimeframeKey,
   NewsArticle,
 } from "@/types";
-import type { TranslationKey } from "@/i18n/translations";
-
-const HISTORICAL_FALLBACK_TIMEFRAME: TimeframeKey = "1m";
-const HISTORICAL_TIMEFRAME_KEYS = TIMEFRAME_KEYS.filter((key) => key !== "1s");
-
-const CHART_TYPE_ORDER: ChartType[] = CHART_TYPES.map((chartType) => chartType.id);
-const CANDLE_SERIES_CHART_TYPES = new Set<ChartType>([
-  "candles",
-  "heikinAshi",
-  "renko",
-  "lineBreak",
-  "pointFigure",
-]);
-const LINE_SERIES_CHART_TYPES = new Set<ChartType>(["line", "kagi"]);
-
-function usesCandleSeries(type: ChartType): boolean {
-  return CANDLE_SERIES_CHART_TYPES.has(type);
-}
-
-function usesTransformedCandleData(type: ChartType): boolean {
-  return type !== "candles" && CANDLE_SERIES_CHART_TYPES.has(type);
-}
-
-function usesDerivedSeriesData(type: ChartType): boolean {
-  return usesTransformedCandleData(type) || type === "kagi";
-}
-
-function usesLineSeries(type: ChartType): boolean {
-  return LINE_SERIES_CHART_TYPES.has(type);
-}
-
-const CHART_TYPE_ICONS: Record<ChartType, typeof CandleIcon> = {
-  candles: CandleIcon,
-  bars: BarChart3,
-  line: LineChart,
-  area: AreaChart,
-  heikinAshi: Layers,
-  renko: Grid3x3,
-  lineBreak: TrendingUp,
-  kagi: Activity,
-  pointFigure: BarChart3,
-};
-
-const CHART_TYPE_LABELS: Record<ChartType, TranslationKey> = {
-  candles: "candlestick",
-  bars: "bars",
-  line: "line",
-  area: "area",
-  heikinAshi: "heikinAshi",
-  renko: "renko",
-  lineBreak: "lineBreak",
-  kagi: "kagi",
-  pointFigure: "pointFigure",
-};
-
-const AI_INDICATOR_ALIASES: Record<string, string> = {
-  sma: "sma20",
-  sma20: "sma20",
-  sma50: "sma50",
-  ema: "ema12",
-  ema12: "ema12",
-  ema26: "ema26",
-  rsi14: "rsi",
-  bollinger: "bb",
-  bollinger_bands: "bb",
-  volume_ma: "volumeMa",
-  parabolic_sar: "psar",
-  atr14: "atr",
-};
-
-const BACKEND_SERIES_INDICATORS = [
-  "sma20",
-  "sma50",
-  "ema12",
-  "ema26",
-  "rsi",
-  "macd",
-  "bb",
-  "volume",
-  "volumeMa",
-  "atr",
-] as const;
-
-const INDICATOR_WARNING_MESSAGES: Record<string, TranslationKey> = {
-  not_enough_candle_data: "indicatorNotEnoughData",
-  indicator_data_unavailable: "indicatorDataUnavailable",
-  backend_returned_empty_result: "indicatorBackendEmpty",
-};
-
-function normalizeAiIndicatorKey(indicator: string): string {
-  const key = indicator.trim().replace(/\s+/g, "_").toLowerCase();
-  return AI_INDICATOR_ALIASES[key] || key;
-}
-
-function activeBackendIndicators(settings: Record<string, IndicatorSettings>): string[] {
-  return BACKEND_SERIES_INDICATORS.filter((indicator) => settings[indicator]?.visible);
-}
-
-function warningMessageKey(warnings: string[] = []): TranslationKey | null {
-  for (const warning of ["not_enough_candle_data", "backend_returned_empty_result", "indicator_data_unavailable"]) {
-    if (warnings.includes(warning)) return INDICATOR_WARNING_MESSAGES[warning];
-  }
-  return null;
-}
-
-function resolveChartTheme(
-  baseTheme: ReturnType<typeof getChartTheme>,
-  preferences: ChartPreferenceSettings,
-): ReturnType<typeof getChartTheme> {
-  const withCandleColors = {
-    ...baseTheme,
-    upColor: preferences.candle_style.up_color,
-    downColor: preferences.candle_style.down_color,
-    volumeUp: `${preferences.candle_style.up_color}80`,
-    volumeDown: `${preferences.candle_style.down_color}80`,
-  };
-
-  if (preferences.chart_theme_preset === "light") {
-    return {
-      ...withCandleColors,
-      background: "#f8fafc",
-      textColor: "#334155",
-      gridColor: "#dbe4ee",
-      borderColor: "#cbd5e1",
-      crosshair: "#475569",
-      crosshairLabelBg: "#e2e8f0",
-    };
-  }
-
-  if (preferences.chart_theme_preset === "highContrast") {
-    return {
-      ...withCandleColors,
-      background: "#050505",
-      textColor: "#f8fafc",
-      gridColor: "#3f3f46",
-      borderColor: "#e4e4e7",
-      crosshair: "#facc15",
-      crosshairLabelBg: "#111111",
-    };
-  }
-
-  return withCandleColors;
-}
-
-function gridLineStyle(preferences: ChartPreferenceSettings): LineStyle {
-  return preferences.grid_crosshair.grid_style === "dashed"
-    ? LineStyle.Dashed
-    : LineStyle.Solid;
-}
-
-function crosshairMode(preferences: ChartPreferenceSettings): CrosshairMode {
-  return preferences.grid_crosshair.crosshair_style === "magnet"
-    ? CrosshairMode.Magnet
-    : CrosshairMode.Normal;
-}
-
-function hasSeriesData(payload: IndicatorSeriesResponse, indicator: string): boolean {
-  const series = payload.series || {};
-  if (indicator === "rsi") return Boolean(series.rsi?.length || series.rsi14?.length);
-  if (indicator === "bb") return Boolean(series.bb_upper?.length || series.bb_middle?.length || series.bb_lower?.length);
-  if (indicator === "volumeMa") return Boolean(series.volumeMa?.length || series.volume_sma20?.length);
-  if (indicator === "atr") return Boolean(series.atr?.length || series.atr14?.length);
-  return Boolean(series[indicator]?.length);
-}
+// Extracted modules
+import {
+  HISTORICAL_FALLBACK_TIMEFRAME,
+  HISTORICAL_TIMEFRAME_KEYS,
+  CHART_TYPE_ORDER,
+  usesCandleSeries,
+  usesDerivedSeriesData,
+  usesLineSeries,
+  CHART_TYPE_ICONS,
+  CHART_TYPE_LABELS,
+  normalizeAiIndicatorKey,
+  activeBackendIndicators,
+  warningMessageKey,
+  resolveChartTheme,
+  gridLineStyle,
+  crosshairMode,
+  hasSeriesData,
+} from "./chartHelpers";
+import { useChartSeries } from "./useChartSeries";
+import { syncSRLines } from "./useChartIndicators";
 
 interface CandlestickChartProps {
   defaultSymbol?: string;
@@ -265,6 +109,8 @@ interface CandlestickChartProps {
   onAiActionControllerReady?: (controller: AiChartActionController | null) => void;
   // Replay mode props
   isReplayActive?: boolean;
+  /** Freeze live updates (used by Interact mode tours) */
+  frozen?: boolean;
 }
 
 interface TooltipData {
@@ -295,43 +141,16 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   showNewsMarkers = true,
   onAiActionControllerReady,
   isReplayActive = false,
+  frozen = false,
 }) => {
   const { t } = useI18n();
+  const [eventFrozen, setEventFrozen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartStageRef = useRef<HTMLDivElement>(null);
   const timeframeButtonRef = useRef<HTMLButtonElement>(null);
   const indicatorButtonRef = useRef<HTMLButtonElement>(null);
-  const chartRef = useRef<ReturnType<typeof createChart> | null>(null);
-  const candleRef = useRef<any>(null);
-  const barRef = useRef<any>(null);
-  const lineRef = useRef<any>(null);
-  const areaRef = useRef<any>(null);
-  const volumeRef = useRef<any>(null);
-  const sma20Ref = useRef<any>(null);
-  const sma50Ref = useRef<any>(null);
-  const ema12Ref = useRef<any>(null);
-  const ema26Ref = useRef<any>(null);
-  const bbUpperRef = useRef<any>(null);
-  const bbBasisRef = useRef<any>(null);
-  const bbLowerRef = useRef<any>(null);
-  const vwapRef = useRef<any>(null);
-  const volumeMaRef = useRef<any>(null);
-  const macdLineRef = useRef<any>(null);
-  const macdSignalRef = useRef<any>(null);
-  const macdHistogramRef = useRef<any>(null);
-  const stochasticKRef = useRef<any>(null);
-  const stochasticDRef = useRef<any>(null);
-  const atrRef = useRef<any>(null);
-  const ichimokuConversionRef = useRef<any>(null);
-  const ichimokuBaseRef = useRef<any>(null);
-  const ichimokuSpanARef = useRef<any>(null);
-  const ichimokuSpanBRef = useRef<any>(null);
-  const ichimokuLaggingRef = useRef<any>(null);
-  const supertrendRef = useRef<any>(null);
-  const psarRef = useRef<any>(null);
-  const rsiSeriesRef = useRef<any>(null);
-  const mfiSeriesRef = useRef<any>(null);
+  const srLinesRef = useRef<{ priceLine: any; label: string }[]>([]);
   const candlesRef = useRef<Candle[]>([]);
   const renderedPriceDataLengthRef = useRef(0);
   const themeRef = useRef(getChartTheme());
@@ -339,6 +158,32 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const timeframeRef = useRef(timeframeProp || "1m");
   const chartTypeRef = useRef<ChartType>(chartType);
   const lastClosedCandleRef = useRef<Candle | null>(null);
+  // Store callbacks in refs for the chart init hook (runs once on mount)
+  const getActivePriceSeriesRef = useRef<() => any>(() => null);
+  const onTooltipRef = useRef<(data: any) => void>(() => {});
+
+  // Series refs managed by useChartSeries (uses refs to avoid forward-ref issues)
+  const seriesRefs = useChartSeries(
+    containerRef as React.RefObject<HTMLDivElement>,
+    chartStageRef as React.RefObject<HTMLDivElement>,
+    chartType,
+    timeframeProp || "1m" as TimeframeKey,
+    chartPreferences,
+    localTickMarkFormatter,
+    localTimeFormatter,
+    getActivePriceSeriesRef,
+    onTooltipRef,
+  );
+  const {
+    chart: chartRef, candleRef, barRef, lineRef, areaRef, volumeRef,
+    sma20Ref, sma50Ref, ema12Ref, ema26Ref,
+    bbUpperRef, bbBasisRef, bbLowerRef,
+    vwapRef, supertrendRef, psarRef, volumeMaRef,
+    ichimokuConversionRef, ichimokuBaseRef, ichimokuSpanARef, ichimokuSpanBRef, ichimokuLaggingRef,
+    rsiSeriesRef, mfiSeriesRef,
+    macdLineRef, macdSignalRef, macdHistogramRef,
+    stochasticKRef, stochasticDRef, atrRef,
+  } = seriesRefs;
 
   const [symbol, setSymbol] = useState(symbolProp || defaultSymbol);
   const [timeframe, setTimeframe] = useState(timeframeProp || "1m");
@@ -510,6 +355,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     if (chartTypeRef.current === "area") return areaRef.current || candleRef.current;
     return candleRef.current;
   }, []);
+  // Wire refs for chart init hook (runs once on mount)
+  getActivePriceSeriesRef.current = getActivePriceSeries;
+  onTooltipRef.current = setTooltip;
 
   const setAllPriceSeriesData = useCallback(
     (data: Candle[]) => {
@@ -635,11 +483,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
             requestInterval,
           );
         } else {
-          olderData = await fetchCandles(
+          olderData = await fetchMergedCandles(
             requestSymbol,
             requestInterval,
             fetchLimit,
-            earliestTime,
           );
         }
       } catch {
@@ -698,397 +545,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     }
   }, [timeframe, onTimeframeChange]);
 
-  // Init chart once
-  useEffect(() => {
-    if (!containerRef.current) return;
-    const preferences = chartPreferences ?? DEFAULT_CHART_PREFERENCES;
-    const chartTheme = resolveChartTheme(getChartTheme(), preferences);
-    const lineStyle = gridLineStyle(preferences);
-    themeRef.current = chartTheme;
-    const chart = createChart(containerRef.current, {
-      layout: {
-        background: { color: chartTheme.background },
-        textColor: chartTheme.textColor,
-        fontFamily: "'Inter','Segoe UI',sans-serif",
-        fontSize: 11,
-      },
-      localization: {
-        locale: navigator.language || "en-US",
-        timeFormatter: localTimeFormatter,
-      },
-      grid: {
-        vertLines: {
-          color: preferences.grid_crosshair.grid_visible ? chartTheme.gridColor : "transparent",
-          style: lineStyle,
-        },
-        horzLines: {
-          color: preferences.grid_crosshair.grid_visible ? chartTheme.gridColor : "transparent",
-          style: lineStyle,
-        },
-      },
-      crosshair: {
-        mode: crosshairMode(preferences),
-        vertLine: {
-          color: chartTheme.crosshair,
-          labelBackgroundColor: chartTheme.crosshairLabelBg,
-          style: LineStyle.Dashed,
-        },
-        horzLine: {
-          color: chartTheme.crosshair,
-          labelBackgroundColor: chartTheme.crosshairLabelBg,
-          style: LineStyle.Dashed,
-        },
-      },
-      rightPriceScale: {
-        borderColor: chartTheme.borderColor,
-        scaleMargins: { top: 0.05, bottom: 0.25 },
-        entireTextOnly: true,
-        visible: preferences.scale.price_labels_visible,
-        mode: 0,
-      },
-      timeScale: {
-        borderColor: chartTheme.borderColor,
-        timeVisible: true,
-        secondsVisible: preferences.scale.seconds_visible && timeframe === "1s",
-        barSpacing: preferences.scale.bar_spacing,
-        minBarSpacing: 2,
-        rightOffset: 8,
-        fixLeftEdge: false,
-        fixRightEdge: false,
-        lockVisibleTimeRangeOnResize: true,
-        tickMarkFormatter: localTickMarkFormatter,
-        visible: preferences.scale.time_labels_visible,
-      },
-      handleScroll: { mouseWheel: false, pressedMouseMove: true },
-      handleScale: {
-        axisPressedMouseMove: true,
-        mouseWheel: false,
-        pinch: true,
-      },
-    });
-    const cs = chart.addSeries(CandlestickSeries, {
-      upColor: chartTheme.upColor,
-      downColor: chartTheme.downColor,
-      borderUpColor: chartTheme.upColor,
-      borderDownColor: chartTheme.downColor,
-      wickUpColor: chartTheme.upColor,
-      wickDownColor: chartTheme.downColor,
-      borderVisible: preferences.candle_style.border_visible,
-      wickVisible: preferences.candle_style.wick_visible && timeframe !== "1s",
-      visible: usesCandleSeries(chartType),
-    });
-    const bs = chart.addSeries(BarSeries, {
-      upColor: chartTheme.upColor,
-      downColor: chartTheme.downColor,
-      thinBars: false,
-      visible: chartType === "bars",
-    });
-    const ls = chart.addSeries(LineSeries, {
-      color: chartTheme.upColor,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: true,
-      lastValueVisible: true,
-      crosshairMarkerVisible: true,
-      visible: usesLineSeries(chartType),
-    });
-    const ar = chart.addSeries(AreaSeries, {
-      lineColor: chartTheme.upColor,
-      topColor: `${chartTheme.upColor}50`,
-      bottomColor: `${chartTheme.background}00`,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: true,
-      lastValueVisible: true,
-      crosshairMarkerVisible: true,
-      visible: chartType === "area",
-    });
-    const vs = chart.addSeries(HistogramSeries, {
-      priceFormat: { type: "volume" },
-      priceScaleId: "volume",
-    });
-    chart
-      .priceScale("volume")
-      .applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
-    const s20 = chart.addSeries(LineSeries, {
-      color: chartTheme.sma20,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: true,
-      crosshairMarkerVisible: false,
-    });
-    const s50 = chart.addSeries(LineSeries, {
-      color: chartTheme.sma50,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: true,
-      crosshairMarkerVisible: false,
-    });
-    const ema12 = chart.addSeries(LineSeries, {
-      color: chartTheme.ema12,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: false,
-      lastValueVisible: true,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const ema26 = chart.addSeries(LineSeries, {
-      color: chartTheme.ema26,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: false,
-      lastValueVisible: true,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const bbUpper = chart.addSeries(LineSeries, {
-      color: chartTheme.bb,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const bbBasis = chart.addSeries(LineSeries, {
-      color: chartTheme.bbBasis,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const bbLower = chart.addSeries(LineSeries, {
-      color: chartTheme.bb,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const vwapSeries = chart.addSeries(LineSeries, {
-      color: chartTheme.vwap,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: false,
-      lastValueVisible: true,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const supertrendSeries = chart.addSeries(LineSeries, {
-      color: chartTheme.supertrend,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: false,
-      lastValueVisible: true,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const psarSeries = chart.addSeries(LineSeries, {
-      color: chartTheme.psar,
-      lineWidth: 1,
-      lineStyle: LineStyle.Dotted,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const volumeMaSeries = chart.addSeries(LineSeries, {
-      color: chartTheme.volumeMa,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-      priceScaleId: "volume",
-    });
-    const ichimokuConversion = chart.addSeries(LineSeries, {
-      color: chartTheme.ichimokuConversion,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const ichimokuBase = chart.addSeries(LineSeries, {
-      color: chartTheme.ichimokuBase,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const ichimokuSpanA = chart.addSeries(LineSeries, {
-      color: chartTheme.ichimokuSpanA,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const ichimokuSpanB = chart.addSeries(LineSeries, {
-      color: chartTheme.ichimokuSpanB,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    const ichimokuLagging = chart.addSeries(LineSeries, {
-      color: chartTheme.bbBasis,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-    // RSI & MFI on a separate left-side oscillator scale (bottom 20%)
-    const rsiSeries = chart.addSeries(LineSeries, {
-      color: chartTheme.rsi,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-      priceScaleId: "oscillator",
-    });
-    const macdLine = chart.addSeries(LineSeries, {
-      color: chartTheme.macd,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-      priceScaleId: "oscillator",
-    });
-    const macdSignal = chart.addSeries(LineSeries, {
-      color: chartTheme.macdSignal,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-      priceScaleId: "oscillator",
-    });
-    const macdHistogram = chart.addSeries(HistogramSeries, {
-      color: chartTheme.macd,
-      priceFormat: { type: "volume" },
-      priceScaleId: "oscillator",
-      visible: false,
-    });
-    const stochasticK = chart.addSeries(LineSeries, {
-      color: chartTheme.stochastic,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-      priceScaleId: "oscillator",
-    });
-    const stochasticD = chart.addSeries(LineSeries, {
-      color: chartTheme.stochasticSignal,
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-      priceScaleId: "oscillator",
-    });
-    const atrSeries = chart.addSeries(LineSeries, {
-      color: chartTheme.atr,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-      priceScaleId: "oscillator",
-    });
-    const mfiSeries = chart.addSeries(LineSeries, {
-      color: chartTheme.mfi,
-      lineWidth: 2 as 1 | 2 | 3 | 4,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-      priceScaleId: "oscillator",
-    });
-    chart.priceScale("oscillator").applyOptions({
-      scaleMargins: { top: 0.75, bottom: 0 },
-      visible: false,
-    });
-    chartRef.current = chart;
-    candleRef.current = cs;
-    barRef.current = bs;
-    lineRef.current = ls;
-    areaRef.current = ar;
-    volumeRef.current = vs;
-    sma20Ref.current = s20;
-    sma50Ref.current = s50;
-    ema12Ref.current = ema12;
-    ema26Ref.current = ema26;
-    bbUpperRef.current = bbUpper;
-    bbBasisRef.current = bbBasis;
-    bbLowerRef.current = bbLower;
-    vwapRef.current = vwapSeries;
-    supertrendRef.current = supertrendSeries;
-    psarRef.current = psarSeries;
-    volumeMaRef.current = volumeMaSeries;
-    macdLineRef.current = macdLine;
-    macdSignalRef.current = macdSignal;
-    macdHistogramRef.current = macdHistogram;
-    stochasticKRef.current = stochasticK;
-    stochasticDRef.current = stochasticD;
-    atrRef.current = atrSeries;
-    ichimokuConversionRef.current = ichimokuConversion;
-    ichimokuBaseRef.current = ichimokuBase;
-    ichimokuSpanARef.current = ichimokuSpanA;
-    ichimokuSpanBRef.current = ichimokuSpanB;
-    ichimokuLaggingRef.current = ichimokuLagging;
-    rsiSeriesRef.current = rsiSeries;
-    mfiSeriesRef.current = mfiSeries;
-    chart.subscribeCrosshairMove((param: any) => {
-      if (!param.time || (param.point && param.point.x < 0)) {
-        setTooltip(null);
-        return;
-      }
-      const activeSeries = getActivePriceSeries();
-      const c = activeSeries ? param.seriesData.get(activeSeries) : param.seriesData.get(cs);
-      const v = param.seriesData.get(vs);
-      if (c) {
-        const lbl = localTimeFormatter(param.time as number);
-        if (
-          typeof c.open === "number"
-          && typeof c.high === "number"
-          && typeof c.low === "number"
-          && typeof c.close === "number"
-        ) {
-          setTooltip({ ...c, volume: v ? v.value : undefined, timeLabel: lbl });
-          return;
-        }
-
-        if (typeof c.value === "number" && Number.isFinite(c.value)) {
-          setTooltip({
-            open: c.value,
-            high: c.value,
-            low: c.value,
-            close: c.value,
-            volume: v ? v.value : undefined,
-            timeLabel: lbl,
-          });
-        }
-      }
-    });
-    const ro = new ResizeObserver(scheduleChartResize);
-    ro.observe(containerRef.current);
-    if (chartStageRef.current) {
-      ro.observe(chartStageRef.current);
-    }
-    window.addEventListener("resize", scheduleChartResize);
-    window.visualViewport?.addEventListener("resize", scheduleChartResize);
-    scheduleChartResize();
-    return () => {
-      ro.disconnect();
-      window.removeEventListener("resize", scheduleChartResize);
-      window.visualViewport?.removeEventListener("resize", scheduleChartResize);
-      chart.remove();
-      chartRef.current = null;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Chart initialization handled by useChartSeries hook above (single mount)
+  // Theme update effect below
 
   useEffect(() => {
     const preferences = chartPreferences ?? DEFAULT_CHART_PREFERENCES;
@@ -1218,6 +676,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     return () => container.removeEventListener("wheel", handleWheel);
   }, []);
 
+  // Use imported syncSRLines from useChartIndicators
+
   const syncIndicatorData = useCallback((data: Candle[]) => {
     const cfg20 = indSettings.sma20;
     const cfg50 = indSettings.sma50;
@@ -1303,6 +763,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
     rsiSeriesRef.current?.setData(calcRSI(data, Number(indSettings.rsi.period ?? 14)));
     mfiSeriesRef.current?.setData(calcMFI(data, Number(indSettings.mfi.period ?? 14)));
+
+    // Support & Resistance lines
+    syncSRLines(data, candleRef.current, indSettings.support_resistance, srLinesRef);
   }, [indSettings]);
 
   const getLiveIndicatorWindow = useCallback(
@@ -1573,6 +1036,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     isLoadingMoreRef.current = true;
     try {
       const limit = 500;
+      // Use fetchCandles with endTime to query InfluxDB/Trino for historical data.
+      // fetchMergedCandles only reads Redis (speed layer, ~7d) — not enough.
       const olderData = await fetchCandles(requestSymbol, requestInterval, limit, earliestTime);
 
       // User changed symbol/timeframe while request was in flight.
@@ -1818,7 +1283,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       try {
         const requestSymbol = symbol;
         const requestInterval = timeframe.toLowerCase();
-        let data = sanitizeCandlesForChart(await fetchCandles(requestSymbol, requestInterval, limit));
+        let data = sanitizeCandlesForChart(await fetchMergedCandles(requestSymbol, requestInterval, limit));
         if (cancelled) return;
 
         data = await preloadInitialCandles({
@@ -1838,9 +1303,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       }
     };
 
-    // ⚠️ CRITICAL: Block WebSocket subscription when replay mode is active
+    // ⚠️ CRITICAL: Block WebSocket subscription when frozen or in replay mode
     // to prevent live fetches or WebSocket updates from interfering with playback.
-    if (isReplayActive) {
+    if (isReplayActive || frozen) {
       return () => {
         cancelled = true;
       };
@@ -1935,9 +1400,10 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         candlesRef.current = updatedCandles;
         syncLatestIndicatorData(updatedCandles);
         commitCandlesState(updatedCandles);
-        setTooltip((tip) =>
-          tip ? { ...tip, ...nextCandle, timeLabel: tip.timeLabel || "" } : null,
-        );
+        setTooltip((tip) => ({
+          ...nextCandle,
+          timeLabel: tip?.timeLabel || "",
+        }));
       },
       onCandle: (tf, candle) => {
         if (tf !== timeframe.toLowerCase()) return;
@@ -1986,11 +1452,102 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     unsubscribeRef.current = unsub;
     indicatorUnsubscribeRef.current = indicatorUnsub;
 
-    // OPTIMIZATION: Disable aggressive polling. WebSocket is now responsive (0.05s).
-    // Only poll as fallback if WebSocket connection fails (passive recovery).
-    // Previous: 1.5-3s polling added latency. Now: WebSocket primary, poll backup.
-    // Fallback poll will be triggered by connection monitoring in future release.
-    const pollId = null;
+    // Poll backup every 10s — also updates _livePriceMap so RightPanel
+    // (CoinSummary price + change%) refreshes even if WS onTicker is idle.
+    const pollId = window.setInterval(async () => {
+      if (cancelled || !candleRef.current) return;
+      try {
+        const ticker = await fetchTicker(symbol);
+        if (!ticker || !ticker.price || cancelled) return;
+        const price = Number(ticker.price);
+        if (price <= 0) return;
+
+        // Update _livePriceMap for RightPanel
+        updateLivePrice(
+          symbol,
+          price,
+          Number(ticker.change24h) || 0,
+          Number(ticker.volume) || 0,
+          Number(ticker.activity_score) || 0,
+        );
+
+        // Build forming candle from REST ticker data
+        const eventTimeMs = ticker.event_time || Date.now();
+        const timeframeSec = getTimeframeSeconds(timeframeRef.current);
+        if (!timeframeSec) return;
+
+        const bucketTime = Math.floor(eventTimeMs / 1000 / timeframeSec) * timeframeSec;
+        const lastClosed = lastClosedCandleRef.current;
+        const forming = formingCandleRef.current;
+
+        // Gap defense: 5 buckets max
+        const maxGapSec = timeframeSec * 5;
+        if (forming && bucketTime - forming.time > maxGapSec) {
+          formingCandleRef.current = null;
+          return;
+        }
+        if (!forming && lastClosed && bucketTime - lastClosed.time > maxGapSec) {
+          lastClosedCandleRef.current = null;
+          return;
+        }
+
+        let nextCandle: Candle;
+        if (forming && forming.time === bucketTime) {
+          nextCandle = {
+            time: bucketTime,
+            open: forming.open,
+            high: Math.max(forming.high, price),
+            low: Math.min(forming.low, price),
+            close: price,
+            volume: forming.volume || 0,
+          };
+          formingCandleRef.current = nextCandle;
+        } else if (forming && forming.time < bucketTime) {
+          lastClosedCandleRef.current = forming;
+          nextCandle = {
+            time: bucketTime,
+            open: forming.close,
+            high: Math.max(forming.close, price),
+            low: Math.min(forming.close, price),
+            close: price,
+            volume: 0,
+          };
+          formingCandleRef.current = nextCandle;
+        } else if (!forming && lastClosed) {
+          nextCandle = {
+            time: bucketTime,
+            open: lastClosed.close,
+            high: Math.max(lastClosed.close, price),
+            low: Math.min(lastClosed.close, price),
+            close: price,
+            volume: 0,
+          };
+          formingCandleRef.current = nextCandle;
+        } else {
+          return;
+        }
+
+        updateAllPriceSeries(nextCandle);
+        if (volumeRef.current) {
+          volumeRef.current.update({
+            time: nextCandle.time,
+            value: nextCandle.volume || 0,
+            color: nextCandle.close >= nextCandle.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
+          });
+        }
+        const closed = candlesRef.current.filter((c) => c.time < bucketTime);
+        const updatedCandles = [...closed, nextCandle];
+        candlesRef.current = updatedCandles;
+        syncLatestIndicatorData(updatedCandles);
+        commitCandlesState(updatedCandles);
+        setTooltip((tip) => ({
+          ...nextCandle,
+          timeLabel: tip?.timeLabel || "",
+        }));
+      } catch {
+        // silent
+      }
+    }, 10_000) as unknown as ReturnType<typeof setInterval>;
     pollIntervalRef.current = pollId;
 
     return () => {
@@ -2014,12 +1571,13 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     preloadInitialCandles,
     syncLatestIndicatorData,
     updateAllPriceSeries,
-    isReplayActive, // ⚠️ Re-run when replay mode changes to block/unblock WebSocket
+    isReplayActive,
+    frozen, // ⚠️ Re-run when frozen/replay mode changes to block/unblock WebSocket
   ]);
 
-  // ⚠️ CRITICAL: Cleanup WebSocket immediately when entering replay mode
+  // ⚠️ CRITICAL: Cleanup WebSocket immediately when entering replay/frozen mode
   useEffect(() => {
-    if (isReplayActive) {
+    if (isReplayActive || frozen) {
       // Unsubscribe WebSocket
       if (unsubscribeRef.current) {
         unsubscribeRef.current();
@@ -2035,7 +1593,19 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         pollIntervalRef.current = null;
       }
     }
-  }, [isReplayActive]);
+  }, [isReplayActive, frozen, eventFrozen]);
+
+  // Listen for external freeze/unfreeze events (from Interact mode tours)
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ frozen: boolean }>).detail;
+      if (detail && typeof detail.frozen === "boolean") {
+        setEventFrozen(detail.frozen);
+      }
+    };
+    window.addEventListener("lmview:chart-freeze", handler);
+    return () => window.removeEventListener("lmview:chart-freeze", handler);
+  }, []);
 
   useEffect(() => {
     if (!showNewsMarkers) {
@@ -2390,6 +1960,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   return (
     <div
       ref={rootRef}
+      data-testid="candlestick-chart"
       className={`flex min-h-0 w-full flex-col overflow-hidden bg-[var(--lm-bg-primary)] ${
         isFullscreen ? "h-dvh rounded-none" : "h-full rounded-lg"
       }`}
@@ -2436,6 +2007,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
               <div className="relative flex-shrink-0">
                 <button
                   ref={timeframeButtonRef}
+                  data-testid="timeframe-button"
                   type="button"
                   onClick={() => setIsTimeframeMenuOpen((open) => !open)}
                   className={`${toolbarButtonBase} min-w-14 gap-1 border border-[var(--lm-border)] px-2.5 ${
@@ -2609,7 +2181,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         </div>
         {/* Chart canvas + overlay slot */}
         <div ref={chartStageRef} data-ai-section="chart-canvas" className="relative min-h-0 flex-1 overflow-hidden">
-          <div ref={containerRef} className="w-full h-full" />
+          <div ref={containerRef} data-testid="chart-canvas" className="w-full h-full" />
           {isLoading && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--lm-bg-primary)]/60">
               <span className="animate-pulse text-sm text-[var(--lm-text-secondary)]">
@@ -2638,6 +2210,15 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
               <p className="text-sm text-[var(--lm-text-secondary)]">
                 {t("noDataAvailable")} {symbol} @ {timeframe}
               </p>
+            </div>
+          )}
+          {/* Frozen overlay for Interact mode tours */}
+          {(frozen || eventFrozen) && (
+            <div className="absolute inset-0 z-10 flex items-start justify-center bg-[var(--lm-bg-primary)]/20 pt-12">
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-center shadow-lg backdrop-blur-sm">
+                <p className="text-xs font-semibold text-amber-300">❄ Chart frozen for analysis</p>
+                <p className="mt-0.5 text-[10px] text-amber-200/60">Resumes after tour ends</p>
+              </div>
             </div>
           )}
           {typeof children === 'function'

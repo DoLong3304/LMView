@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -20,6 +20,8 @@ import {
   Send,
   Shield,
   Sparkles,
+  ThumbsDown,
+  ThumbsUp,
   UserRound,
 } from "lucide-react";
 import { useAuth } from "@/features/auth/AuthContext";
@@ -27,7 +29,8 @@ import { useAiActions } from "@/features/ai/actions/AiActionProvider";
 import { useAiChat } from "@/features/ai/hooks/useAiChat";
 import { useI18n } from "@/i18n";
 import type { ChartContextForAi } from "@/features/ai/types";
-import type { Candle } from "@/types";
+import type { Candle, IndicatorSettings } from "@/types";
+import { calcSupportResistance } from "@/features/chart/indicatorUtils";
 
 interface AiAssistantPanelProps {
   selectedSymbol: string;
@@ -36,6 +39,8 @@ interface AiAssistantPanelProps {
   selectedIndicators?: string[];
   exchange?: string;
   onOpenSettings?: () => void;
+  /** Optional indicator settings for richer AI context */
+  indSettings?: Record<string, IndicatorSettings>;
 }
 
 function MarkdownContent({ content, compact = false }: { content: string; compact?: boolean }) {
@@ -55,28 +60,85 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
   selectedIndicators = [],
   exchange = "binance",
   onOpenSettings,
+  indSettings,
 }) => {
   const { t } = useI18n();
   const { user } = useAuth();
   const { executeAction } = useAiActions();
-  const { messages, loading, error, mode, setMode, sendMessage, clearChat } = useAiChat();
+  const {
+    messages,
+    loading,
+    error,
+    mode,
+    setMode,
+    sendMessage,
+    clearChat,
+    activeTour,
+    setActiveTour,
+  } = useAiChat();
   const [inputValue, setInputValue] = useState("");
   const [suggestionsOpen, setSuggestionsOpen] = useState(true);
   const [actionResult, setActionResult] = useState("");
   const [tourSummary, setTourSummary] = useState<{ summary: string; actions: number } | null>(null);
+  const [tourRunning, setTourRunning] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const autoExecutedRef = useRef<Set<string>>(new Set());
   const [debugOpen, setDebugOpen] = useState(false);
   const isAdmin = user?.role === "admin";
 
+  // Rating handler
+  const rateMessage = useCallback(async (messageId: string, rating: 1 | -1) => {
+    try {
+      const { rateMessage: apiRate } = await import("@/services/aiService");
+      await apiRate(messageId, rating);
+    } catch (err) {
+      console.warn("Failed to rate message:", err);
+    }
+  }, []);
+
   const chartContext: ChartContextForAi = useMemo(() => {
     const lastCandle = candles[candles.length - 1];
+    // Send last 20 candles as lightweight preview
+    const recentCandles = candles.slice(-20).map(c => ({
+      time: c.time ?? 0,
+      open: c.open ?? 0,
+      high: c.high ?? 0,
+      low: c.low ?? 0,
+      close: c.close ?? 0,
+      volume: c.volume ?? 0,
+    }));
+    // Extract indicator values from settings
+    const indicatorValues: Array<{ name: string; value: number | null; signal: string | null; params: Record<string, unknown> }> = [];
+    for (const [key, cfg] of Object.entries(indSettings || {})) {
+      if (cfg.visible && cfg.type) {
+        indicatorValues.push({
+          name: key,
+          value: null,
+          signal: null,
+          params: { ...cfg },
+        });
+      }
+    }
+    // Add S/R levels as computed values
+    if (indSettings?.support_resistance?.visible && candles.length >= 10) {
+      const srLevels = calcSupportResistance(candles, Number(indSettings.support_resistance.lookback ?? 50));
+      for (const level of srLevels) {
+        indicatorValues.push({
+          name: `sr_${level.type}`,
+          value: level.price,
+          signal: level.type,
+          params: { label: level.label },
+        });
+      }
+    }
     return {
       symbol: selectedSymbol,
       exchange,
       timeframe,
       chart_type: "candles",
       selected_indicators: selectedIndicators,
+      recent_candles: recentCandles.length > 0 ? recentCandles : undefined,
+      indicator_values: indicatorValues.length > 0 ? indicatorValues : undefined,
       latest_candle: lastCandle
         ? {
             open_time: lastCandle.time ? lastCandle.time * 1000 : undefined,
@@ -87,9 +149,9 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
             volume: lastCandle.volume,
           }
         : null,
-      frontend_context_version: "2.0.0",
+      frontend_context_version: "3.0.0",
     };
-  }, [selectedSymbol, exchange, timeframe, selectedIndicators, candles]);
+  }, [selectedSymbol, exchange, timeframe, selectedIndicators, candles, indSettings]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -110,6 +172,38 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
     });
   }, [executeAction, messages, mode]);
 
+  // Detect tour_plan from latest assistant message → start tour
+  useEffect(() => {
+    if (mode !== "interact") return;
+    if (tourRunning) return;
+    const latest = messages[messages.length - 1];
+    if (!latest || latest.role !== "assistant") return;
+    if (!latest.tour_plan || !latest.tour_plan.steps?.length) return;
+
+    const plan = latest.tour_plan;
+    setActiveTour({
+      plan: {
+        tour_id: plan.tour_id,
+        title: plan.title,
+        summary: plan.summary,
+        chart_snapshot: plan.chart_snapshot || null,
+        steps: plan.steps.map((s) => ({
+          action_type: s.action_type,
+          params: s.params || {},
+          explanation: s.explanation || "",
+          target_selector: s.target_selector,
+          requires_approval: s.requires_approval ?? false,
+        })),
+      },
+      currentStep: 0,
+      active: true,
+    });
+    setTourRunning(true);
+
+    // Freeze chart
+    window.dispatchEvent(new CustomEvent("lmview:chart-freeze", { detail: { frozen: true } }));
+  }, [messages, mode, tourRunning, setActiveTour]);
+
   useEffect(() => {
     const onTourComplete = (event: Event) => {
       const detail = (event as CustomEvent<{ summary?: string; actions?: unknown[] }>).detail;
@@ -122,6 +216,51 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
     window.addEventListener("lmview:ai-tour-complete", onTourComplete);
     return () => window.removeEventListener("lmview:ai-tour-complete", onTourComplete);
   }, [t]);
+
+  // Auto-execute current tour step action
+  const autoExecutedStepRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!activeTour || !activeTour.active) return;
+    const step = activeTour.plan.steps[activeTour.currentStep];
+    if (!step) return;
+    const key = `${activeTour.plan.tour_id}-${activeTour.currentStep}`;
+    if (autoExecutedStepRef.current.has(key)) return;
+    autoExecutedStepRef.current.add(key);
+    void executeAction({
+      name: step.action_type,
+      arguments: step.params || {},
+      reason: `tour:${activeTour.plan.title} step ${activeTour.currentStep + 1}`,
+    });
+  }, [activeTour, executeAction]);
+
+  // Tour navigation
+  const tourNextStep = useCallback(() => {
+    if (!activeTour || !activeTour.active) return;
+    const nextIdx = activeTour.currentStep + 1;
+    if (nextIdx >= activeTour.plan.steps.length) {
+      // Tour complete
+      setActiveTour(null);
+      setTourRunning(false);
+      window.dispatchEvent(new CustomEvent("lmview:chart-freeze", { detail: { frozen: false } }));
+      window.dispatchEvent(new CustomEvent("lmview:ai-tour-complete", {
+        detail: { summary: activeTour.plan.summary, actions: activeTour.plan.steps },
+      }));
+      return;
+    }
+    setActiveTour({ ...activeTour, currentStep: nextIdx });
+  }, [activeTour, setActiveTour]);
+
+  const tourPrevStep = useCallback(() => {
+    if (!activeTour || !activeTour.active) return;
+    const prevIdx = Math.max(0, activeTour.currentStep - 1);
+    setActiveTour({ ...activeTour, currentStep: prevIdx });
+  }, [activeTour, setActiveTour]);
+
+  const cancelTour = useCallback(() => {
+    setActiveTour(null);
+    setTourRunning(false);
+    window.dispatchEvent(new CustomEvent("lmview:chart-freeze", { detail: { frozen: false } }));
+  }, [setActiveTour]);
 
   const handleSend = () => {
     const trimmed = inputValue.trim();
@@ -141,11 +280,31 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
     .replace("{symbol}", selectedSymbol)
     .replace("{timeframe}", timeframe.toUpperCase());
 
-  const suggestions = [
-    t("aiSuggestionLmview"),
-    t("aiSuggestionDrawingTools"),
-    t("aiSuggestionIndicatorsHelp"),
-  ];
+  const suggestions = useMemo(() => {
+    const pool = [
+      t("aiSuggestionLmview"),
+      t("aiSuggestionDrawingTools"),
+      t("aiSuggestionIndicatorsHelp"),
+      "Analyze recent trend direction",
+      "Find support and resistance levels",
+      "Detect candlestick patterns",
+      "Compare multiple timeframes",
+      "Check volume confirmation",
+      "Explain current indicator signals",
+    ];
+    // Symbol-specific prompts
+    if (selectedSymbol) {
+      pool.push(`Analyze ${selectedSymbol} trend on ${timeframe}`);
+      pool.push(`Key support levels for ${selectedSymbol}?`);
+      pool.push(`What indicators say about ${selectedSymbol}?`);
+      pool.push(`Show me ${selectedSymbol} order flow`);
+      pool.push(`${selectedSymbol} breakout levels`);
+      pool.push(`Compare ${selectedSymbol} with BTC`);
+    }
+    // Pick random 3
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+    return shuffled.slice(0, 3);
+  }, [t, selectedSymbol, timeframe]);
   const assistantLabel = t("assistantName");
   const allMessages = [
     { id: "intro", role: "assistant" as const, content: introMessage },
@@ -153,7 +312,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
   ];
 
   return (
-    <div data-ai-section="ai-panel" className="flex min-h-0 flex-1 flex-col bg-gray-900">
+    <div data-ai-section="ai-panel" className="relative flex min-h-0 flex-1 flex-col bg-gray-900">
       <div className="border-b border-gray-800 bg-gray-850 px-3 py-2.5">
         <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2">
@@ -366,6 +525,25 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
                       </div>
                     </div>
                   )}
+                  {/* Rating buttons (👍/👎) for assistant messages */}
+                  {!isUser && message.id.startsWith("api-") && (
+                    <div className="mt-1.5 flex items-center gap-2">
+                      <button
+                        onClick={() => rateMessage(message.id, 1)}
+                        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] text-gray-500 hover:text-emerald-300 hover:bg-emerald-500/10 transition-colors"
+                        title="Helpful"
+                      >
+                        <ThumbsUp size={10} />
+                      </button>
+                      <button
+                        onClick={() => rateMessage(message.id, -1)}
+                        className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] text-gray-500 hover:text-red-300 hover:bg-red-500/10 transition-colors"
+                        title="Not helpful"
+                      >
+                        <ThumbsDown size={10} />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 {isUser && (
                   <div className="mt-5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-gray-800 text-gray-300">
@@ -551,6 +729,65 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
         .ai-md a { color: rgb(147 197 253); text-decoration: underline; }
         .ai-md-compact code { background: rgba(15, 23, 42, .45); color: white; }
       `}</style>
+
+      {/* Tour Step Overlay */}
+      {activeTour?.active && activeTour.plan.steps[activeTour.currentStep] && (
+        <div className="absolute left-2 right-2 top-2 z-50 rounded-lg border border-amber-500/30 bg-gray-850/95 p-3 shadow-xl backdrop-blur">
+          {/* Progress bar */}
+          <div className="mb-2 flex items-center gap-2">
+            <div className="flex-1">
+              <div className="h-1 w-full overflow-hidden rounded-full bg-gray-700">
+                <div
+                  className="h-full rounded-full bg-amber-500 transition-all duration-500"
+                  style={{ width: `${((activeTour.currentStep + 1) / activeTour.plan.steps.length) * 100}%` }}
+                />
+              </div>
+            </div>
+            <span className="text-[10px] text-amber-300/70">
+              {activeTour.currentStep + 1}/{activeTour.plan.steps.length}
+            </span>
+          </div>
+          {/* Step info */}
+          <p className="text-xs font-semibold text-amber-200">
+            {activeTour.plan.title}
+          </p>
+          <p className="mt-1 text-[11px] leading-relaxed text-gray-300">
+            {activeTour.plan.steps[activeTour.currentStep].explanation}
+          </p>
+          {/* Navigation */}
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <button
+              type="button"
+              onClick={cancelTour}
+              className="rounded bg-gray-700 px-2 py-1 text-[10px] font-semibold text-gray-300 hover:bg-gray-600"
+            >
+              {t("cancel")}
+            </button>
+            <div className="flex items-center gap-2">
+              {activeTour.currentStep > 0 && (
+                <button
+                  type="button"
+                  onClick={tourPrevStep}
+                  className="rounded bg-gray-700 px-2.5 py-1 text-[10px] font-semibold text-gray-300 hover:bg-gray-600"
+                >
+                  {t("previous")}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={tourNextStep}
+                className={`rounded px-2.5 py-1 text-[10px] font-semibold ${
+                  activeTour.currentStep >= activeTour.plan.steps.length - 1
+                    ? "bg-emerald-600 text-white hover:bg-emerald-500"
+                    : "bg-amber-600 text-white hover:bg-amber-500"
+                }`}
+              >
+                {activeTour.currentStep >= activeTour.plan.steps.length - 1 ? t("finish") : t("next")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

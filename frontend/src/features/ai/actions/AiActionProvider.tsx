@@ -6,6 +6,7 @@ import { useI18n } from "@/i18n";
 import { fetchHistoricalCandles } from "@/services/marketDataService";
 import { CHART_TYPES } from "@/types";
 import { sanitizeTechnicalDetails } from "@/utils/errors";
+import { getActionHandler } from "@/features/ai/actions/handlers";
 import type { ChartType, Drawing, IndicatorSettings, TimeframeKey } from "@/types";
 
 type AppView = "charts" | "marketsNews" | "screener";
@@ -518,6 +519,15 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
       recordAction(call, detail);
       return { ok, detail };
     };
+
+    // Try handler registry first (Batch 10 modular handlers)
+    const handler = getActionHandler(call.name);
+    if (handler) {
+      const detail = await handler(call, (msg) => setHighlight({ target: "debug", message: msg }));
+      return done(true, detail);
+    }
+
+    // Fallback to inline handlers for LMView-specific UI actions
     switch (call.name) {
       case "add_indicator":
         runtime.chartController?.setIndicatorVisible(String(args.indicator), true);

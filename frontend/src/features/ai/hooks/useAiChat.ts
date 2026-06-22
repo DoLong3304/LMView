@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAuth } from "@/features/auth/AuthContext";
 import {
   deleteLocalAiSession,
@@ -13,6 +13,7 @@ import {
 import { generateLmviewHelpResponse } from "@/features/ai/localHelpResponder";
 import {
   aiChat,
+  aiChatStream,
   aiGetSessionMessages,
   aiListSessions,
   shouldUseMockAi,
@@ -25,6 +26,7 @@ import type {
   AiChatState,
   AiMessage,
   ChartContextForAi,
+  TourExecutionState,
 } from "@/features/ai/types";
 import type { AiMode, LocalAiHelpSession } from "@/types";
 
@@ -41,6 +43,7 @@ interface UseAiChatReturn extends AiChatState {
   setMode: (mode: AiMode) => void;
   loadSession: (session: LocalAiHelpSession) => Promise<void>;
   deleteSession: (sessionId: string) => void;
+  setActiveTour: (tour: TourExecutionState | null) => void;
 }
 
 function titleFromMessage(message: string): string {
@@ -83,6 +86,19 @@ function metadataNumber(metadata: Record<string, unknown>, key: string): number 
 
 function mapApiMessage(message: AIMessageResponse): AiMessage {
   const metadata = message.metadata || {};
+  const tourPlan = message.tour_plan ? {
+    tour_id: message.tour_plan.tour_id,
+    title: message.tour_plan.title,
+    steps: message.tour_plan.steps.map((s: Record<string, unknown>) => ({
+      action_type: String(s.action_type || ""),
+      params: (s.params as Record<string, unknown>) || {},
+      explanation: String(s.explanation || ""),
+      target_selector: s.target_selector != null ? String(s.target_selector) : undefined,
+      requires_approval: Boolean(s.requires_approval),
+    })),
+    summary: message.tour_plan.summary,
+    chart_snapshot: message.tour_plan.chart_snapshot as Record<string, unknown> | null | undefined,
+  } : null;
   return {
     id: message.id,
     role: message.role === "user" || message.role === "system" ? message.role : "assistant",
@@ -112,6 +128,7 @@ function mapApiMessage(message: AIMessageResponse): AiMessage {
     token_input: message.token_input ?? metadataNumber(metadata, "token_input"),
     token_output: message.token_output ?? metadataNumber(metadata, "token_output"),
     estimated_cost_usd: metadataNumber(metadata, "estimated_cost_usd"),
+    tour_plan: tourPlan,
   };
 }
 
@@ -132,12 +149,14 @@ function localInteractToolCalls(message: string, mode: AiMode): AiToolCall[] | u
 export function useAiChat(): UseAiChatReturn {
   const { user, isAuthenticated } = useAuth();
   const isAdmin = user?.role === "admin";
+  const abortRef = useRef<(() => void) | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<AiMessage[]>([]);
   const [sessions, setSessions] = useState<LocalAiHelpSession[]>([]);
   const [mode, setMode] = useState<AiMode>("ask");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [activeTour, setActiveTour] = useState<TourExecutionState | null>(null);
 
   const loadApiSession = useCallback(
     async (targetSessionId: string) => {
@@ -222,6 +241,13 @@ export function useAiChat(): UseAiChatReturn {
     return () => window.removeEventListener(AI_SESSION_SELECTED_EVENT, onSelected);
   }, [isAuthenticated, loadApiSession, user?.id]);
 
+  // Abort streaming on unmount
+  useEffect(() => {
+    return () => {
+      abortRef.current?.();
+    };
+  }, []);
+
   const persistSession = useCallback(
     (nextMessages: AiMessage[], firstMessage: string, nextSessionId: string | null) => {
       if (!user?.id || nextMessages.length === 0) return null;
@@ -258,6 +284,9 @@ export function useAiChat(): UseAiChatReturn {
       setLoading(true);
       setError(null);
 
+      // Abort previous stream if any
+      abortRef.current?.();
+
       try {
         let assistantMsg: AiMessage;
         let nextSessionId = sessionId;
@@ -277,51 +306,130 @@ export function useAiChat(): UseAiChatReturn {
           assistantMsg = mockDataAdapter.generateAiResponse(trimmed, context);
           assistantMsg.tool_calls = localInteractToolCalls(trimmed, mode);
         } else {
+          // Try streaming first, fall back to batch
           try {
-            const response = await aiChat({
+            const chatStream = aiChatStream({
               session_id: sessionId,
               mode,
               message: trimmed,
               chart_context: context as Record<string, unknown> | null,
             });
-            nextSessionId = response.session_id || sessionId;
-            assistantMsg = {
-              id: response.message_id || `api-${Date.now()}`,
+            abortRef.current = chatStream.abort;
+            const { stream } = chatStream;
+
+            // Create streaming placeholder message
+            const streamMsgId = `stream-${Date.now()}`;
+            const streamAssistantMsg: AiMessage = {
+              id: streamMsgId,
               role: "assistant",
-              content: response.content,
-              is_mock: response.is_mock,
-              provider: response.provider,
-              model_name: response.model_name,
-              created_at: response.created_at ?? new Date().toISOString(),
-              warnings: response.warnings,
-              suggested_actions: response.suggested_actions,
-              tool_calls: response.tool_calls,
-              chart_actions: response.chart_actions,
-              confidence: response.confidence,
-              sources: response.sources,
-              data_caveats: response.data_caveats,
-              provider_metadata: response.provider_metadata,
-              token_input: response.token_input ?? undefined,
-              token_output: response.token_output ?? undefined,
-              estimated_cost_usd: response.estimated_cost_usd ?? undefined,
-              news_context: response.news_context ?? undefined,
+              content: "",
+              is_mock: false,
+              provider: "streaming",
+              created_at: new Date().toISOString(),
             };
-            if (nextSessionId && user?.id) {
-              setSessionId(nextSessionId);
-              setActiveAiSessionId(user.id, nextSessionId);
+
+            // Add placeholder so user sees immediate response
+            const msgsWithPlaceholder = [...baseMessages, streamAssistantMsg];
+            setMessages(msgsWithPlaceholder);
+
+            let fullContent = "";
+            let streamDone = false;
+
+            for await (const event of stream) {
+              if (event.done) {
+                streamDone = true;
+                // Update with final content
+                const finalContent = event.content || fullContent;
+                streamAssistantMsg.content = finalContent;
+                streamAssistantMsg.provider = "api";
+                if (event.guard_warnings) {
+                  streamAssistantMsg.warnings = event.guard_warnings;
+                }
+                // Use session ID from the first response metadata if available
+                nextSessionId = sessionId;
+                break;
+              }
+              if (event.content) {
+                fullContent += event.content;
+                // Update progressively — use functional state update
+                streamAssistantMsg.content = fullContent;
+                setMessages([...msgsWithPlaceholder.slice(0, -1), { ...streamAssistantMsg }]);
+              }
+              if (event.error) {
+                streamDone = true;
+                streamAssistantMsg.content = `Error: ${event.error}`;
+                streamAssistantMsg.warnings = [event.error];
+                setMessages([...msgsWithPlaceholder.slice(0, -1), { ...streamAssistantMsg }]);
+                break;
+              }
             }
-          } catch (apiErr) {
+
+            if (!streamDone) {
+              // Stream ended without done event — use accumulated
+              streamAssistantMsg.content = fullContent || "Response incomplete.";
+            }
+
+            assistantMsg = streamAssistantMsg;
+          } catch (streamErr) {
+            // Streaming failed — try batch API
             if (isAdmin || import.meta.env.DEV) {
-              console.warn("[AI] API failed, using local help:", sanitizeTechnicalDetails(apiErr));
+              console.warn("[AI] Stream failed, falling back to batch:", sanitizeTechnicalDetails(streamErr));
             }
-            assistantMsg = generateLmviewHelpResponse(trimmed, context);
-            assistantMsg.tool_calls = localInteractToolCalls(trimmed, mode);
-            assistantMsg.warnings = [
-              ...(assistantMsg.warnings || []),
-              isAdmin
-                ? `API unavailable - using local help mode: ${getRoleAwareErrorMessage(apiErr, { isAdmin: true, area: "ai" })}`
-                : "AI service is unavailable, so local help mode answered instead.",
-            ];
+            try {
+              const response = await aiChat({
+                session_id: sessionId,
+                mode,
+                message: trimmed,
+                chart_context: context as Record<string, unknown> | null,
+              });
+              nextSessionId = response.session_id || sessionId;
+              assistantMsg = {
+                id: response.message_id || `api-${Date.now()}`,
+                role: "assistant",
+                content: response.content,
+                is_mock: response.is_mock,
+                provider: response.provider,
+                model_name: response.model_name,
+                created_at: response.created_at ?? new Date().toISOString(),
+                warnings: response.warnings,
+                suggested_actions: response.suggested_actions,
+                tool_calls: response.tool_calls,
+                chart_actions: response.chart_actions,
+                confidence: response.confidence,
+                sources: response.sources,
+                data_caveats: response.data_caveats,
+                provider_metadata: response.provider_metadata,
+                token_input: response.token_input ?? undefined,
+                token_output: response.token_output ?? undefined,
+                estimated_cost_usd: response.estimated_cost_usd ?? undefined,
+                news_context: response.news_context ?? undefined,
+                tour_plan: response.tour_plan ? {
+                  tour_id: response.tour_plan.tour_id,
+                  title: response.tour_plan.title,
+                  steps: response.tour_plan.steps.map((s: Record<string, unknown>) => ({
+                    action_type: String(s.action_type || ""),
+                    params: (s.params as Record<string, unknown>) || {},
+                    explanation: String(s.explanation || ""),
+                    target_selector: s.target_selector != null ? String(s.target_selector) : undefined,
+                    requires_approval: Boolean(s.requires_approval),
+                  })),
+                  summary: response.tour_plan.summary,
+                  chart_snapshot: response.tour_plan.chart_snapshot as Record<string, unknown> | null | undefined,
+                } : null,
+              };
+            } catch (apiErr) {
+              if (isAdmin || import.meta.env.DEV) {
+                console.warn("[AI] API failed, using local help:", sanitizeTechnicalDetails(apiErr));
+              }
+              assistantMsg = generateLmviewHelpResponse(trimmed, context);
+              assistantMsg.tool_calls = localInteractToolCalls(trimmed, mode);
+              assistantMsg.warnings = [
+                ...(assistantMsg.warnings || []),
+                isAdmin
+                  ? `API unavailable - using local help mode: ${getRoleAwareErrorMessage(apiErr, { isAdmin: true, area: "ai" })}`
+                  : "AI service is unavailable, so local help mode answered instead.",
+              ];
+            }
           }
         }
 
@@ -349,6 +457,7 @@ export function useAiChat(): UseAiChatReturn {
         setMessages(nextMessages);
         persistSession(nextMessages, trimmed, sessionId);
       } finally {
+        abortRef.current = null;
         setLoading(false);
       }
     },
@@ -407,10 +516,12 @@ export function useAiChat(): UseAiChatReturn {
     mode,
     loading,
     error,
+    activeTour,
     sendMessage,
     clearChat,
     setMode,
     loadSession,
     deleteSession,
+    setActiveTour,
   };
 }

@@ -65,6 +65,20 @@ export interface AIChatResponse {
   estimated_cost_usd?: number | null;
   /** News context summary for display chips */
   news_context?: NewsContextSummary | null;
+  /** Tour plan for Interact mode guided analysis */
+  tour_plan?: {
+    tour_id: string;
+    title: string;
+    steps: Array<{
+      action_type: string;
+      params: Record<string, unknown>;
+      explanation: string;
+      target_selector?: string | null;
+      requires_approval?: boolean;
+    }>;
+    summary: string;
+    chart_snapshot?: Record<string, unknown> | null;
+  } | null;
 }
 
 /** Compact news context returned by AI chat */
@@ -131,6 +145,20 @@ export interface AIMessageResponse {
   latency_ms?: number | null;
   created_at?: string | null;
   metadata: Record<string, unknown>;
+  /** Tour plan for Interact mode guided analysis */
+  tour_plan?: {
+    tour_id: string;
+    title: string;
+    steps: Array<{
+      action_type: string;
+      params: Record<string, unknown>;
+      explanation: string;
+      target_selector?: string | null;
+      requires_approval?: boolean;
+    }>;
+    summary: string;
+    chart_snapshot?: Record<string, unknown> | null;
+  } | null;
 }
 
 export interface AIHealthResponse {
@@ -275,8 +303,184 @@ export async function aiActionCatalog(): Promise<AiActionCatalog> {
   return aiFetch<AiActionCatalog>("/ai/actions/catalog");
 }
 
+// ── Streaming ───────────────────────────────────────────────────────────────
+
+export interface AIChatStreamEvent {
+  content?: string;
+  error?: string;
+  done?: boolean;
+  event?: string;
+  guard_warnings?: string[];
+}
+
+/**
+ * Stream AI chat response token-by-token via SSE.
+ *
+ * Returns an object with:
+ * - stream: AsyncGenerator yielding parsed AIChatStreamEvent objects
+ * - abort: () => void to cancel the fetch
+ */
+export function aiChatStream(
+  request: AIChatRequest,
+): {
+  stream: AsyncGenerator<AIChatStreamEvent, void, unknown>;
+  abort: () => void;
+} {
+  const url = `${API_BASE_URL}/ai/chat/stream`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...getAuthHeaders(),
+  };
+
+  const controller = new AbortController();
+
+  const stream = async function* () {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(request),
+      signal: controller.signal,
+    });
+
+    if (!resp.ok) {
+      const errorData = await resp.json().catch(() => ({}));
+      yield {
+        error: `HTTP ${resp.status}: ${errorData?.detail || resp.statusText}`,
+        done: true,
+      };
+      return;
+    }
+
+    const reader = resp.body?.getReader();
+    if (!reader) {
+      yield { error: "No response body", done: true };
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse SSE data lines
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            const parsed = JSON.parse(line.slice(6)) as AIChatStreamEvent;
+            yield parsed;
+            if (parsed.done) return;
+          } catch {
+            // Skip unparseable events
+          }
+        }
+      }
+    }
+
+    // Process remaining buffer
+    if (buffer.startsWith("data: ")) {
+      try {
+        const parsed = JSON.parse(buffer.slice(6)) as AIChatStreamEvent;
+        yield parsed;
+      } catch {
+        // Skip
+      }
+    }
+  }();
+
+  return {
+    stream,
+    abort: () => controller.abort(),
+  };
+}
+
 // ── Mock fallback ────────────────────────────────────────────────────────────
 
 export function shouldUseMockAi(): boolean {
   return DATA_SOURCE === "mock";
+}
+
+// ── Message rating ───────────────────────────────────────────────────────────
+
+export async function rateMessage(messageId: string, rating: 1 | -1): Promise<void> {
+  const url = `${API_BASE_URL}/ai/messages/${messageId}/rate`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...getAuthHeaders(),
+  };
+  await fetch(url, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({ rating }),
+  });
+}
+
+// ── Tour persistence ─────────────────────────────────────────────────────────
+
+/** Save a completed tour plan for replay */
+export async function saveTourPlan(
+  sessionId: string,
+  plan: {
+    tour_id: string;
+    title: string;
+    summary?: string;
+    chart_snapshot?: Record<string, unknown> | null;
+    steps: Array<unknown>;
+  },
+): Promise<{ plan_id: string; status: string }> {
+  const url = `${API_BASE_URL}/ai/tours/save`;
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    ...getAuthHeaders(),
+  };
+  const resp = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ session_id: sessionId, ...plan }),
+  });
+  return resp.json();
+}
+
+/** Get tour history for a session */
+export async function getTourHistory(sessionId: string): Promise<Array<{
+  id: string;
+  tour_id: string;
+  title: string;
+  summary?: string;
+  status: string;
+  created_at?: string;
+  completed_at?: string;
+}>> {
+  const url = `${API_BASE_URL}/ai/tours/history/${sessionId}`;
+  const headers: Record<string, string> = {
+    ...getAuthHeaders(),
+  };
+  const resp = await fetch(url, { headers });
+  return resp.json();
+}
+
+/** Get a full tour plan for replay */
+export async function getTourPlan(planId: string): Promise<{
+  id: string;
+  tour_id: string;
+  title: string;
+  summary?: string;
+  steps: Array<unknown>;
+  chart_snapshot?: Record<string, unknown> | null;
+  status: string;
+  created_at?: string;
+  completed_at?: string;
+}> {
+  const url = `${API_BASE_URL}/ai/tours/${planId}`;
+  const headers: Record<string, string> = {
+    ...getAuthHeaders(),
+  };
+  const resp = await fetch(url, { headers });
+  return resp.json();
 }

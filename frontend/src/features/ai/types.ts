@@ -24,6 +24,8 @@ export interface AiMessage {
     reason?: string | null;
     requires_approval: boolean;
   }> | null;
+  /** Tour plan for Interact mode guided analysis */
+  tour_plan?: TourPlan | null;
   /** Phase 1: response confidence level 0-1 */
   confidence?: number | null;
   /** Phase 1: RAG source citations */
@@ -46,11 +48,42 @@ export interface AiMessage {
   news_context?: import("@/services/aiService").NewsContextSummary | null;
 }
 
+/**
+ * Tour step action for Interact mode guided analysis.
+ */
+export interface TourStepAction {
+  action_type: string;
+  params: Record<string, unknown>;
+  explanation: string;
+  target_selector?: string | null;
+  requires_approval?: boolean;
+}
+
+/**
+ * Tour plan for Interact mode guided analysis.
+ */
+export interface TourPlan {
+  tour_id: string;
+  title: string;
+  steps: TourStepAction[];
+  summary: string;
+  chart_snapshot?: Record<string, unknown> | null;
+}
+
+/** Active tour execution state */
+export interface TourExecutionState {
+  plan: TourPlan;
+  currentStep: number;
+  active: boolean;
+}
+
 export interface AiChatState {
   sessionId: string | null;
   messages: AiMessage[];
   loading: boolean;
   error: string | null;
+  /** Active tour execution, if any */
+  activeTour: TourExecutionState | null;
 }
 
 export interface ChartContextForAi {
@@ -67,6 +100,22 @@ export interface ChartContextForAi {
     close?: number;
     volume?: number;
   } | null;
+  /** Batch 4: last 20 candles as lightweight preview */
+  recent_candles?: Array<{
+    time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+    volume: number;
+  }>;
+  /** Batch 4: actual indicator values from chart state */
+  indicator_values?: Array<{
+    name: string;
+    value?: number | null;
+    signal?: string | null;
+    params: Record<string, unknown>;
+  }>;
   frontend_context_version: string;
 }
 

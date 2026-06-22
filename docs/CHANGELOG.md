@@ -1,3 +1,165 @@
+## [0.26.3] - 2026-06-21
+
+### Fixed — Học thuật hóa Chương 2-3 (Distributed Systems Theory & APA Citations)
+
+- **Chương 2 — Kiến trúc Lambda**: Bổ sung CAP theorem (Gilbert & Lynch, 2002) [33], Kiran et al. (2015) [36] cho phân tích Lambda chi phí thấp, Spark RDD (Zaharia et al., 2012) [35]
+- **Chương 3 — Cơ chế chịu lỗi 3.1.3**: Viết lại hoàn toàn với Fail-Stop model (Schneider, 1984) [38], Raft consensus (Ongaro & Ousterhout, 2014) [34], CAP theorem [33], RTO/RPO metrics định lượng
+- **Chương 2 — Spot instances**: Bổ sung Agmon Ben-Yehuda et al. (2014) [37] cho phân tích rủi ro Spot Instance
+- **Tài liệu tham khảo**: Thêm 18 citation mới [21]–[38] (Ethereum, CAP, Raft, Spark RDD, Lambda cost, Spot instances, Fail-Stop, LLM papers)
+
+## [0.26.2] - 2026-06-21
+
+### Fixed — Học thuật hóa Chương 1-3 (Citation & Consistency)
+
+- **Chương 1 — Bổ sung trích dẫn học thuật**: Thêm citation Ethereum Whitepaper [21], Flink [26], Redis Sentinel [27], Iceberg [28], GPT-1 [29], BERT [30], GPT-3 [31], Llama [32], CoinMarketCap [24], Binance API Docs [25]
+- **Chương 1 — Sắp xếp lại cấu trúc mục 1.1**: Hợp nhất hai mục 1.1.2 trùng lặp, đánh số thứ tự đúng (1.1.1→1.1.5)
+- **Chương 1 — Xóa placeholder nội bộ**: Thay `[CẦN XÁC NHẬN:...]` bằng văn phong học thuật, dẫn sang mục Hạn chế 4.2
+- **Chương 2 — Sửa mâu thuẫn chi phí (NFR7)**: Đổi mục tiêu từ "< 10 USD/tháng" thành "< 300 USD/tháng (production)" và "< 50 USD/tháng (staging)", cập nhật nhất quán toàn bộ luận văn
+- **Chương 3 — Rút gọn nội dung hướng dẫn**: Chuyển cấu hình chi tiết (Nginx, Swarm, Kafka, Redis Sentinel, MinIO, monitoring, CI/CD) sang Phụ lục A, giữ lại phân tích thiết kế và nguyên tắc triển khai
+
+## [0.26.1] - 2026-06-21
+
+### Added — Interact Mode Redesign (Batches 3-5)
+
+Completed the guided tour-based interact mode with chart freeze,
+step-by-step execution, and persistence.
+
+#### Batch 3: Chart Freeze
+- Added `frozen` prop to `CandlestickChart` — blocks WebSocket updates + polling
+- Added `lmview:chart-freeze` window event for cross-component freeze/unfreeze
+- Frozen overlay badge with "❄ Chart frozen for analysis" message
+
+#### Batch 4: Tour Execution UI
+- Tour plan detection in `AiAssistantPanel` — auto-starts tour from `tour_plan`
+- StepOverlay component: progress bar, step explanation, prev/next/finish/cancel
+- Auto-executes each step's action via `AiActionProvider.executeAction()`
+- Chart freezes on tour start, unfreezes on complete/cancel
+- Recap summary shown after tour completion
+
+#### Batch 5: Persistence + Replay
+- Migration 007: `tour_plans`, `tour_step_logs` tables + `active_tour_plan_id` column
+- Backend API endpoints: `POST /api/ai/tours/save`, `GET /history/{session_id}`, `GET /{plan_id}`
+- Frontend service: `saveTourPlan()`, `getTourHistory()`, `getTourPlan()`
+- `tour_plan` type in `AIChatResponse` and `AIMessageResponse`
+- `activeTour`/`setActiveTour` in `useAiChat` hook
+
+### Changed
+
+- `CandlestickChart.tsx` refactored — extracted chartHelpers, useChartSeries, useChartIndicators
+- 10s poll fallback added alongside WebSocket for RightPanel price updates
+- `frozen` prop + `eventFrozen` state on CandlestickChart
+- Tour step auto-execution uses same `executeAction()` pattern as existing actions
+
+### Technical
+
+- TypeScript: typecheck clean, production build clean
+- Python: all modules pass `ast.parse`
+- 7 files modified, 2 new files
+
+## [0.26.0] - 2026-06-21
+
+### Added — AI Implementation Plan (Batches 1-10)
+
+Completed the full AI implementation plan across 10 batches, bringing
+LangGraph orchestration, SSE streaming, LLM function calling, adaptive
+chart context, knowledge boundary, enhanced RAG, expert ensemble,
+agent observability, and frontend stability improvements.
+
+#### Batch 1: Deprecate Legacy Pipeline
+- Removed legacy linear pipeline from `orchestrator.py`
+- Set LangGraph as the only supported orchestration mode
+- Updated `.env.example` and `docker-compose.swarm.yml`
+
+#### Batch 2: SSE Streaming
+- Added streaming abstract method to base provider
+- LiteLLM provider: streaming support with `generate_chat_stream()`
+- ProviderRouter: `route_stream()` for streaming dispatch
+- Synthesis: `synthesize_response_stream()` yields SSE tokens
+- Orchestrator: `run_chat_stream()` for end-to-end streaming
+- Backend: `/ai/chat/stream` SSE endpoint
+- Frontend: `aiChatStream()` service + `useAiChat` hook progressive content update
+
+#### Batch 3: LLM Native Function Calling
+- Added `tools`, `tool_choice` to `LLMCompletionRequest`
+- Added `tool_calls` to `LLMCompletionResponse`
+- `get_openai_tools()` converts CHART_TOOLS to OpenAI-compatible format
+- Synthesis passes `tools` parameter in Interact mode
+- LiteLLM provider forwards `tools` and parses `tool_calls` from response
+
+#### Batch 4: Adaptive Chart Context & Expert-Driven Candle Retrieval
+- Extended `ChartContextForAi` with `recent_candles` and `indicator_values`
+- Frontend sends last 20 candles as lightweight chart context preview
+- Added `get_candles_for_ai()` to `candle_service.py` with Redis + InfluxDB fallback
+- Created `pattern_detector.py` (Doji, Hammer, Shooting Star, Engulfing, Marubozu, etc.)
+- Created `support_resistance.py` (swing pivots, fractal detection, dedup levels)
+- Technical analysis expert integrates pattern detection + S/R calculation
+
+#### Batch 5: Agent Orchestration & Knowledge Boundary
+- Created `knowledge_boundary.py` — identity questions, out-of-domain detection
+- Integrated knowledge boundary check before scope gate in orchestrator
+- Graceful handling of "who are you" and non-crypto queries
+
+#### Batch 6: RAG Overhaul — Hybrid Search + Reranking
+- Created `bm25_search.py` — PostgreSQL `ts_rank_cd` keyword search
+- Created `reranker.py` — cross-encoder reranking via `CrossEncoder`
+- Integrated RRF (Reciprocal Rank Fusion) into `retrieval_service.py`
+- Added `AI_RERANKER_MODEL` setting to `backend/core/config.py`
+- Hybrid search flow: BM25 → Vector → RRF merge → cross-encoder rerank
+
+#### Batch 7: Knowledge Base Expansion + Auto-Ingest
+- Created 8 new KB docs: Chart_Pattern_Encyclopedia, Multi_Timeframe_Analysis, On_Chain_Analytics, DeFi_Analysis, Market_Regime_Detection, Correlation_Analysis, Order_Flow_Analysis, Risk_Management_Frameworks
+- Created `auto_ingest.py` — scans `docs/ai/knowledge_base/approved/` for new/modified files and ingests them via existing pipeline
+- Added auto-ingest startup call in `backend/app.py` lifespan
+- Updated `registry.yml` with 8 new source entries
+
+#### Batch 8: FinBERT Integration — News Feed Ingestion
+- Created `news_feed.py` — RSS feed fetcher (CoinDesk, CoinTelegraph, Decrypt, The Block, Bitcoin Magazine)
+- Integrates with existing `news_articles` table for downstream FinBERT processing
+- Added news feed background loop to `backend/app.py` startup
+
+#### Batch 9: Frontend UX Bug Fixes
+- Added response rating system (👍/👎) via `PATCH /api/ai/messages/{id}/rate` endpoint
+- Added `rateMessage()` frontend service + UI buttons on assistant messages
+- Expanded suggested prompts pool (15+ prompts, random 3 shown, symbol-specific)
+- Added `AbortController` refactor + unmount cleanup for streaming
+- Created modular action handlers: indicatorHandler, chartTypeHandler, drawToolHandler, highlightHandler, tourHandler
+
+#### Batch 10: Interact Mode Completion — Modular Action Handlers
+- Refactored action handling into modular handlers under `frontend/src/features/ai/actions/handlers/`
+- Created `StepOverlay.tsx` — guided tour step overlay component
+- Created handler registry index for action dispatch
+
+#### Batch 11: Guided Tour Rewrite + Final Polish
+- Created `ai_service/tours/tour_templates.py` — tour step/template dataclasses
+- Created `WORKSPACE_OVERVIEW_TOUR` and `INDICATOR_TUTORIAL_TOUR` templates
+- Created `tour_registry.py` — lookup, list, and resolve tours
+- Updated `docs/CHANGELOG.md`, `VERSION` to 0.26.0
+- Added `symbol`, `exchange`, `timeframe`, `use_hybrid_search` to `RAGRetrievalRequest`
+- Hybrid search (60% vector + 40% keyword TS rank) in `_build_retrieval_query()`
+- Metadata filtering: tags AND logic for symbol/exchange/timeframe
+- RAG knowledge expert passes chart context for metadata filtering
+
+#### Batch 7: Expert Quality Ensemble
+- Created `ensemble.py` with weighted voting, cross-validation, conflict detection
+- Aggregate confidence from weighted expert outputs
+- Cross-validated signals detection (same signal from multiple experts)
+- Conflict detection between technical_analysis and market_data trends
+- Integrated into graph.py expert_execution_node
+
+#### Batch 8: Agent Observability & Authorization Guard
+- Added `_track_node_execution()` — per-node counters + latency histograms
+- Added `get_node_stats()` for agent runtime metrics
+- Abort controller for frontend streaming (unmount cleanup)
+
+#### Batch 9: Frontend UX & Stability
+- Abort controller support in `useAiChat` — cancels pending stream on unmount
+- Cleanup effects prevent stale state updates
+- Improved error handling with role-aware messages
+
+#### Batch 10: Final Integration & Documentation
+- Updated `VERSION` to 0.26.0
+- Updated `docs/CHANGELOG.md` with full change log
+
 ## [0.25.60] - 2026-06-21
 
 ### Fixed — Flink Order Book / Recent Trade data flow

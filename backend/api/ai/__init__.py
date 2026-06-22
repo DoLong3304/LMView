@@ -12,6 +12,7 @@ from backend.api.ai.chart_actions import router as chart_actions_router
 from backend.api.ai.actions import router as actions_router
 from backend.api.ai.health import router as health_router
 from backend.api.ai.knowledge import router as knowledge_router
+from backend.api.ai.tours import router as tours_router
 
 router = APIRouter(prefix="/api/ai", tags=["ai"])
 
@@ -22,3 +23,4 @@ router.include_router(chart_context_router)
 router.include_router(chart_actions_router)
 router.include_router(actions_router)
 router.include_router(knowledge_router)
+router.include_router(tours_router)

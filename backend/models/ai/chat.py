@@ -7,6 +7,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
+from backend.models.ai.tour import TourPlan
+
 from pydantic import BaseModel, Field
 
 
@@ -74,6 +76,8 @@ class AIChatResponse(BaseModel):
     estimated_cost_usd: Optional[float] = None
     # News context summary for frontend display
     news_context: Optional[Dict[str, Any]] = None
+    # Tour plan for Interact mode guided analysis
+    tour_plan: Optional[TourPlan] = None
 
 
 class AISessionResponse(BaseModel):
