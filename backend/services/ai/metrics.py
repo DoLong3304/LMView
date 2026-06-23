@@ -359,10 +359,11 @@ AI_EMBEDDING_DIMENSIONS = Gauge(
     ["model"],
 )
 
-# Info: source / catalog info for the knowledge base (static labels)
-AI_KNOWLEDGE_BASE_SOURCE_INFO = Info(
-    "ai_knowledge_base_source",
-    "Knowledge base source / catalog metadata (static labels)",
+# Info: source / catalog info for the knowledge base (Gauge, not Info type — Prometheus 2.45 doesn't support OpenMetrics info)
+AI_KNOWLEDGE_BASE_SOURCE_INFO = Gauge(
+    "ai_knowledge_base_source_info",
+    "Knowledge base source info (embedding model in label)",
+    ["embedding_model"],
 )
 
 # Counter: total RAG retrievals (label-free alias)
@@ -548,11 +549,9 @@ def record_kb_inventory(
     AI_KNOWLEDGE_BASE_LAST_INGEST_TIMESTAMP.set(last_ingest_ts)
     AI_KNOWLEDGE_BASE_OLDEST_CHUNK_TIMESTAMP.set(oldest_chunk_ts)
     AI_EMBEDDING_DIMENSIONS.labels(model=embedding_model).set(embedding_dim)
-    AI_KNOWLEDGE_BASE_SOURCE_INFO.info({
-        "embedding_model": embedding_model,
-        "embedding_dim": str(embedding_dim),
-        "index_type": "hnsw",
-    })
+    AI_KNOWLEDGE_BASE_SOURCE_INFO.labels(
+        embedding_model=embedding_model,
+    ).set(1)
 
 
 def record_rag_retrieval_count(n: int = 1) -> None:

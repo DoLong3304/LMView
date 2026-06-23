@@ -110,19 +110,60 @@ async def get_merged_klines(
     limit: int = Query(100, ge=1, le=1000),
     redis: Redis = Depends(get_redis),
 ) -> List[Dict]:
-    """Return merged candles: closed candles from Redis zset + live forming candle."""
+    """Return merged candles: closed candles from Redis zset + live forming candle.
+
+    For 1m, reads from candle:1m:binance:{symbol} Redis zset (fast path).
+    For higher intervals (5m+), falls back to _fetch_1m_plus_candles + aggregation
+    since those zsets don't exist in Redis.
+    """
     # 1. Get closed candles (most recent first)
-    zset_key = f"candle:{interval}:binance:{symbol.lower()}"
+    zset_key = f"candle:{interval}:binance:{symbol}"
     raw = await redis.zrevrangebyscore(zset_key, "+inf", "-inf", withscores=True, start=0, num=limit)
     closed: List[Dict] = []
-    for item_bytes, ts_ms in raw:
-        item = json.loads(item_bytes)
-        item["isClosed"] = True
-        item["timestamp"] = int(ts_ms)
-        closed.append(item)
+
+    if raw:
+        for item_bytes, ts_ms in raw:
+            item = json.loads(item_bytes)
+            closed.append({
+                "timestamp": int(ts_ms),
+                "open": item.get("o", item.get("open", 0)),
+                "high": item.get("h", item.get("high", 0)),
+                "low": item.get("l", item.get("low", 0)),
+                "close": item.get("c", item.get("close", 0)),
+                "volume": float(item.get("v", item.get("volume", 0))),
+                "quote_volume": float(item.get("qv", item.get("quote_volume", 0))),
+                "trade_count": int(item.get("n", item.get("trade_count", 0))),
+                "isClosed": item.get("x", item.get("isClosed", True)),
+            })
+    elif interval != "1m":
+        # Fallback: fetch 1m candles from Redis/InfluxDB/Trino, then aggregate
+        now_ms = int(time.time() * 1000)
+        influx_cutoff_ms = now_ms - (INFLUX_1M_RETENTION_DAYS * 24 * 3600 * 1000)
+        try:
+            target_sec = _interval_to_seconds(interval)
+            raw_1m = await _fetch_1m_plus_candles(
+                redis, symbol, interval, target_sec, limit, None, now_ms, influx_cutoff_ms, "binance",
+            )
+            if raw_1m:
+                # Aggregate 1m candles to target interval
+                aggregated = aggregate(raw_1m, target_sec * 1000)
+                closed = [{
+                    "timestamp": int(c["openTime"]),
+                    "open": float(c.get("open", 0)),
+                    "high": float(c.get("high", 0)),
+                    "low": float(c.get("low", 0)),
+                    "close": float(c.get("close", 0)),
+                    "volume": float(c.get("volume", 0)),
+                    "quote_volume": float(c.get("quote_volume", 0)),
+                    "trade_count": int(c.get("trade_count", 0)),
+                    "isClosed": True,
+                } for c in aggregated]
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("merged klines fallback failed: %s", exc)
 
     # 2. Get live ticker
-    ticker_key = f"ticker:latest:binance:{symbol.lower()}"
+    ticker_key = f"ticker:latest:binance:{symbol}"
     ticker = await redis.hgetall(ticker_key)
     if not ticker:
         return closed
@@ -130,7 +171,11 @@ async def get_merged_klines(
     current_ts = int(ticker.get(b"event_time", int(time.time() * 1000)))
     if current_price <= 0:
         return closed
-    forming_ts = (current_ts // 60000) * 60000
+
+    # Use proper interval ms for forming timestamp
+    target_sec = _interval_to_seconds(interval)
+    forming_ts = (current_ts // (target_sec * 1000)) * (target_sec * 1000)
+
     # 3. Build forming candle
     if closed and closed[0]["timestamp"] == forming_ts:
         last = closed[0]
@@ -141,8 +186,8 @@ async def get_merged_klines(
             "low": min(last["low"], current_price),
             "close": current_price,
             "volume": last["volume"],
-            "quote_volume": last.get("quote_volume", 0),
-            "trade_count": last.get("trade_count", 0),
+            "quote_volume": last["quote_volume"],
+            "trade_count": last["trade_count"],
             "isClosed": False,
         }
         merged = [forming] + closed[1:]
@@ -173,6 +218,23 @@ async def get_merged_klines(
         }
         merged = [forming]
     return merged
+
+
+def _interval_to_seconds(interval: str) -> int:
+    """Convert interval string like '5m', '1h', '1d' to seconds."""
+    unit = interval[-1]
+    val = int(interval[:-1])
+    if unit == "s":
+        return val
+    elif unit == "m":
+        return val * 60
+    elif unit == "h":
+        return val * 3600
+    elif unit == "d":
+        return val * 86400
+    elif unit == "w":
+        return val * 604800
+    return 60  # default to 1m
 
 
 async def _fetch_1s_candles(r, symbol: str, limit: int, end_time: int | None, now_ms: int, exchange: str = "binance") -> list[dict]:

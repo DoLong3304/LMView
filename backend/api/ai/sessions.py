@@ -1,5 +1,5 @@
 """
-AI Sessions endpoints — list, create, and get messages.
+AI Sessions endpoints — list, create, get messages, and delete.
 """
 from __future__ import annotations
 
@@ -59,3 +59,29 @@ async def get_session_messages(
             detail="Session not found or access denied",
         )
     return {"messages": messages}
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_200_OK)
+async def delete_session(
+    session_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Soft-delete an AI chat session for the current user.
+
+    Marks the session as ``deleted`` in PostgreSQL (matches the existing
+    ``status`` check constraint). Messages are kept for audit but are
+    excluded from ``GET /sessions`` because the list query already
+    filters ``status != 'deleted'``.
+
+    Returns ``{"deleted": true, "session_id": "..."}`` on success.
+    """
+    deleted = await ai_chat_service.soft_delete_session(
+        session_id=session_id,
+        user_id=current_user["id"],
+    )
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found or access denied",
+        )
+    return {"deleted": True, "session_id": session_id}

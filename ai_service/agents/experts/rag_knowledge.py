@@ -50,11 +50,21 @@ class RAGKnowledgeExpert(BaseExpert):
             from backend.models.ai.rag import RAGRetrievalRequest
             from ai_service.rag.retrieval_service import retrieve
 
+            # Extract chart context for metadata filtering
+            chart_context = state.get("chart_context") or {}
+            symbol = chart_context.get("symbol") or state.get("symbol")
+            exchange = chart_context.get("exchange") or state.get("exchange", "binance")
+            timeframe = chart_context.get("timeframe") or state.get("timeframe")
+
             retrieval_result = await retrieve(
                 RAGRetrievalRequest(
                     query=user_query,
                     language=language,
                     review_status="approved",
+                    symbol=symbol,
+                    exchange=exchange,
+                    timeframe=timeframe,
+                    use_hybrid_search=True,
                 ),
                 user_id=user_id,
                 session_id=session_id,

@@ -224,3 +224,139 @@ sources:
     file_path: approved/Technical_Analysis.md
     internal_only: false
 
+  - source_id: chart-pattern-encyclopedia
+    title: Chart Pattern Encyclopedia
+    description: Complete reference for candlestick and chart patterns including H&S, double top/bottom, triangles, flags, cup and handle.
+    domain: technical_analysis
+    language: en
+    source_type: system_doc
+    credibility_level: reviewed
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-21"
+    lmview_version_scope: "0.26.0+"
+    source_urls: []
+    tags: [patterns, chart, technical-analysis, hns, triangles]
+    allowed_for_rag: true
+    file_path: approved/Chart_Pattern_Encyclopedia.md
+    internal_only: false
+
+  - source_id: multi-timeframe-analysis
+    title: Multi-Timeframe Analysis
+    description: Top-down analysis approach, timeframe alignment signals, confluency scoring.
+    domain: technical_analysis
+    language: en
+    source_type: system_doc
+    credibility_level: reviewed
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-21"
+    lmview_version_scope: "0.26.0+"
+    source_urls: []
+    tags: [timeframe, multi-tf, analysis]
+    allowed_for_rag: true
+    file_path: approved/Multi_Timeframe_Analysis.md
+    internal_only: false
+
+  - source_id: on-chain-analytics
+    title: On-Chain Analytics
+    description: Exchange flows, whale alerts, NVT ratio, MVRV, SOPR, network metrics.
+    domain: crypto_education
+    language: en
+    source_type: system_doc
+    credibility_level: reviewed
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-21"
+    lmview_version_scope: "0.26.0+"
+    source_urls: []
+    tags: [on-chain, analytics, metrics, blockchain]
+    allowed_for_rag: true
+    file_path: approved/On_Chain_Analytics.md
+    internal_only: false
+
+  - source_id: defi-analysis
+    title: DeFi Analysis
+    description: TVL trends, yield farming risks, impermanent loss, protocol metrics.
+    domain: crypto_education
+    language: en
+    source_type: system_doc
+    credibility_level: reviewed
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-21"
+    lmview_version_scope: "0.26.0+"
+    source_urls: []
+    tags: [defi, tvl, yield, liquidity]
+    allowed_for_rag: true
+    file_path: approved/DeFi_Analysis.md
+    internal_only: false
+
+  - source_id: market-regime-detection
+    title: Market Regime Detection
+    description: Trending vs ranging detection, volatility regimes, ADX, chop index, mean reversion vs momentum.
+    domain: technical_analysis
+    language: en
+    source_type: system_doc
+    credibility_level: reviewed
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-21"
+    lmview_version_scope: "0.26.0+"
+    source_urls: []
+    tags: [regime, volatility, trend, ranging]
+    allowed_for_rag: true
+    file_path: approved/Market_Regime_Detection.md
+    internal_only: false
+
+  - source_id: correlation-analysis
+    title: Correlation Analysis
+    description: BTC dominance cycle, alt season indicators, cross-asset correlations, stablecoin flows, macro correlations.
+    domain: crypto_education
+    language: en
+    source_type: system_doc
+    credibility_level: reviewed
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-21"
+    lmview_version_scope: "0.26.0+"
+    source_urls: []
+    tags: [correlation, dominance, macro, altcoin]
+    allowed_for_rag: true
+    file_path: approved/Correlation_Analysis.md
+    internal_only: false
+
+  - source_id: order-flow-analysis
+    title: Order Flow Analysis
+    description: CVD, footprint charts, absorption/exhaustion patterns, delta divergence.
+    domain: technical_analysis
+    language: en
+    source_type: system_doc
+    credibility_level: reviewed
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-21"
+    lmview_version_scope: "0.26.0+"
+    source_urls: []
+    tags: [orderflow, cvd, footprint, delta]
+    allowed_for_rag: true
+    file_path: approved/Order_Flow_Analysis.md
+    internal_only: false
+
+  - source_id: risk-management-frameworks
+    title: Risk Management Frameworks
+    description: Kelly criterion, fixed fractional, position sizing, portfolio allocation, max drawdown, risk-reward optimization.
+    domain: risk_management
+    language: en
+    source_type: system_doc
+    credibility_level: reviewed
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-21"
+    lmview_version_scope: "0.26.0+"
+    source_urls: []
+    tags: [risk, management, kelly, position-sizing]
+    allowed_for_rag: true
+    file_path: approved/Risk_Management_Frameworks.md
+    internal_only: false
+

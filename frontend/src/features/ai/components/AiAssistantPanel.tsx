@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import ReactMarkdown from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
@@ -7,16 +8,18 @@ import {
   Bot,
   BookOpen,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   CircleDot,
   CornerDownLeft,
   ExternalLink,
+  GripVertical,
   Info,
   Loader2,
   MoreHorizontal,
   Newspaper,
-  Play,
   Plus,
+  RotateCcw,
   Send,
   Shield,
   Sparkles,
@@ -29,8 +32,16 @@ import { useAiActions } from "@/features/ai/actions/AiActionProvider";
 import { useAiChat } from "@/features/ai/hooks/useAiChat";
 import { useI18n } from "@/i18n";
 import type { ChartContextForAi } from "@/features/ai/types";
+import type { AiMessage } from "@/features/ai/types";
 import type { Candle, IndicatorSettings } from "@/types";
 import { calcSupportResistance } from "@/features/chart/indicatorUtils";
+import {
+  calcSMA,
+  calcEMA,
+  calcRSI,
+  calcMACD,
+  calcBollingerBands,
+} from "@/features/chart/indicatorUtils";
 
 interface AiAssistantPanelProps {
   selectedSymbol: string;
@@ -75,14 +86,51 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
     clearChat,
     activeTour,
     setActiveTour,
+    liveMessageIdsRef,
+    setMessages,
   } = useAiChat();
   const [inputValue, setInputValue] = useState("");
+  // Suggested prompts visible until user sends their first message in the session.
+  // Reloaded sessions with prior user messages also stay hidden.
   const [suggestionsOpen, setSuggestionsOpen] = useState(true);
+  // actionResult captures the last auto-executed tool_call result.
+  // It is logged to the dev console and kept for any future debug
+  // panel; it is intentionally NOT surfaced as a banner to normal
+  // users because action results frequently contain internal terms
+  // like "error: unsupported X" which are not actionable for end-users.
+  // The setter is referenced elsewhere; the value is intentionally
+  // left unread for normal-user UX.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [actionResult, setActionResult] = useState("");
-  const [tourSummary, setTourSummary] = useState<{ summary: string; actions: number } | null>(null);
+  void actionResult;
   const [tourRunning, setTourRunning] = useState(false);
+  // Last completed/active tour plan kept in memory so the Replay button
+  // can re-trigger the same analysis without needing a fresh LLM call.
+  const lastTourPlanRef = useRef<{
+    tour_id: string;
+    title: string;
+    summary: string;
+    steps: Array<{
+      action_type: string;
+      params: Record<string, unknown>;
+      explanation: string;
+      target_selector?: string | null;
+      requires_approval?: boolean;
+    }>;
+    chart_snapshot?: Record<string, unknown> | null;
+  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const autoExecutedRef = useRef<Set<string>>(new Set());
+  const autoExecutedStepRef = useRef<Set<string>>(new Set());
+  // Tour step overlay: draggable. The header acts as the drag handle.
+  // Position is in pixels relative to the AI panel's top-left so the
+  // box can be moved out of the way of the highlighted chart region.
+  const [overlayPos, setOverlayPos] = useState<{ x: number; y: number } | null>(null);
+  const dragStartRef = useRef<{ pointerX: number; pointerY: number; baseX: number; baseY: number } | null>(null);
+  // NB: tourRestorePromptOpen is a placeholder kept for legacy callers;
+  // the restore-prompt UI itself is no longer rendered (the AI
+  // automatically restores state via capture/restore events).
+  const [_tourRestorePromptOpen, setTourRestorePromptOpen] = useState(false);
   const [debugOpen, setDebugOpen] = useState(false);
   const isAdmin = user?.role === "admin";
 
@@ -107,18 +155,102 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
       close: c.close ?? 0,
       volume: c.volume ?? 0,
     }));
-    // Extract indicator values from settings
-    const indicatorValues: Array<{ name: string; value: number | null; signal: string | null; params: Record<string, unknown> }> = [];
-    for (const [key, cfg] of Object.entries(indSettings || {})) {
-      if (cfg.visible && cfg.type) {
-        indicatorValues.push({
-          name: key,
-          value: null,
-          signal: null,
-          params: { ...cfg },
-        });
-      }
+    // Compute *actual* indicator values from the current candle series so
+    // the backend experts can read real numbers (RSI, SMA, EMA, BB,
+    // MACD, S/R levels). Previously the chart context only carried the
+    // indicator *settings* (visible flag, period) but ``value`` was
+    // always null, so the LLM received no real numbers for indicators.
+    const lastPoint = <T extends { time: number; value: number }>(arr: T[]): number | null =>
+      arr.length > 0 ? arr[arr.length - 1].value : null;
+    const indicatorValues: Array<{
+      name: string;
+      value: number | null;
+      signal: string | null;
+      params: Record<string, unknown>;
+    }> = [];
+
+    const safeNumber = (n: number | null | undefined): number | null =>
+      typeof n === "number" && Number.isFinite(n) ? n : null;
+
+    const classifyRsi = (v: number): "oversold" | "overbought" | "neutral" => {
+      if (v <= 30) return "oversold";
+      if (v >= 70) return "overbought";
+      return "neutral";
+    };
+
+    const pushIndicator = (
+      name: string,
+      value: number | null,
+      signal: string | null,
+      cfg: IndicatorSettings | undefined,
+    ) => {
+      if (!cfg?.visible) return;
+      indicatorValues.push({
+        name,
+        value: safeNumber(value),
+        signal,
+        params: cfg ? { ...cfg } : {},
+      });
+    };
+
+    if (indSettings?.sma20?.visible) {
+      const period = Number(indSettings.sma20.period ?? 20);
+      const arr = candles.length >= period ? calcSMA(candles, period) : [];
+      pushIndicator("sma20", lastPoint(arr), null, indSettings.sma20);
     }
+    if (indSettings?.sma50?.visible) {
+      const period = Number(indSettings.sma50.period ?? 50);
+      const arr = candles.length >= period ? calcSMA(candles, period) : [];
+      pushIndicator("sma50", lastPoint(arr), null, indSettings.sma50);
+    }
+    if (indSettings?.ema12?.visible) {
+      const period = Number(indSettings.ema12.period ?? 12);
+      const arr = candles.length >= period ? calcEMA(candles, period) : [];
+      pushIndicator("ema12", lastPoint(arr), null, indSettings.ema12);
+    }
+    if (indSettings?.ema26?.visible) {
+      const period = Number(indSettings.ema26.period ?? 26);
+      const arr = candles.length >= period ? calcEMA(candles, period) : [];
+      pushIndicator("ema26", lastPoint(arr), null, indSettings.ema26);
+    }
+    if (indSettings?.rsi?.visible) {
+      const period = Number(indSettings.rsi.period ?? 14);
+      const arr = candles.length > period ? calcRSI(candles, period) : [];
+      const v = lastPoint(arr);
+      pushIndicator(
+        "rsi",
+        v,
+        v != null ? classifyRsi(v) : null,
+        indSettings.rsi,
+      );
+    }
+    if (indSettings?.bb?.visible) {
+      const period = Number(indSettings.bb.period ?? 20);
+      const bands = candles.length >= period ? calcBollingerBands(candles, period) : null;
+      pushIndicator("bb_upper", bands ? lastPoint(bands.upper) : null, null, indSettings.bb);
+      pushIndicator("bb_middle", bands ? lastPoint(bands.middle) : null, null, indSettings.bb);
+      pushIndicator("bb_lower", bands ? lastPoint(bands.lower) : null, null, indSettings.bb);
+    }
+    if (indSettings?.macd?.visible) {
+      const fast = Number(indSettings.macd.fast ?? 12);
+      const slow = Number(indSettings.macd.slow ?? 26);
+      const signalPeriod = Number(indSettings.macd.signal ?? 9);
+      const m = candles.length >= slow ? calcMACD(candles, fast, slow, signalPeriod) : null;
+      const macdLast = m ? lastPoint(m.macd) : null;
+      const signalLast = m ? lastPoint(m.signal) : null;
+      const histLast = m ? lastPoint(m.histogram) : null;
+      pushIndicator("macd", macdLast, null, indSettings.macd);
+      pushIndicator("macd_signal", signalLast, null, indSettings.macd);
+      pushIndicator(
+        "macd_histogram",
+        histLast,
+        macdLast != null && signalLast != null
+          ? macdLast > signalLast ? "bullish_crossover" : "bearish_crossover"
+          : null,
+        indSettings.macd,
+      );
+    }
+
     // Add S/R levels as computed values
     if (indSettings?.support_resistance?.visible && candles.length >= 10) {
       const srLevels = calcSupportResistance(candles, Number(indSettings.support_resistance.lookback ?? 50));
@@ -149,14 +281,48 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
             volume: lastCandle.volume,
           }
         : null,
-      frontend_context_version: "3.0.0",
+      frontend_context_version: "3.0.1",
     };
   }, [selectedSymbol, exchange, timeframe, selectedIndicators, candles, indSettings]);
 
+  // Only auto-scroll the chat when a *new* message arrives, not on every
+  // re-render. The chat is anchored to the bottom only on incremental
+  // updates so the user can scroll up freely when a tour is active.
+  const lastMessageIdRef = useRef<string | null>(null);
+  // Track suggestion visibility against message list changes. We key on
+  // the *length* and last-message ID rather than the array reference so
+  // that an unrelated re-render (chart tick, settings save, etc.) does
+  // not collapse a dropdown the user has explicitly opened.
+  const lastSuggestionsMessageKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    if (messages.some((message) => message.role === "user")) setSuggestionsOpen(false);
+    const last = messages[messages.length - 1];
+    const lastId = last?.id || null;
+    const key = `${messages.length}:${lastId ?? ""}`;
+    if (key !== lastSuggestionsMessageKeyRef.current) {
+      lastSuggestionsMessageKeyRef.current = key;
+      if (messages.some((message) => message.role === "user")) {
+        setSuggestionsOpen(false);
+      } else {
+        setSuggestionsOpen(true);
+      }
+    }
+    if (lastId !== lastMessageIdRef.current) {
+      lastMessageIdRef.current = lastId;
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
   }, [messages]);
+
+  // Defensive: if a session is loaded that already contains user messages, keep
+  // suggestions hidden (covers reload-from-DB case where the dependency above
+  // may not fire on the first render pass).
+  useEffect(() => {
+    if (messages.some((message) => message.role === "user")) {
+      setSuggestionsOpen(false);
+    }
+    // We intentionally do NOT depend on `messages` here — only on initial mount
+    // — so user re-opening suggestions (if any future feature) is preserved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (mode !== "interact") return;
@@ -167,22 +333,34 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
       if (autoExecutedRef.current.has(key) || call.requires_approval) return;
       autoExecutedRef.current.add(key);
       void executeAction({ name: call.name, arguments: call.arguments || {}, reason: call.reason }).then((result) => {
-        setActionResult(result.detail);
+        // Only surface success results in the AI Action debug panel.
+        // Errors (e.g. "error: unsupported drawing tool X") are
+        // logged to the console for developers but never shown to
+        // normal users — they would just see a confusing internal
+        // error message.
+        if (!result.detail?.startsWith("error:")) {
+          setActionResult(result.detail);
+        } else {
+          console.warn("[AI Action] skipped unsupported action:", call.name, result.detail);
+        }
       });
     });
   }, [executeAction, messages, mode]);
 
-  // Detect tour_plan from latest assistant message → start tour
+  // Capture the most recent tour_plan from messages so the Replay
+  // button can re-run an analysis after the user reloads the session
+  // or finishes a tour. Runs whenever messages change but skips while
+  // a tour is already in flight.
   useEffect(() => {
-    if (mode !== "interact") return;
     if (tourRunning) return;
-    const latest = messages[messages.length - 1];
-    if (!latest || latest.role !== "assistant") return;
-    if (!latest.tour_plan || !latest.tour_plan.steps?.length) return;
-
-    const plan = latest.tour_plan;
-    setActiveTour({
-      plan: {
+    if (!messages.length) return;
+    // Find the latest assistant message that has a tour_plan
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i];
+      if (m.role !== "assistant") continue;
+      const plan = m.tour_plan;
+      if (!plan || !plan.steps?.length) continue;
+      const normalized = {
         tour_id: plan.tour_id,
         title: plan.title,
         summary: plan.summary,
@@ -194,44 +372,180 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
           target_selector: s.target_selector,
           requires_approval: s.requires_approval ?? false,
         })),
-      },
-      currentStep: 0,
-      active: true,
-    });
-    setTourRunning(true);
+      };
+      // Only update if the plan actually changed to avoid noise.
+      const current = lastTourPlanRef.current;
+      if (
+        !current ||
+        current.tour_id !== normalized.tour_id ||
+        current.steps.length !== normalized.steps.length
+      ) {
+        lastTourPlanRef.current = normalized;
+      }
+      break;
+    }
+  }, [messages, tourRunning]);
 
-    // Freeze chart
+  // Auto-start a guided analysis when a fresh assistant response carries
+  // a `tour_plan`. We gate on TWO things to avoid restart-loops:
+  //   1. The most recent assistant message must have a tour_plan
+  //   2. The user must be in interact mode
+  // We DO NOT gate on liveMessageIdsRef anymore because that caused
+  // sessions loaded from the server to never auto-start their tour
+  // (the user would see the analysis card in the chat but the overlay
+  // never appeared). Instead we track which message ids we have
+  // already auto-started (autoExecutedStepRef is per-message) and
+  // skip if the same message has been started before in this mount.
+  const autoExecutedTourIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (mode !== "interact") return;
+    if (tourRunning) return;
+    const latest = messages[messages.length - 1];
+    if (!latest || latest.role !== "assistant") return;
+    if (!latest.tour_plan || !latest.tour_plan.steps?.length) return;
+    if (!latest.id) return;
+    if (autoExecutedTourIdsRef.current.has(latest.id)) return;
+    // Mark as auto-started BEFORE doing any state changes so a
+    // re-render mid-tour doesn't fire a second auto-start.
+    autoExecutedTourIdsRef.current.add(latest.id);
+
+    const plan = latest.tour_plan;
+    const normalizedPlan = {
+      tour_id: plan.tour_id,
+      title: plan.title,
+      summary: plan.summary,
+      chart_snapshot: plan.chart_snapshot || null,
+      steps: plan.steps.map((s) => ({
+        action_type: s.action_type,
+        params: s.params || {},
+        explanation: s.explanation || "",
+        target_selector: s.target_selector,
+        requires_approval: s.requires_approval ?? false,
+      })),
+    };
+    lastTourPlanRef.current = normalizedPlan;
+    autoExecutedStepRef.current = new Set();
+    
+    setActionResult("");
+    setTourRestorePromptOpen(false);
+    // Drop the in-flight "Progressing…" placeholder from the previous
+    // tour, if any, so the new tour starts with a clean chat list.
+    setMessages((prev) =>
+      prev.filter(
+        (m) => !(m.role === "assistant" && (m as AiMessage & { _placeholder?: boolean })._placeholder),
+      ),
+    );
+    window.dispatchEvent(new CustomEvent("lmview:ai-tour-capture-ui"));
+    window.dispatchEvent(new CustomEvent("lmview:ai-tour-start"));
+    setActiveTour({ plan: normalizedPlan, currentStep: 0, active: true });
+    setTourRunning(true);
+    setSuggestionsOpen(false);
     window.dispatchEvent(new CustomEvent("lmview:chart-freeze", { detail: { frozen: true } }));
-  }, [messages, mode, tourRunning, setActiveTour]);
+    // Append a single "Progressing…" placeholder that lives in the
+    // chat list. The onTourComplete listener swaps this placeholder
+    // for the recap final-response message when the tour ends.
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: `progressing-${Date.now()}`,
+        role: "assistant",
+        content: t("tourProgressingLabel").replace("{current}", "1").replace("{total}", String(normalizedPlan.steps.length)),
+        created_at: new Date().toISOString(),
+        // Mark as placeholder so the renderer can show a spinner
+        // and the onTourComplete swap can find + remove it.
+        _placeholder: true,
+      } as AiMessage & { _placeholder?: boolean },
+    ]);
+  }, [messages, mode, tourRunning, setActiveTour, liveMessageIdsRef, setMessages, t]);
+
+  // Replay the most recent tour plan (button at the bottom of the recap).
+  const replayTour = useCallback(() => {
+    const plan = lastTourPlanRef.current;
+    if (!plan) return;
+    autoExecutedStepRef.current = new Set();
+    setActiveTour({ plan, currentStep: 0, active: true });
+    setTourRunning(true);
+    
+    setActionResult("");
+    setTourRestorePromptOpen(false);
+    window.dispatchEvent(new CustomEvent("lmview:ai-tour-capture-ui"));
+    window.dispatchEvent(new CustomEvent("lmview:chart-freeze", { detail: { frozen: true } }));
+  }, [setActiveTour]);
 
   useEffect(() => {
     const onTourComplete = (event: Event) => {
       const detail = (event as CustomEvent<{ summary?: string; actions?: unknown[] }>).detail;
-      setTourSummary({
-        summary: detail?.summary || t("tourRecapBody"),
-        actions: Array.isArray(detail?.actions) ? detail.actions.length : 0,
+      const summary = detail?.summary || t("tourRecapBody");
+      const actionCount = Array.isArray(detail?.actions) ? detail.actions.length : 0;
+      setActionResult("");
+      setTourRunning(false);
+      // The recap is the final assistant response. We surface it
+      // as a chat message (not a floating banner) so the user has
+      // a single source of truth for the analysis outcome, and the
+      // chat list itself doubles as a history of past analyses.
+      setMessages((prev) => {
+        // Drop the in-flight "Progressing…" placeholder if any.
+        const withoutProgressing = prev.filter(
+          (m) => !(m.role === "assistant" && (m as AiMessage & { _placeholder?: boolean })._placeholder),
+        );
+        const recapMessage: AiMessage & { _placeholder?: boolean } = {
+          id: `recap-${Date.now()}`,
+          role: "assistant",
+          content: summary,
+          created_at: new Date().toISOString(),
+          // Carry the recap payload so the chat bubble can render the
+          // Replay button + the step count without re-reading global
+          // state.
+          tool_calls: [
+            {
+              name: "tour_recap",
+              arguments: { action_count: actionCount, tour_id: lastTourPlanRef.current?.tour_id || "" },
+              reason: "Analysis complete",
+              requires_approval: false,
+            },
+          ],
+        };
+        return [...withoutProgressing, recapMessage];
       });
-      setActionResult(t("tourCompleted"));
     };
     window.addEventListener("lmview:ai-tour-complete", onTourComplete);
     return () => window.removeEventListener("lmview:ai-tour-complete", onTourComplete);
-  }, [t]);
+  }, [setMessages, t]);
 
   // Auto-execute current tour step action
-  const autoExecutedStepRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (!activeTour || !activeTour.active) return;
+    if (!activeTour || !activeTour.active) {
+      return;
+    }
     const step = activeTour.plan.steps[activeTour.currentStep];
     if (!step) return;
     const key = `${activeTour.plan.tour_id}-${activeTour.currentStep}`;
-    if (autoExecutedStepRef.current.has(key)) return;
+    if (autoExecutedStepRef.current.has(key)) {
+      return;
+    }
     autoExecutedStepRef.current.add(key);
+    // Update the "Progressing…" placeholder with the current step
+    // number so the chat row stays in sync with the step overlay.
+    setMessages((prev) =>
+      prev.map((m) => {
+        const placeholder = m as AiMessage & { _placeholder?: boolean };
+        if (placeholder._placeholder) {
+          return {
+            ...placeholder,
+            content: t("tourProgressingLabel")
+              .replace("{current}", String(activeTour.currentStep + 1))
+              .replace("{total}", String(activeTour.plan.steps.length)),
+          };
+        }
+        return m;
+      }),
+    );
     void executeAction({
       name: step.action_type,
       arguments: step.params || {},
       reason: `tour:${activeTour.plan.title} step ${activeTour.currentStep + 1}`,
     });
-  }, [activeTour, executeAction]);
+  }, [activeTour, executeAction, setMessages, t]);
 
   // Tour navigation
   const tourNextStep = useCallback(() => {
@@ -242,9 +556,11 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
       setActiveTour(null);
       setTourRunning(false);
       window.dispatchEvent(new CustomEvent("lmview:chart-freeze", { detail: { frozen: false } }));
+      window.dispatchEvent(new CustomEvent("lmview:ai-clear-highlights"));
       window.dispatchEvent(new CustomEvent("lmview:ai-tour-complete", {
         detail: { summary: activeTour.plan.summary, actions: activeTour.plan.steps },
       }));
+      window.dispatchEvent(new CustomEvent("lmview:open-panel", { detail: { target: "ai" } }));
       return;
     }
     setActiveTour({ ...activeTour, currentStep: nextIdx });
@@ -259,13 +575,79 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
   const cancelTour = useCallback(() => {
     setActiveTour(null);
     setTourRunning(false);
+    setTourRestorePromptOpen(false);
+    setOverlayPos(null);
+    // Clear freeze + highlight + tour-end atomically so the chart, the
+    // dim overlay, and the step overlay all close together — this is
+    // the single source of truth for "user is done with the analysis".
     window.dispatchEvent(new CustomEvent("lmview:chart-freeze", { detail: { frozen: false } }));
+    window.dispatchEvent(new CustomEvent("lmview:ai-clear-highlights"));
+    window.dispatchEvent(new CustomEvent("lmview:ai-tour-end"));
+    // Restore the right panel to the AI Helper tab so the textarea is
+    // visible. During the tour, open_panel steps may have switched the
+    // right panel to "overview" / "orderBook" / etc.
+    window.dispatchEvent(new CustomEvent("lmview:open-panel", { detail: { target: "ai" } }));
   }, [setActiveTour]);
+
+  // Reset overlay position when a new tour starts so the box is
+  // back in its default location (top of the panel).
+  useEffect(() => {
+    if (activeTour?.active && overlayPos === null) {
+      setOverlayPos(null); // no-op, kept for clarity
+    } else if (!activeTour?.active) {
+      setOverlayPos(null);
+    }
+  }, [activeTour?.active, overlayPos]);
+
+  // Drag handlers for the tour step overlay. The header bar is the
+  // drag handle. We track the pointer position and adjust the box's
+  // top/left in real time. Releases on pointerup or pointercancel.
+  const onDragStart = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!activeTour?.active) return;
+    e.preventDefault();
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    const cur = overlayPos ?? { x: 0, y: 0 };
+    dragStartRef.current = { pointerX: e.clientX, pointerY: e.clientY, baseX: cur.x, baseY: cur.y };
+  }, [activeTour?.active, overlayPos]);
+
+  const onDragMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    const start = dragStartRef.current;
+    if (!start) return;
+    setOverlayPos({
+      x: start.baseX + (e.clientX - start.pointerX),
+      y: start.baseY + (e.clientY - start.pointerY),
+    });
+  }, []);
+
+  const onDragEnd = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStartRef.current) return;
+    (e.target as HTMLElement).releasePointerCapture?.(e.pointerId);
+    dragStartRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (messages.length === 0) {
+      setActionResult("");
+      
+      setTourRestorePromptOpen(false);
+      autoExecutedStepRef.current = new Set();
+    }
+  }, [messages.length]);
 
   const handleSend = () => {
     const trimmed = inputValue.trim();
     if (!trimmed || loading) return;
     setInputValue("");
+    // Clear any in-flight tour state so a new request can start fresh.
+    // The auto-start effect will re-evaluate the new assistant message
+    // and trigger a new tour if it carries a tour_plan.
+    if (activeTour?.active) {
+      setActiveTour(null);
+      setTourRunning(false);
+      autoExecutedStepRef.current = new Set();
+      window.dispatchEvent(new CustomEvent("lmview:chart-freeze", { detail: { frozen: false } }));
+      window.dispatchEvent(new CustomEvent("lmview:ai-clear-highlights"));
+    }
     void sendMessage(trimmed, chartContext);
   };
 
@@ -447,16 +829,17 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
       })()}
 
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
+        <div
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3"
+        >
           {error && (
             <div className="rounded border border-red-500/25 bg-red-500/10 px-3 py-2 text-[11px] leading-5 text-red-200">{error}</div>
           )}
 
           {allMessages.map((message) => {
             const isUser = message.role === "user";
-            const actionCalls = "tool_calls" in message && Array.isArray(message.tool_calls) ? message.tool_calls : [];
             return (
-              <div key={message.id} className={`flex gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
+              <div key={message.id} data-testid={`ai-message-${message.id}`} className={`flex gap-2 ${isUser ? "justify-end" : "justify-start"}`}>
                 {!isUser && (
                   <div className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded bg-blue-500/10 text-blue-300">
                     <Bot size={13} />
@@ -467,26 +850,79 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
                     {isUser ? <UserRound size={10} /> : <Sparkles size={10} />}
                     <span>{isUser ? t("you") : assistantLabel}</span>
                   </div>
-                  <div className={`max-w-full rounded px-3 py-2 text-xs leading-5 shadow-sm ${isUser ? "bg-blue-600 text-white" : "border border-gray-800 bg-gray-850 text-gray-200"}`}>
-                    <MarkdownContent content={message.content} compact={isUser} />
+                  <div
+                    className={`max-w-full rounded px-3 py-2 text-xs leading-5 shadow-sm ${
+                      isUser
+                        ? "bg-blue-600 text-white"
+                        : message.tour_plan && message.tour_plan.steps?.length
+                          ? "border border-amber-500/40 bg-amber-500/5"
+                          : "border border-gray-800 bg-gray-850 text-gray-200"
+                    }`}
+                  >
+                    {message.tour_plan && message.tour_plan.steps?.length ? (
+                      // In Interact mode the assistant message *is* the
+                      // visual analysis: don't dump the LLM narrative in
+                      // chat (it's repeated in the step overlay + recap).
+                      // Render a compact card pointing to the step overlay.
+                      <div className="space-y-1.5" data-testid="ai-analysis-card">
+                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-200">
+                          <Sparkles size={11} className="text-amber-300" />
+                          {message.tour_plan.title || "Guided analysis"}
+                        </div>
+                        <div className="text-[11px] leading-5 text-amber-100/90">
+                          {message.tour_plan.summary || t("analysisReadyBody")}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-[10px] text-amber-200/70">
+                          <Sparkles size={9} />
+                          {message.tour_plan.steps.length} {t("analysisSteps")}
+                          {activeTour?.plan?.tour_id === message.tour_plan.tour_id && (
+                            <span className="ml-1 rounded bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-semibold">
+                              Running
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ) : message.tool_calls?.some((call) => call.name === "tour_recap") ? (
+                      // The final response of a guided analysis: the
+                      // recap. Rendered as a regular chat bubble with
+                      // an embedded Replay button so the chat list is
+                      // the single source of truth for the analysis
+                      // outcome (no floating banner).
+                      <div className="space-y-1.5" data-testid="ai-tour-recap">
+                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-200">
+                          <Sparkles size={11} className="text-emerald-300" />
+                          {t("tourRecapTitle")}
+                        </div>
+                        <div className="text-[11px] leading-5 text-emerald-100/90 whitespace-pre-line">
+                          {message.content}
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={replayTour}
+                            disabled={!lastTourPlanRef.current}
+                            className="flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                            data-testid="ai-tour-replay"
+                          >
+                            <RotateCcw size={10} />
+                            {t("replay")}
+                          </button>
+                          <span className="text-[9px] text-emerald-100/60">
+                            {lastTourPlanRef.current?.title}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <MarkdownContent content={message.content} compact={isUser} />
+                    )}
                   </div>
-                  {!isUser && actionCalls.length > 0 && (
-                    <div className="mt-1.5 flex flex-wrap gap-1.5">
-                      {actionCalls.map((call, index) => (
-                        <button
-                          key={`${call.name}-${index}`}
-                          type="button"
-                          onClick={async () => {
-                            const result = await executeAction({ name: call.name, arguments: call.arguments || {} });
-                            setActionResult(result.detail);
-                          }}
-                          className="inline-flex items-center gap-1 rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[11px] font-semibold text-blue-200 hover:bg-blue-500/20"
-                        >
-                          <Play size={11} /> {call.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  {/* Admin tool-call replay buttons. These used to be
+                      rendered inline in the chat, but exposing action
+                      names like "start_tour" in the chat confuses
+                      regular users and clutters the screen during a
+                      guided analysis. The dedicated AI Action debug
+                      window (openable via `lmview:open-ai-action-debug`)
+                      is the right place for these. */}
                   {isAdmin && !isUser && (message.token_input || message.token_output || message.estimated_cost_usd) && (
                     <div className="mt-1 flex items-center gap-2 text-[9px] text-gray-600">
                       {message.token_input && message.token_output && <span>{message.token_input}{" -> "}{message.token_output} tokens</span>}
@@ -574,24 +1010,13 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
             </div>
           )}
 
-          {actionResult && (
-            <div className="rounded border border-blue-500/25 bg-blue-500/10 px-3 py-2 text-[11px] text-blue-100">{actionResult}</div>
-          )}
-
-          {tourSummary && (
-            <div className="rounded border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-[11px] leading-5 text-emerald-100">
-              <div className="font-semibold">{t("tourRecapTitle")}</div>
-              <div className="mt-1 text-emerald-100/80">{tourSummary.summary}</div>
-              <div className="mt-1 text-emerald-100/60">{tourSummary.actions} {t("actionsSaved")}</div>
-              <button
-                type="button"
-                onClick={() => void executeAction({ name: "start_tour", arguments: { tour_id: "lmview-overview" } })}
-                className="mt-2 rounded bg-emerald-600 px-2 py-1 text-[10px] font-semibold text-white"
-              >
-                {t("replay")}
-              </button>
-            </div>
-          )}
+          {/* actionResult is shown only inside the AI Action debug
+              window for admin/developer visibility (see
+              AiActionDebugPanel below). It is intentionally NOT
+              surfaced as a banner to normal users because action
+              results frequently contain internal terms like
+              "error: unsupported drawing tool X" which are not
+              actionable for end-users. */}
 
           <div className="rounded border border-dashed border-gray-800 bg-gray-850/70">
             <button
@@ -731,28 +1156,63 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
       `}</style>
 
       {/* Tour Step Overlay */}
-      {activeTour?.active && activeTour.plan.steps[activeTour.currentStep] && (
-        <div className="absolute left-2 right-2 top-2 z-50 rounded-lg border border-amber-500/30 bg-gray-850/95 p-3 shadow-xl backdrop-blur">
-          {/* Progress bar */}
-          <div className="mb-2 flex items-center gap-2">
-            <div className="flex-1">
-              <div className="h-1 w-full overflow-hidden rounded-full bg-gray-700">
+      {activeTour?.active && activeTour.plan.steps[activeTour.currentStep] && (() => {
+        const stepIdx = activeTour.currentStep;
+        const totalSteps = activeTour.plan.steps.length;
+        const isLastStep = stepIdx >= totalSteps - 1;
+        const currentStep = activeTour.plan.steps[stepIdx];
+        // NB: the highlight dim is `fixed inset-0 z-[680]` at the body
+        // level. Positioning our overlay as `absolute` inside the AI
+        // panel would put us inside the panel's own stacking context,
+        // and the dim would still cover us. Render at the body level
+        // via a portal so our z-[720] actually wins against z-[680].
+        const overlayPosStyle: React.CSSProperties = overlayPos
+          ? { top: `${Math.max(8, overlayPos.y)}px`, left: `${Math.max(8, overlayPos.x)}px`, right: 'auto' }
+          : { top: '88px', left: '50%', transform: 'translateX(-50%)' };
+        const overlayNode = (
+          <div
+            className="fixed z-[720] w-[min(420px,calc(100vw-32px))] rounded-lg border border-amber-500/40 bg-gray-850/95 p-3 shadow-2xl backdrop-blur"
+            data-testid="ai-tour-overlay"
+            style={overlayPosStyle}
+          >
+          {/* Drag handle header */}
+          <div
+            onPointerDown={onDragStart}
+            onPointerMove={onDragMove}
+            onPointerUp={onDragEnd}
+            onPointerCancel={onDragEnd}
+            className="-mx-3 -mt-3 mb-2 flex cursor-move select-none items-center justify-between rounded-t-lg border-b border-amber-500/20 bg-amber-500/10 px-3 py-1.5 active:cursor-grabbing"
+            title="Drag to move"
+          >
+            <div className="flex items-center gap-2">
+              <GripVertical size={12} className="text-amber-300/70" />
+              <span className="text-[10px] font-bold uppercase tracking-wider text-amber-200">
+                Step {stepIdx + 1} of {totalSteps}
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="h-1 w-20 overflow-hidden rounded-full bg-gray-700/60">
                 <div
-                  className="h-full rounded-full bg-amber-500 transition-all duration-500"
-                  style={{ width: `${((activeTour.currentStep + 1) / activeTour.plan.steps.length) * 100}%` }}
+                  className="h-full rounded-full bg-amber-400 transition-all duration-500"
+                  style={{ width: `${((stepIdx + 1) / totalSteps) * 100}%` }}
                 />
               </div>
+              <span className="text-[9px] tabular-nums text-amber-300/70">
+                {Math.round(((stepIdx + 1) / totalSteps) * 100)}%
+              </span>
             </div>
-            <span className="text-[10px] text-amber-300/70">
-              {activeTour.currentStep + 1}/{activeTour.plan.steps.length}
-            </span>
           </div>
-          {/* Step info */}
-          <p className="text-xs font-semibold text-amber-200">
-            {activeTour.plan.title}
+          {/* Step info. We show action verb + plan title as a
+              compact breadcrumb, but only when they actually add
+              information. The template title "LMView Workspace"
+              already appears in the chart overlay (breadcrumb +
+              tour title in the chat recap), so concatenating it
+              here would just look like "LocateLMView Workspace". */}
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-300/80">
+            {labelForAction(currentStep.action_type)}
           </p>
           <p className="mt-1 text-[11px] leading-relaxed text-gray-300">
-            {activeTour.plan.steps[activeTour.currentStep].explanation}
+            {currentStep.explanation}
           </p>
           {/* Navigation */}
           <div className="mt-2 flex items-center justify-between gap-2">
@@ -763,12 +1223,13 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
             >
               {t("cancel")}
             </button>
-            <div className="flex items-center gap-2">
-              {activeTour.currentStep > 0 && (
+            <div className="flex items-center gap-1.5">
+              {stepIdx > 0 && (
                 <button
                   type="button"
                   onClick={tourPrevStep}
                   className="rounded bg-gray-700 px-2.5 py-1 text-[10px] font-semibold text-gray-300 hover:bg-gray-600"
+                  data-testid="ai-tour-prev"
                 >
                   {t("previous")}
                 </button>
@@ -776,20 +1237,101 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
               <button
                 type="button"
                 onClick={tourNextStep}
-                className={`rounded px-2.5 py-1 text-[10px] font-semibold ${
-                  activeTour.currentStep >= activeTour.plan.steps.length - 1
+                className={`flex items-center gap-1 rounded px-3 py-1 text-[10px] font-semibold ${
+                  isLastStep
                     ? "bg-emerald-600 text-white hover:bg-emerald-500"
                     : "bg-amber-600 text-white hover:bg-amber-500"
                 }`}
+                data-testid="ai-tour-next"
               >
-                {activeTour.currentStep >= activeTour.plan.steps.length - 1 ? t("finish") : t("next")}
+                {isLastStep ? t("finish") : t("next")}
+                <ChevronRight size={10} />
               </button>
             </div>
           </div>
-        </div>
-      )}
+          {/* Keep / Revert ONLY on the last step */}
+          {isLastStep && (
+            <div className="mt-2 flex flex-col gap-1.5 rounded border border-amber-500/20 bg-gray-900/50 p-2">
+              <p className="text-[10px] font-semibold text-amber-200/90">
+                Tour complete — keep the chart as the AI left it, or revert to your previous view?
+              </p>
+              <div className="flex items-center justify-end gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Keep: just close the tour; leave the chart as-is.
+                    cancelTour();
+                  }}
+                  className="rounded border border-emerald-500/40 px-2.5 py-1 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-500/10"
+                  data-testid="ai-tour-keep"
+                >
+                  Keep current state
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    // Revert: restore captured UI snapshot, unfreeze chart,
+                    // clear highlights, end tour.
+                    window.dispatchEvent(new CustomEvent("lmview:ai-tour-restore-ui"));
+                    window.dispatchEvent(new CustomEvent("lmview:chart-freeze", { detail: { frozen: false } }));
+                    window.dispatchEvent(new CustomEvent("lmview:ai-clear-highlights"));
+                    window.dispatchEvent(new CustomEvent("lmview:open-panel", { detail: { target: "ai" } }));
+                    cancelTour();
+                  }}
+                  className="rounded border border-gray-600 px-2.5 py-1 text-[10px] font-semibold text-gray-200 hover:bg-gray-700"
+                  data-testid="ai-tour-revert"
+                >
+                  Revert to previous view
+                </button>
+              </div>
+            </div>
+          )}
+          </div>
+        );
+        // Portal the overlay to body so its z-[720] escapes the AI
+        // panel's stacking context and actually sits above the
+        // highlight dim (z-[680]).
+        return createPortal(overlayNode, document.body);
+      })()}
     </div>
   );
 };
+
+function labelForAction(actionType: string): string {
+  switch (actionType) {
+    case "highlight_section":
+      return "Locate";
+    case "highlight_chart_area":
+      return "Highlight zone";
+    case "highlight_candles":
+      return "Highlight candles";
+    case "add_indicator":
+      return "Add indicator";
+    case "remove_indicator":
+      return "Remove indicator";
+    case "draw_tool":
+    case "draw_trendline":
+      return "Draw on chart";
+    case "create_annotation":
+      return "Add note";
+    case "set_timeframe":
+      return "Change timeframe";
+    case "set_chart_type":
+      return "Change chart type";
+    case "zoom_chart":
+      return "Zoom";
+    case "scroll_chart":
+      return "Scroll";
+    case "open_panel":
+    case "switch_panel_tab":
+      return "Open panel";
+    case "switch_app_view":
+      return "Switch view";
+    case "fetch_historical_prices":
+      return "Load history";
+    default:
+      return "Step";
+  }
+}
 
 export default AiAssistantPanel;

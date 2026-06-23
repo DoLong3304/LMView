@@ -53,6 +53,7 @@ AI_EMBEDDING_PROVIDER = os.environ.get("AI_EMBEDDING_PROVIDER", "local")
 AI_EMBEDDING_MODEL = os.environ.get("AI_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
 AI_RAG_TOP_K = int(os.environ.get("AI_RAG_TOP_K", "6"))
 AI_RAG_MIN_SCORE = float(os.environ.get("AI_RAG_MIN_SCORE", "0.25"))
+AI_RERANKER_MODEL = os.environ.get("AI_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
 AI_KB_APPROVED_ONLY = os.environ.get("AI_KB_APPROVED_ONLY", "true").lower() in ("1", "true", "yes")
 
 # ─── CORS ───────────────────────────────────────────────────────────────────

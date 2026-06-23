@@ -46,6 +46,13 @@ async def run_chat_langgraph(body: AIChatRequest, user_id: str) -> AIChatRespons
             "language": body.language,
             "mode": body.mode.value,
             "orchestration": "langgraph",
+            # Persist the chart context alongside the user message so
+            # that on reload we can rebuild the exact state the LLM saw
+            # (symbol, timeframe, indicators, recent candles, latest
+            # candle). Without this the conversation history returned by
+            # GET /sessions/{id}/messages loses the chart snapshot the
+            # user was looking at when they asked.
+            "chart_context": body.chart_context,
         },
     )
 
@@ -176,6 +183,17 @@ async def run_chat_langgraph(body: AIChatRequest, user_id: str) -> AIChatRespons
             "data_caveats": data_caveats,
             "news_context": news_context,
             "revision_count": final_state.get("revision_count", 0),
+            # Persist chart actions and tool calls so they survive a page
+            # reload. Without this the assistant message reappears without
+            # the Interact-mode action buttons (tool_calls) or any
+            # structured chart action proposals.
+            "tool_calls": tool_calls,
+            "chart_actions": [a.model_dump(mode="json") for a in chart_actions] if chart_actions else [],
+            "rag_sources": rag_sources,
+            # Persist tour plan so Replay works after a session reload.
+            # Without this the user would need to re-ask the LLM to get
+            # the same visual tour.
+            "tour_plan": tour_plan.model_dump(mode="json") if tour_plan else None,
         },
     )
 
@@ -304,6 +322,9 @@ async def run_chat_stream(
             "language": body.language,
             "mode": body.mode.value,
             "orchestration": "langgraph_stream",
+            # Persist the chart context so the LLM can reconstruct the
+            # user's view on subsequent reloads of this session.
+            "chart_context": body.chart_context,
         },
     )
 

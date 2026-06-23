@@ -9,39 +9,52 @@ clients:
   - url: http://loki:3100/loki/api/v1/push
 
 scrape_configs:
-  - job_name: docker
-    docker_sd_configs:
-      - host: unix:///var/run/docker.sock
-        refresh_interval: 5s
-    relabel_configs:
-      - source_labels: ['__meta_docker_container_name']
-        regex: '/(.*)'
-        target_label: 'container'
-      - source_labels: ['__meta_docker_container_log_stream']
-        target_label: 'logstream'
-      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
-        target_label: 'service'
+  # Use file-based discovery of Docker container logs
+  # Docker API (docker_sd_configs) uses client version 1.42,
+  # but Docker 29.1.3 requires 1.44+. Fall back to file scraping.
+  - job_name: docker-containers
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: docker
+          __path__: /var/lib/docker/containers/*/*-json.log
     pipeline_stages:
+      # Parse Docker JSON log format: {"log":"...","stream":"stdout","time":"..."}
+      - json:
+          expressions:
+            log: log
+            stream: stream
+            timestamp: time
+      # Extract container ID from the path for labeling
       - regex:
-          expression: '^(?P<timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+\[(?P<log_level>\w+)\]'
+          expression: /var/lib/docker/containers/(?P<container_id>[a-f0-9]+)/
+          source: __path__
+      # Set timestamp from Docker log timestamp
+      - timestamp:
+          source: timestamp
+          format: RFC3339Nano
+      # Extract log level from message
+      - regex:
+          expression: '^(?P<message_timestamp>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+\[(?P<log_level>\w+)\]'
+          source: log
       - labels:
           log_level:
+      # Detect error types
       - regex:
-          expression: '(?i)(?P<error_type>Exception|Error|Fatal|Traceback|panic|OOM|timeout)'
+          expression: '(?i)(?P<error_type>Exception|Error|Fatal|Traceback|panic|OOMKilled|timeout)'
+          source: log
       - labels:
           error_type:
-      - match:
-          selector: '{log_level!=""}'
-          stages:
-            - timestamp:
-                source: timestamp
-                format: '2006-01-02 15:04:05'
+      # Fallback log level detection
       - match:
           selector: '{log_level=""}'
           stages:
             - regex:
                 expression: '(?i)(?P<log_level>ERROR|WARN|INFO|DEBUG|TRACE)'
+                source: log
             - labels:
                 log_level:
+      # Remove timestamp prefix from output message
       - output:
-          source: message
+          source: log

@@ -276,6 +276,14 @@ export async function aiGetSessionMessages(
   return aiFetch(`/ai/sessions/${sessionId}/messages`);
 }
 
+export async function aiDeleteSession(
+  sessionId: string,
+): Promise<{ deleted: boolean; session_id: string }> {
+  return aiFetch(`/ai/sessions/${sessionId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function aiSubmitChartContext(
   context: ChartContextDTO,
 ): Promise<{ snapshot_id?: string; context: ChartContextDTO }> {

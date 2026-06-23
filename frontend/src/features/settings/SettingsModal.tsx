@@ -9,6 +9,7 @@ import {
   KeyRound,
   Loader2,
   Lock,
+  Plus,
   RefreshCcw,
   Save,
   SlidersHorizontal,
@@ -503,10 +504,52 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
     setSessions(loadLocalAiSessions(user.id));
   };
 
+  const [deleteSessionTarget, setDeleteSessionTarget] = useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+
+  const confirmDeleteSession = async (sessionId: string, sessionTitle: string) => {
+    if (!user?.id) return;
+    const confirmed = window.confirm(
+      t("confirmDeleteAiSession").replace("{title}", sessionTitle),
+    );
+    if (!confirmed) return;
+    setDeleteSessionTarget({ id: sessionId, title: sessionTitle });
+    try {
+      const session = sessions.find((s) => s.id === sessionId);
+      const isApi = session?.source === "api";
+      if (isApi) {
+        const { aiDeleteSession } = await import("@/services/aiService");
+        await aiDeleteSession(sessionId);
+        setSessions((prev) => prev.filter((s) => s.id !== sessionId));
+      } else {
+        handleDeleteSession(sessionId);
+      }
+    } catch (error) {
+      setStatusError(error, t("deleteSessionFailed"));
+    } finally {
+      setDeleteSessionTarget(null);
+    }
+  };
+
   const handleLoadSession = (targetSessionId: string) => {
     if (!user?.id) return;
     selectAiSession(user.id, targetSessionId);
     setStatusMessage("success", t("aiSessionLoaded"));
+    onClose();
+  };
+
+  // Start a brand-new AI Helper conversation: drop any active session
+  // pointer and clear the chat so the next `sendMessage` creates a
+  // fresh session. This is the escape hatch when the current session
+  // is stuck (e.g. tour lockup, missing from list, etc.) and the user
+  // cannot otherwise recover.
+  const handleNewSession = () => {
+    if (!user?.id) return;
+    selectAiSession(user.id, null);
+    window.dispatchEvent(new CustomEvent("lmview:ai-clear-chat"));
+    setStatusMessage("success", t("aiSessionStarted"));
     onClose();
   };
 
@@ -1045,6 +1088,19 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                     <ActionButton label={t("saveChanges")} icon={<Save size={14} />} loading={saving} onClick={() => saveSettingsPatch(saveAiSettings(settings.ai_settings))} />
                   </Panel>
                   <Panel title={t("savedAiSessions")}>
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="text-[10px] text-gray-500">
+                        {sessions.length} {t("savedAiSessionsCount")}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleNewSession}
+                        className="flex items-center gap-1 rounded border border-blue-500/40 bg-blue-500/10 px-2 py-1 text-[11px] font-semibold text-blue-200 hover:bg-blue-500/20"
+                        data-testid="ai-new-session"
+                      >
+                        <Plus size={11} /> {t("newChat")}
+                      </button>
+                    </div>
                     {sessions.length > 0 ? sessions.map((session) => (
                       <div key={session.id} className="flex items-center gap-3 border-b border-gray-800 py-2 last:border-b-0">
                         <div className="min-w-0 flex-1">
@@ -1054,14 +1110,24 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
                             {session.symbol && session.timeframe ? ` - ${session.symbol} ${session.timeframe.toUpperCase()}` : ""}
                           </div>
                         </div>
-                        <button type="button" onClick={() => handleLoadSession(session.id)} className="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 hover:border-blue-500 hover:text-white">
+                        <button type="button" onClick={() => handleLoadSession(session.id)} className="rounded border border-gray-700 px-2 py-1 text-[11px] font-semibold text-gray-300 hover:border-blue-500 hover:text-white" title={t("loadSession")}>
                           {t("loadSession")}
                         </button>
-                        {session.source !== "api" && (
-                          <button type="button" onClick={() => handleDeleteSession(session.id)} className="rounded p-1.5 text-gray-500 hover:bg-red-500/10 hover:text-red-300" title={t("deleteSession")}>
+                        <button
+                          type="button"
+                          onClick={() => void confirmDeleteSession(session.id, session.title)}
+                          disabled={deleteSessionTarget?.id === session.id}
+                          className="flex h-7 w-7 items-center justify-center rounded p-1 text-gray-500 hover:bg-red-500/10 hover:text-red-300 disabled:cursor-not-allowed disabled:opacity-50"
+                          title={t("deleteSession")}
+                          aria-label={t("deleteSession")}
+                          data-testid={`ai-delete-session-${session.id}`}
+                        >
+                          {deleteSessionTarget?.id === session.id ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
                             <Trash2 size={14} />
-                          </button>
-                        )}
+                          )}
+                        </button>
                       </div>
                     )) : (
                       <EmptyState text={t("noSavedAiSessions")} />

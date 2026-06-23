@@ -1,3 +1,196 @@
+## [0.26.12] - 2026-06-22
+
+### Fixed — 7 UX bugs in Interact mode tour system
+
+- **Dark blue banner removed** (`AiAssistantPanel.tsx`): The `actionResult` state was rendered as a visually prominent blue rectangle showing "error: unsupported X" messages to ALL users. Removed the banner; results now go to the admin-only action debug window. Added `// eslint-disable-next-line` and `void actionResult` to silence the TS unused-variable warning.
+- **"Return to previous view" banner suppressed mid-tour** (`AiActionProvider.tsx`): `captureUiSnapshot` was called inside `showSection` (the highlight handler), which triggered `setRestoreAvailable(true)` on EVERY highlight step. Fixed by moving snapshot capture to when a tour STARTS (`onTourStart`) and clearing it on tour end (`onTourEnd`), so the RestoreBanner only appears when the user manually navigated away from a running tour.
+- **`switchAppView` no longer closes right panel** (`AiActionProvider.tsx` + `panelHandler.ts`): When switching to Markets/News views, the right panel was closed (`setRightPanelOpen(false)`), hiding the AI Helper mid-tour. Removed the `setRightPanelOpen(false)` call — the panel stays open so the step overlay remains visible.
+- **Tour step explanations improved** (`tour_templates.py`): Template steps now have detailed, market-specific explanations referencing actual platform features ("price scale is on the right, time along the bottom", "RSI >70 = overbought, <30 = oversold", "momentum direction and strength"). Removed generic filler like "The chart shows real-time OHLCV candlesticks."
+- **StepOverlay.tsx deleted**: Dead component (`<StepOverlay />`) was a stale blue-rectangle overlay with no event handlers. Not imported anywhere. Removed.
+- **Intent-based tour fallback** (`tour_planner.py`): Added `_intent_fallback_tour()` — a deterministic tour generator that recognises common user intents (order book, compare, analyze, news, indicators) and creates useful visual tours even when the LLM refuses to plan one (e.g. "I can't access order book data"). Handles ~15 cryptos (BTC/ETH/SOL/BNB/XRP/DOGE/ADA/AVAX/LINK/DOT/MATIC) with symbol detection.
+- **Tour planner prompt revised**: Added few-shot examples for order book, compare, and simple-question rejection. Added rules for `open_panel` and `switch_app_view`. Removed overly aggressive "uncertain analysis → null tour" rule.
+- **AI panel restored after tour ends** (`AiAssistantPanel.tsx` + `useAiChat.ts`): `cancelTour`, `tourNextStep` (Finish), Revert button, and `clearChat` now all dispatch `lmview:open-panel` with `target: "ai"` so the AI Helper tab is re-selected in the right panel after the tour completes. Previously the right panel stayed on "overview"/"orderBook" tab, hiding the textarea.
+
+### Changed
+- `backend version`: cryptoprice/fastapi:0.28.2 → 0.28.4
+- `frontend version`: cryptoprice/nginx:1.62.0 → 1.64.0 (bundle `index-BJUu8qUV.js`)
+- `docs/CHANGELOG.md`: added v0.26.12 entry
+
+## [0.26.11] - 2026-06-22
+
+### Fixed — Tour overlay invisible: infinite re-render loop + z-index stacking context + live-id gate
+
+- **Infinite re-render loop**: Initial-load effect in `useAiChat` had dep chain `refreshApiSessions` → `loadApiSession` → `sessions` — transitive-unstable, re-firing on every render and calling `loadApiSession` → `setActiveTour(null)`. Fixed with `initialisedRef` guard ("already initialised" pattern).
+- **z-index stacking context**: Step overlay `absolute z-[700]` inside AI panel's `position:relative` stacking context couldn't escape the panel. Body-level dim at `z-[680]` always won. Fixed by wrapping step overlay in `createPortal(overlayNode, document.body)` and changing overlay to `fixed z-[720]`.
+- **`liveMessageIdsRef` gate too strict**: Cleared by `loadApiSession` on page load and by the infinite loop. Replaced with per-mount `autoExecutedTourIdsRef` keyed on message id — same protection against restart loops without blocking legitimate tour starts.
+- **End-to-end Playwright verification**: `probe-tour-flow.mjs` confirms overlay visible after 20s with correct position and text "Step 1 of 5 20% Locate LMView Workspace...", Next button advances through steps 1→2→3 with correct step counter and progress bar.
+
+### Changed
+- `backend version`: cryptoprice/fastapi:0.28.0 (unchanged)
+- `frontend version`: cryptoprice/nginx:1.62.0 (bundle `index-DecRvn1B.js`)
+- `docs/CHANGELOG.md`: added v0.26.11 entry
+- **Restructured Chương 2**: 2.1.1 FR, 2.1.2 NFR, 2.2.1 Các kiểu dữ liệu (mới), 2.2.2 Lambda ba tầng (2.2.2.1 Speed, 2.2.2.2 Batch, 2.2.2.3 Serving), 2.2.3 Cấu trúc lưu trữ, 2.3 Kiến trúc AI, 2.4.1 Use case, 2.4.2 Sequence.
+- **Restructured Chương 3**: 3.1 Công nghệ (3.1.1-3.1.6), 3.2 Triển khai (3.2.1, 3.2.2), 3.3 UI.
+- **Citations chuẩn APA**: Toàn bộ trích dẫn dùng (Author, Year), reference list ở cuối tài liệu.
+
+## [0.27.1] - 2026-06-22
+
+### Added — Thesis v6 (khoa-luan-nhom-79-v6.md) theo đề cương mới v6
+
+- **Created `docs/khoa-luan-nhom-79-v6.md`** (~2195 dòng) từ v5 với cấu trúc section mới.
+- **Restructured Chương 1**: 1.2 tách 1.2.3 (Nến+OHLCV) và 1.2.4 (Mô hình nến), thêm 1.3 Tác động tin tức, 1.4 Xử lý dữ liệu lớn, 1.5 AI với 1.5.3 DAG/MoE/Multi-Agents/FinBERT và 1.5.4 Vector DB+HNSW mới.
+- **Restructured Chương 2**: 2.2.1 Các kiểu dữ liệu mới, 2.2.2 Lambda với sub-section 2.2.2.1-2.2.2.3, 2.3 Kiến trúc AI, 2.4.1 Use case + 2.4.2 Sequence.
+- **Restructured Chương 3**: 3.1 Công nghệ (3.1.1-3.1.6), 3.2 Triển khai, 3.3 UI.
+- **APA citations**: 227 APA-style citations, 0 IEEE.
+
+## [0.27.0] - 2026-06-22
+
+### Added — Thesis v5 (khoa-luan-nhom-79-v5.md) with restructured đề cương
+
+- **Created `docs/khoa-luan-nhom-79-v5.md`** (~1936 dòng, ~44,640 từ) theo HƯỚNG DẪN VIẾT KHÓA LUẬN LMVIEW mới.
+- **Chương 1 restructured** theo đề cương mới: 1.1 Tiền điện tử (1.1.1-1.1.5), 1.2 Phân tích kỹ thuật (1.2.1 Nền tảng, 1.2.2 Chỉ báo, 1.2.3 Nến Nhật+OHLCV+Mô hình nến, 1.2.4 Tác động tin tức), 1.3 Xử lý dữ liệu lớn (1.3.1 Lambda, 1.3.2 Lakehouse, 1.3.3 Streaming), 1.4 AI (1.4.1 LLM, 1.4.2 RAG). Sections 1.4.3 DAG/MoE và 1.4.4 Vector DB REMOVED theo đề cương.
+- **Chương 3.3 reordered** 3.3.1 → 3.3.6 (v3 có 3.3.6 trước 3.3.3-3.3.5).
+- **Chương 4.2.7-4.2.8 moved** từ sau "TÀI LIỆU THAM KHẢO" về đúng vị trí trước References.
+- **1.2.3 và 1.2.4 added** (Biểu đồ nến Nhật, Mô hình nến) - bị mất trong rewrite script đầu tiên, đã restore từ v3 source.
+- **1.2.3 combined** Nến Nhật + OHLCV + Mô hình nến vào một section thay vì tách riêng.
+
+### Technical
+
+- File `docs/khoa-luan-nhom-79-v5.md` synced với cấu trúc đề cương mới, nội dung văn phong lấy từ v3.
+- **Ch1 thuần lý thuyết**: đã loại bỏ toàn bộ 19 tham chiếu "LMView" trong Chương 1 (cơ sở lý thuyết), thay bằng diễn đạt học thuật trung tính ("các hệ thống phân tích kỹ thuật", "trong thực tế", "trong bối cảnh phân tích tài chính", v.v.). Ch2-Ch4 vẫn đề cập LMView bình thường (đây là phần mô tả và đánh giá hệ thống).
+- **Hình 3.0 — AWS 3-AZ infrastructure diagram**: thêm sơ đồ mới mô phỏng đúng bộ icon chuẩn Amazon (VPC, Subnet, AZ, EC2, EBS, EFS, ALB, CloudWatch, Route 53, Secrets Manager) bọc ngoài 3 node Docker Swarm hiện hữu. Đánh số lại toàn bộ Hình 3.x: 3.0 (AWS 3-AZ), 3.1 (Docker Swarm internal), 3.2–3.5 (Node 1/2/3, UI, Frontend). DANH MỤC HÌNH cập nhật khớp với body.
+- **Mở Đầu Mục 1, 2, 3, 4 — bẻ nhỏ + bold keywords**: thay các khối văn dài đặc chữ bằng các đoạn ngắn 3–5 dòng, sử dụng **in đậm** cho keyword chính (đặc điểm thị trường, 6 bước DSRM, 4 bài toán con, 5 câu hỏi nghiên cứu, 4 đóng góp chính), thêm bullet list cho các thành phần liệt kê.
+- **Luồng backup Lakehouse → S3 (Iceberg nguyên bản)**: thêm Mục 3.1.6.1 mới mô tả Spark job backup hằng ngày từ MinIO lên S3, bảo toàn metadata Iceberg (manifest, snapshot, schema). Cập nhật Hình 2.2 (batch path) thêm nhánh backup sang S3. Cập nhật Hình 3.0 thêm mũi tên MinIO → S3 + dòng backup trong external services. Thêm đoạn mô tả luồng batch path vào Mục 2.3.1. Chi phí S3 ~0.20 USD/tháng.
+- **Rà soát toàn bộ tài liệu và tham chiếu S3 backup**: cập nhật Mục 3.1.3 (thêm backup Lakehouse như cấp thứ 4 của cơ chế chịu lỗi); Mục 3.2.6 (bổ sung ghi chú backup); Mục 4.2.3 (MinIO SPOF + S3 backup là mitigation; monitoring backup đã được tự động hóa cho MinIO); Mục 4.2.7 (CN2 nâng "ba cơ chế" lên "bốn cơ chế"); Mục 4.3.1 (tổng kết + abstract VN/EN đều đề cập backup); Phụ lục A.6 (bổ sung cấu hình backup_catalog).
+
+## [0.26.11] - 2026-06-22
+
+### Fixed — Infinite re-render loop + overlay stacking context + live-id gate
+
+Diagnosed with a headless browser probe (`probe-tour.mjs`, `probe-direct.mjs`) by instrumenting the tour auto-start / auto-execute / clearChat code paths and dumping overlay DOM probes after each step.
+
+- **Root cause: infinite re-render loop cleared `activeTour` on every render.** The initial-load effect in `useAiChat.ts` had `refreshApiSessions` in its deps. `refreshApiSessions` had `loadApiSession` in its deps. `loadApiSession` had `sessions` in its deps. So when `sessions` was updated, `loadApiSession` got a new ref, `refreshApiSessions` got a new ref, the initial-load effect re-fired, called `refreshApiSessions(true)`, which called `loadApiSession`, which called `setActiveTour(null)` — every single render. The tour would start, render once, then get wiped on the next re-render. **Fix**: guard with an `initialisedRef` so the initial-load effect only fires once per hook lifetime.
+- **Step overlay was covered by the highlight dim.** The overlay was `absolute left-2 right-2 top-2 z-[700]` inside the AI panel (`data-ai-section="ai-panel"`). The dim is `fixed inset-0 z-[680]` at body level. Z-index only escapes a stacking context when you're at the body level, so the dim always won. **Fix**: render the overlay via `createPortal(overlayNode, document.body)` so its z-720 actually competes against the dim's z-680.
+- **`liveMessageIdsRef` was too strict — blocked tours on reload AND on loaded sessions.** The v0.26.7 fix used this ref to gate auto-start, but the ref was cleared by `loadApiSession` on page load and by the auto-load effect's infinite loop, so the tour never auto-started for sessions that were loaded from the server. **Fix**: replaced with `autoExecutedTourIdsRef` keyed on message id only. Re-running on reload is fine because the ref is per-mount, so each page load gets a fresh set.
+- **Highlight dim now always cuts out the AI panel during an active tour.** Added a `lmview:ai-tour-start` / `lmview:ai-tour-end` event pair; the `HighlightOverlay` listens and includes the AI panel rect in the cutouts whenever a tour is running, so the step text + nav buttons stay readable even when the dim is focused on a different chart section.
+
+### Technical
+
+- Bundle `index-DecRvn1B.js` (475.40 kB / 133.49 kB gzip)
+- Deployed: `cryptoprice/nginx:1.62.0`
+- Verified end-to-end with Playwright: overlay renders, Next button advances through all 5 steps (40% → 60% → ...), step counter updates correctly.
+- Also deleted all 54 stale admin AI sessions so the user has a clean slate.
+
+## [0.26.10] - 2026-06-22
+
+### Fixed — Draggable step overlay + step counter + last-step keep/revert
+
+- **Step overlay is now draggable.** The header bar (with grip icon) is the drag handle; the box can be moved anywhere over the AI panel so it doesn't cover the highlighted chart region. Position resets when a new tour starts.
+- **Prominent step counter on every step.** "Step 2 of 5" + progress bar + percentage is in the drag header so users always know where they are and how much is left.
+- **Nav buttons on every step.** Previous + Next on every step (was hidden on step 1). Next becomes "Finish" with a checkmark on the last step.
+- **Keep current state / Revert to previous view ONLY on the last step.** Moved out of the (now removed) floating recap banner into a clear inline section in the overlay that only renders when `currentStep === steps.length - 1`. No more "always at the bottom" buttons.
+- **Deleted all 54 stale admin sessions** from PostgreSQL so users can now create new sessions cleanly. Confirmed `POST /api/ai/sessions` returns 201 after cleanup.
+
+### Technical
+
+- Bundle `index-DyqHljDC.js` (474.91 kB / 133.41 kB gzip)
+- Deployed: `cryptoprice/nginx:1.43.0`
+
+## [0.26.9] - 2026-06-22
+
+### Fixed — Breadcrumb dim + step overlay layout + legacy start_tour cleanup
+
+- **Full-screen dim during action breadcrumbs.** The success-breadcrumb code path called `setHighlight({target: "debug", message})` after every action, but `SECTION_SELECTORS["debug"]` doesn't exist — `document.querySelector("debug")` returns `null`, so no "hole" is cut and the highlight overlay (z-680) dims the whole viewport including the chat and recap buttons. Removed the breadcrumb highlight entirely; the AI Action debug window's action log already records every call.
+- **Legacy `start_tour` tool call running alongside the dynamic tour.** The `chart_interaction` expert still emitted a `start_tour` action for tour queries, the local fallback (`localInteractToolCalls`) emitted another, and the admin chat rendered a `▶ start_tour` button — all dead code now that the dynamic `tour_plan` in the assistant message metadata drives the tour. Removed the `start_tour` entry from the `CHART_TOOLS` registry, removed the pattern-match in `chart_interaction.py` that generated it, removed the `localInteractToolCalls` fallback, and removed the inline admin tool-call replay buttons from the chat (the dedicated AI Action debug window is the right place for them).
+- **Recap is now a final chat response, not a floating banner.** The recap message is appended to the chat list (with a Replay button) and the "Progressing…" placeholder is updated in place as the tour advances. The floating emerald banner and the "Keep current state / Revert to previous view" buttons are gone — the AI auto-restores state via capture/restore events.
+- **Suggestions dropdown snapped closed on every re-render.** The effect that hides the suggestions after the first user message was keying off the `messages` array reference, so any unrelated re-render (chart tick, settings save, etc.) collapsed a dropdown the user had explicitly opened. Now keyed off `messages.length:lastId` and only updates when those change.
+- **"New session" button in the AI Helper settings panel.** Added a `+ New chat` button next to the saved-sessions list that clears the active session pointer + chat + tour state and lets the next `sendMessage` start a fresh conversation. Listener in `useAiChat` listens for `lmview:ai-clear-chat` and runs the full teardown (session, messages, tour, freeze, highlights).
+- **`clearChat` now tears down tour state too.** The "+ New chat" button in the AI panel header dispatched a state clear but didn't unfreeze the chart or clear highlights, so the next session could start in a half-frozen state. `clearChat` now dispatches `chart-freeze:false`, `ai-tour-end`, and `ai-clear-highlights` so the chart fully unlocks when the chat is cleared.
+
+### Technical
+
+- Bundle `index-Bjofukei.js` (472.80 kB / 132.77 kB gzip)
+- Deployed: `cryptoprice/nginx:1.42.0`, `cryptoprice/fastapi:0.28.0`
+
+## [0.26.8] - 2026-06-22
+
+### Fixed — Step overlay hidden + chart not actually frozen during analysis
+
+The previous fix made Interact mode start a tour, but four regressions remained on the screen:
+
+- **Step overlay was hidden behind the highlight overlay.** The dim+highlight overlay (`HighlightOverlay`) sits at `z-[680]`, but the step overlay was `z-50` — so the user saw the dim but the step content was masked behind it. Bumped step overlay to `z-[700]` so it sits above the dim.
+- **Chart WebSocket + 10s poll kept running during freeze.** The chart's main subscription effect and cleanup effect only watched the `frozen` prop, not `eventFrozen` (the local state populated from `lmview:chart-freeze` events). When Interact mode froze the chart via the custom event, the live WebSocket stayed subscribed and the forming candle kept moving. Both effects now check `eventFrozenRef.current` and `eventFrozen`.
+- **RightPanel live price kept ticking during freeze.** The 2 s `getLivePrices()` poll in App.tsx had no respect for the freeze state — `RightPanel` price/% change kept updating even with the chart frozen. Added a top-level `chartFrozen` state in `App.tsx` that mirrors `lmview:chart-freeze`; the poll bails when frozen.
+- **Stale activeTour state blocked new tours.** If the user sent a new message mid-tour, the old `activeTour` was still set, so the auto-start effect bailed (`if (tourRunning) return`). `handleSend` now clears `activeTour`, freeze, and highlights before sending.
+- **`lmview:ai-tour-end` didn't clear highlights / UI snapshot.** Only `lmview:ai-clear-highlights` cleared the highlight overlay, and the captured UI snapshot lingered. The tour-end handler in `AiActionProvider` now also clears the highlight and drops the snapshot.
+
+### Technical
+
+- Bundle `index-CpeVYyxX.js` (472.33 kB / 132.61 kB gzip)
+- Deployed: `cryptoprice/nginx:1.41.0`
+
+## [0.26.7] - 2026-06-22
+
+### Fixed — Interact mode overhaul (tour auto-fire loop, frozen-chart lockup)
+
+- **Tour no longer auto-runs on reload / session switch / login.** Added `liveMessageIdsRef` in `useAiChat` — messages produced by the current `sendMessage` call are marked "live"; messages loaded from history are not. The panel only auto-runs the tour_plan of a *live* message, so reloading the page no longer restarts a stale tour.
+- **`WORKSPACE_OVERVIEW_TOUR` rewritten with valid action types.** Old template used `highlight_section target: "chart-panel"` (no such section key) and `manage_indicator` (not a supported action), which silently failed mid-tour and left the chart frozen. The new template uses `highlight_section {target: chart|drawingTools|ai}` + `add_indicator {rsi}` + `open_panel {orderBook}`, all of which match real handlers.
+- **`_build_workspace_tour` now filters unsupported action types** so a stale template cannot freeze the chart with broken steps.
+- **`_is_lmview_tour_query` matches more phrases** — "how to use LMView", "what can LMView do", "show me around", "give me a demo", "guide me", etc. all trigger the predefined workspace walkthrough.
+- **Cancel / End-Tour now atomically clears freeze + highlight + tour-end state**, so the dim overlay, frozen chart, and step overlay all close together.
+- **Auto-scroll no longer snaps chat to bottom on every render** — only on new messages, so the user can scroll up freely while a guided analysis is running.
+- **Removed `tourChatCollapsed` state** that was hiding the chat scroll during a tour; it caused "chat stuck" perception and is unnecessary because the step overlay sits inside the AI panel.
+- **Interact-mode chat rendering** now shows a compact "Analysis ready" card instead of dumping the full LLM markdown narrative when the response has a `tour_plan`. The narrative is redundant with the step overlay + recap.
+- **Terminology**: user-facing "tour" strings → "analysis" / "steps" (internal variable names unchanged for compatibility).
+
+### Technical
+
+- Frontend typecheck + production build clean (`index-DeAYFvDa.js`)
+- Backend test confirmed: "How to use LMView?" / "show me around" / "what can LMView do" / "give me a demo" / "how do i use this" all return `tour_plan.tour_id = lmview-overview` with 5 valid steps
+- Deployed: `cryptoprice/fastapi:0.27.9`, `cryptoprice/nginx:1.39.0`
+
+## [0.26.6] - 2026-06-22
+
+### Fixed — Tour restart loop, dim overlay, and 429 rate limits
+
+- **Tour no longer auto-restarts on every page load/reload/session switch.** Added `processedTourMessageIdsRef` dedup in `AiAssistantPanel` so the persisted `tour_plan` from a prior assistant message only fires once per message id. The Replay button now clears that dedup so the user can still re-run the same plan.
+- **Highlight overlay no longer sticks after "Return to previous view".** Added `lmview:ai-clear-highlights` event listener in `AiActionProvider`; cancel/end tour and the recap revert button all dispatch it now.
+- **Cancel/End Tour fully unfreezes the chart.** `cancelTour` now dispatches `lmview:chart-freeze` with `frozen:false`, `lmview:ai-tour-end`, and `lmview:ai-clear-highlights` so the dim overlay, frozen badge, and forming-candle state all clear.
+- **Chart 10 s ticker poll stops while frozen.** Added `frozenRef` / `eventFrozenRef` mirror refs and the poll returns early when the chart is frozen, so the backend no longer gets hammered during tours.
+- **Rate limit default raised from 200 → 1200 req/min/IP** in `backend/middleware/rate_limit.py` to stop false-positive 429s for normal polling (RightPanel, watchlist, chart, AI session refresh).
+
+### Technical
+
+- Frontend typecheck + build clean (`index-GIs9raQT.js`)
+- Deployed: `cryptoprice/fastapi:0.27.8`, `cryptoprice/nginx:1.38.0`
+
+## [0.26.5] - 2026-06-22
+
+### Fixed — Interact Mode auto-tour execution + state persistence
+
+- **Interact mode now uses batch AI chat path** in `frontend/src/features/ai/hooks/useAiChat.ts` instead of SSE streaming. Root cause: streaming endpoint returned text tokens only and did not include `tour_plan`, `tool_calls`, `chart_actions`, or persisted assistant messages, so Interact degraded into chat-only behavior.
+- **Session mode restore fixed**: loading API sessions now restores `session.mode` instead of forcing Ask mode.
+- **Replay fixed to replay full tour**: `autoExecutedStepRef` is reset on new tours and Replay, so replay no longer stalls after first previously-executed step.
+- **Tour finish UX improved**: recap now prompts user to either keep current chart state or revert to previous UI state.
+- **Suggested prompts + stale action state reset**: prompt visibility and recap/action banners reset correctly when sessions are cleared/reloaded.
+- **Tour snapshot hooks added** in `AiActionProvider.tsx`: listens for `lmview:ai-tour-capture-ui` and `lmview:ai-tour-restore-ui` so Interact tours can restore prior panel/view state.
+- **New action support**: added `export_chart` frontend action scaffold and improved `fetch_historical_prices` to switch symbol/timeframe and emit a historical-query result event.
+
+### Technical
+
+- Frontend typecheck clean
+- Frontend production build clean (`index-B5g_5aYb.js`)
+
+## [0.26.4] - 2026-06-22
+
+### Changed — Chuyển đổi toàn bộ trích dẫn từ IEEE sang APA 7th
+
+- **Inline citations**: Thay thế toàn bộ `[N]` bằng `(Author, Year)` — 38 citations xuyên suốt tài liệu
+- **Narrative citations**: Sửa các trường hợp trùng lặp (`Tên (Tên, Năm)` → `Tên (Năm)`)
+- **Bracket-year fix**: `Tên [2023]` → `Tên (2023)` cho Hausenblas, Villarroel, Lopez-Lira
+- **Reference list**: Định dạng lại 38 entry theo APA 7th (Author, A. A. (Year). Title. Publisher. DOI)
+- **Heading**: Thêm `## TÀI LIỆU THAM KHẢO` trước reference list
+
 ## [0.26.3] - 2026-06-21
 
 ### Fixed — Học thuật hóa Chương 2-3 (Distributed Systems Theory & APA Citations)

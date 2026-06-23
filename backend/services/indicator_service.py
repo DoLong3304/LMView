@@ -126,7 +126,7 @@ SUPPORTED_INDICATORS: List[SupportedIndicator] = [
     SupportedIndicator(
         name="support_resistance", display_name="Support / Resistance",
         category="levels", default_params={"lookback": 120},
-        available_sources=["future"],
+        available_sources=["computed"],
     ),
     SupportedIndicator(
         name="whale_alert", display_name="Whale Alert",
@@ -182,6 +182,7 @@ INDICATOR_REQUIRED_CANDLES = {
     "ichimoku": 53,
     "supertrend": 15,
     "psar": 3,
+    "support_resistance": 15,
 }
 
 DEFAULT_SERIES_INDICATORS = [
@@ -547,6 +548,63 @@ def _atr_series(candles: Sequence[dict], period: int = 14) -> List[IndicatorPoin
     return out
 
 
+def _sr_series(candles: Sequence[dict], lookback: int = 50) -> List[IndicatorPoint]:
+    """Compute support and resistance levels as indicator points.
+
+    Each point has time=last candle timestamp and value=level price.
+    The label is encoded as a comment-style marker via the time formatting
+    (fractional time offset encodes level type: support=0.001, resistance=0.002).
+    """
+    if len(candles) < 3:
+        return []
+
+    recent = list(candles[-lookback:])
+    swing_lows: List[float] = []
+    swing_highs: List[float] = []
+
+    for i in range(1, len(recent) - 1):
+        prev, curr, nxt = recent[i - 1], recent[i], recent[i + 1]
+        if curr["low"] < prev["low"] and curr["low"] < nxt["low"]:
+            swing_lows.append(float(curr["low"]))
+        if curr["high"] > prev["high"] and curr["high"] > nxt["high"]:
+            swing_highs.append(float(curr["high"]))
+
+    swing_lows.append(min(float(c["low"]) for c in recent))
+    swing_highs.append(max(float(c["high"]) for c in recent))
+
+    def dedupe(arr: List[float], tol: float = 0.005) -> List[float]:
+        if not arr:
+            return []
+        s = sorted(set(arr))
+        result = [s[0]]
+        for v in s[1:]:
+            if abs(v - result[-1]) / result[-1] > tol:
+                result.append(v)
+        return result
+
+    supports = dedupe(swing_lows)
+    resistances = dedupe(swing_highs)
+    current_price = float(recent[-1]["close"])
+
+    points: List[IndicatorPoint] = []
+    last_ts = int(recent[-1]["openTime"])
+
+    for s in supports:
+        if s < current_price:
+            points.append(IndicatorPoint(time=last_ts, value=round(s, 4)))
+    for r in resistances:
+        if r > current_price:
+            points.append(IndicatorPoint(time=last_ts, value=round(r, 4)))
+
+    # Sort by proximity to current price
+    points.sort(key=lambda p: abs(p.value - current_price))
+    # Keep max 6 levels (3 support + 3 resistance)
+    supports_out = [p for p in points if p.value < current_price][:3]
+    resistances_out = [p for p in points if p.value > current_price][:3]
+
+    return supports_out + resistances_out
+
+
 def _calculate_series(
     candles: Sequence[dict],
     requested: Sequence[str],
@@ -580,6 +638,9 @@ def _calculate_series(
         atr = _atr_series(candles, 14)
         series["atr"] = atr
         series["atr14"] = atr
+    if "support_resistance" in requested:
+        sr = _sr_series(candles, 50)
+        series["support_resistance"] = sr
 
     latest = {key: _series_latest(points) for key, points in series.items()}
     return series, latest

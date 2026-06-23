@@ -71,21 +71,21 @@ def run():
     s3_config.set_string("s3.endpoint",          MINIO_ENDPOINT)
     s3_config.set_string("s3.access-key",        MINIO_ACCESS_KEY)
     s3_config.set_string("s3.secret-key",        MINIO_SECRET_KEY)
-    s3_config.set_string("s3.path.style.access", "true")
     s3_config.set_string("fs.s3a.endpoint",           MINIO_ENDPOINT)
     s3_config.set_string("fs.s3a.access.key",         MINIO_ACCESS_KEY)
     s3_config.set_string("fs.s3a.secret.key",         MINIO_SECRET_KEY)
+    s3_config.set_string("fs.s3a.impl",               "org.apache.hadoop.fs.s3a.S3AFileSystem")
     s3_config.set_string("fs.s3a.path.style.access",  "true")
     s3_config.set_string("fs.s3a.impl",               "org.apache.hadoop.fs.s3a.S3AFileSystem")
-    env.configure(s3_config)
+    s3_config.set_string("fs.s3a.path.style.access",  "true")
 
     env.get_checkpoint_config().set_checkpoint_storage_dir(
-        "s3://flink-checkpoints/flink-checkpoints"
+        "file:///tmp/flink-checkpoints"
     )
-    # Phase 2: checkpoint interval restored to 120s. Pipeline is
-    # stable, 0 replica errors, no task failures. 120s = less S3
-    # write overhead = more CPU for actual aggregation.
-    env.enable_checkpointing(60_000)
+    # Phase 2: checkpoint interval set to 120s. Pipeline was
+    # checkpointing to S3 which caused timeout failures. Use local
+    # file:// storage directly (volume-mounted).
+    env.enable_checkpointing(120_000)
     env.set_restart_strategy(
         RestartStrategies.failure_rate_restart(
             5,
@@ -97,7 +97,7 @@ def run():
     chk.set_checkpointing_mode(CheckpointingMode.EXACTLY_ONCE)
     chk.enable_unaligned_checkpoints()
     chk.set_min_pause_between_checkpoints(30_000)
-    chk.set_checkpoint_timeout(120_000)
+    chk.set_checkpoint_timeout(300_000)
 
     # ─────────────────────────────────────────────────────────────────────
     # Checkpoint observability hook (B6)

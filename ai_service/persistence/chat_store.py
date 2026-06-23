@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from backend.core.postgres import get_pg_pool
+from backend.models.ai.tour import TourPlan
 
 logger = logging.getLogger("ai_service.persistence.chat_store")
 
@@ -151,6 +152,38 @@ async def store_message(
     return _message_to_dict(row) if row else None
 
 
+async def soft_delete_session(
+    session_id: str,
+    user_id: str,
+) -> bool:
+    """Soft-delete an AI chat session by setting status='deleted'.
+
+    Verifies ownership first; returns False if the session does not
+    exist or belongs to a different user.
+    """
+    pool = await get_pg_pool()
+    if pool is None:
+        return False
+
+    try:
+        sid = uuid.UUID(session_id)
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        return False
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE ai_chat_sessions
+            SET status = 'deleted', updated_at = now()
+            WHERE id = $1 AND user_id = $2
+            RETURNING id
+            """,
+            sid, uid,
+        )
+    return row is not None
+
+
 async def store_chart_snapshot(
     user_id: str,
     session_id: Optional[str],
@@ -216,8 +249,20 @@ def _message_to_dict(row) -> dict:
         meta = json.loads(meta)
 
     is_mock = False
+    tour_plan = None
     if isinstance(meta, dict):
         is_mock = meta.get("is_mock", False)
+        # Surface the tour plan from metadata so reloads can offer
+        # Replay without re-running the LLM. The plan is stored under
+        # ``metadata.tour_plan`` by the orchestrator.
+        stored_plan = meta.get("tour_plan")
+        if isinstance(stored_plan, dict) and stored_plan:
+            try:
+                # Validate + coerce to TourPlan schema. ``steps`` may be
+                # a list of dicts; Pydantic will coerce as needed.
+                tour_plan = TourPlan.model_validate(stored_plan).model_dump(mode="json")
+            except Exception:
+                tour_plan = stored_plan
 
     return {
         "id": str(row["id"]),
@@ -232,4 +277,5 @@ def _message_to_dict(row) -> dict:
         "latency_ms": row.get("latency_ms"),
         "created_at": row["created_at"],
         "metadata": meta,
+        "tour_plan": tour_plan,
     }

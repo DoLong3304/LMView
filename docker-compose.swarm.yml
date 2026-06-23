@@ -106,6 +106,7 @@ services:
         limits:
           memory: 512M
 
+
   minio:
     deploy:
       placement:
@@ -124,6 +125,7 @@ services:
         constraints: [node.labels.role == core]
       restart_policy:
         condition: none
+
 
   influxdb:
     deploy:
@@ -147,7 +149,7 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 512M
+          memory: 2G
 
   # ════════════════════════════════════════════════════════════════════════════
   # REDIS SENTINEL CLUSTER — core node
@@ -232,7 +234,7 @@ services:
   fastapi-prod:
     environment:
       AI_MODE: ${AI_MODE:-api}
-      AI_ORCHESTRATION: ${AI_ORCHESTRATION:-legacy}
+      AI_ORCHESTRATION: ${AI_ORCHESTRATION:-langgraph}
       AI_ENABLE_REAL_LLM: ${AI_ENABLE_REAL_LLM:-true}
       AI_ENABLE_RAG: ${AI_ENABLE_RAG:-true}
       AI_CONFIG_PATH: ${AI_CONFIG_PATH:-ai_service/configs/ai.api.yaml}
@@ -343,6 +345,21 @@ services:
         condition: on-failure
         delay: 5s
         max_attempts: 10
+      resources:
+        limits:
+          memory: 512M
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # COMBINED-STREAM KAFKA PRODUCER — core node
+  # ════════════════════════════════════════════════════════════════════════════
+  combined-stream-producer:
+    deploy:
+      placement:
+        constraints: [node.labels.role == core]
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
       resources:
         limits:
           memory: 512M
@@ -605,7 +622,7 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 1.5G
+          memory: 2G
 
   kafka-exporter:
     command:

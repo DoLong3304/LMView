@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import abc
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from backend.models.ai.providers import (
     LLMCompletionRequest,
@@ -36,6 +36,22 @@ class BaseProvider(abc.ABC):
     ) -> LLMCompletionResponse:
         """Generate a chat completion response."""
         ...
+
+    async def generate_chat_completion_stream(
+        self,
+        request: LLMCompletionRequest,
+    ) -> AsyncGenerator[str, None]:
+        """Generate a streaming chat completion.
+
+        Yields SSE-encoded token strings: each is a JSON-encoded token event
+        with keys: content (str), done (bool).
+
+        The final yielded event has done=True with the full accumulated content.
+        Override this for provider-specific streaming.
+        """
+        # Default: non-streaming fallback
+        response = await self.generate_chat_completion(request)
+        yield '{"content": "' + response.content.replace('"', '\\"') + '", "done": true}'
 
     async def generate_structured_response(
         self,

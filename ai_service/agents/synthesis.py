@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+import json
+from typing import Any, AsyncGenerator, Dict, List, Optional
 
 from ai_service.agents.state import AgentState
 from ai_service.agents.types import ExpertOutput, Timer
@@ -162,17 +163,27 @@ async def synthesize_response(state: AgentState) -> AgentState:
     # User message
     messages.append(LLMMessage(role="user", content=user_query))
 
-    # Make the single LLM call
     from ai_service.providers.router import get_provider_router
     from ai_service.config import load_settings
+    from ai_service.actions.tool_definitions import get_openai_tools
 
     settings = load_settings()
+
+    # Pass tools parameter in Interact mode for native function calling
+    tools_param = None
+    tool_choice = None
+    if mode == "interact":
+        tools_param = get_openai_tools()
+        tool_choice = "auto"
+
     llm_request = LLMCompletionRequest(
         messages=messages,
         temperature=settings.temperature,
         max_tokens=settings.max_tokens,
         top_p=settings.top_p,
         metadata={"mode": mode, "node": "synthesis"},
+        tools=tools_param,
+        tool_choice=tool_choice,
     )
 
     provider_router = get_provider_router()
@@ -338,3 +349,127 @@ def _build_context_sections(
         parts.append("")
 
     return "\n".join(parts)
+
+
+async def synthesize_response_stream(
+    state: AgentState,
+) -> AsyncGenerator[str, None]:
+    """Streaming response synthesis — yields SSE token events.
+
+    Builds context from expert outputs (same as batch), makes a single
+    streaming LLM call, and yields tokens as they arrive.
+    After streaming completes, applies output guard and yields final metadata.
+    """
+    expert_outputs = state.get("expert_outputs", {})
+    user_query = state.get("user_query", "")
+    language = state.get("language")
+    chart_context = state.get("chart_context")
+    chat_history = state.get("chat_history", [])
+    data_caveats = state.get("data_caveats", [])
+    mode = state.get("mode", "ask")
+
+    # Build context sections
+    context_sections = _build_context_sections(expert_outputs, chart_context, data_caveats)
+
+    from backend.models.ai.providers import LLMMessage, LLMCompletionRequest
+
+    messages: List[LLMMessage] = []
+
+    # System prompt
+    now_utc = datetime.now(timezone.utc)
+    runtime = (
+        f"\n## Runtime Context\n"
+        f"- Current server time (UTC): {now_utc.isoformat()}\n"
+        f"- Current epoch milliseconds: {int(now_utc.timestamp() * 1000)}\n"
+        f"- Chart times are live runtime data — do not reject timestamps past training cutoff.\n"
+    )
+    system_content = SYNTHESIS_SYSTEM_PROMPT + runtime
+    if language and language.lower() in ("vi", "vietnamese"):
+        system_content += "\nThe user prefers Vietnamese. Respond in Vietnamese.\n"
+
+    messages.append(LLMMessage(role="system", content=system_content))
+
+    # Expert data as system context
+    if context_sections:
+        messages.append(LLMMessage(
+            role="system",
+            content="## Expert Analysis Data\n" + context_sections,
+            name="expert_data",
+        ))
+
+    # Interact mode policy
+    if mode == "interact":
+        messages.append(LLMMessage(
+            role="system",
+            content=(
+                "Interact mode: You may propose LMView chart actions as tool calls. "
+                "Never execute actions directly. Return prose first; backend will "
+                "normalize action proposals for user approval.\n\n"
+                "Step-by-step analysis guidance: After presenting your analysis, "
+                "propose ONE specific chart action per response that would help the user "
+                "understand the data better. "
+                + _build_tool_catalog_text()
+            ),
+            name="interaction_policy",
+        ))
+
+    # Conversation history (last 10)
+    for msg in chat_history[-10:]:
+        messages.append(LLMMessage(
+            role=msg.get("role", "user"),
+            content=msg.get("content", ""),
+        ))
+
+    # User message
+    messages.append(LLMMessage(role="user", content=user_query))
+
+    from ai_service.providers.router import get_provider_router
+    from ai_service.config import load_settings
+    from ai_service.actions.tool_definitions import get_openai_tools
+
+    settings = load_settings()
+
+    # Pass tools parameter in Interact mode
+    tools_param = None
+    tool_choice = None
+    if mode == "interact":
+        tools_param = get_openai_tools()
+        tool_choice = "auto"
+
+    llm_request = LLMCompletionRequest(
+        messages=messages,
+        temperature=settings.temperature,
+        max_tokens=settings.max_tokens,
+        top_p=settings.top_p,
+        metadata={"mode": mode, "node": "synthesis_stream"},
+        tools=tools_param,
+        tool_choice=tool_choice,
+    )
+
+    provider_router = get_provider_router()
+    accumulated = ""
+
+    async for event in provider_router.route_completion_stream(llm_request):
+        yield event
+        # Accumulate for post-hoc guard check
+        try:
+            ev = json.loads(event)
+            if ev.get("content") and not ev.get("done"):
+                accumulated += ev["content"]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Apply output guard on full accumulated response (post-hoc)
+    from ai_service.safety.output_guard import guard_output
+    guard_result = guard_output(accumulated, language=language)
+    final_content = guard_result["content"]
+    guard_warnings = list(guard_result["warnings"])
+
+    # Yield final metadata with guard results
+    metadata_event = json.dumps({
+        "event": "metadata",
+        "guard_warnings": guard_warnings,
+        "content": final_content,
+        "done": True,
+    })
+    yield metadata_event

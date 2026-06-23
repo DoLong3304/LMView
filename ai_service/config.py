@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 
 VALID_AI_MODES = {"auto", "local", "api", "none"}
-VALID_ORCHESTRATION_MODES = {"legacy", "langgraph"}
+VALID_ORCHESTRATION_MODES = {"langgraph"}
 DEFAULT_API_MODEL = "openai/qwen3.5-plus"
 DEFAULT_QWEN_BASE_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
@@ -158,9 +158,9 @@ def load_settings() -> AISettings:
         )
     )
 
-    orch_mode = os.environ.get("AI_ORCHESTRATION", "legacy").strip().lower()
+    orch_mode = os.environ.get("AI_ORCHESTRATION", "langgraph").strip().lower()
     if orch_mode not in VALID_ORCHESTRATION_MODES:
-        orch_mode = "legacy"
+        orch_mode = "langgraph"
 
     return AISettings(
         mode=mode,

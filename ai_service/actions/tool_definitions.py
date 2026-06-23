@@ -38,6 +38,59 @@ def is_valid_tool(tool_name: str) -> bool:
     return tool_name in CHART_TOOLS
 
 
+def get_openai_tools() -> List[Dict[str, Any]]:
+    """Convert CHART_TOOLS to OpenAI-compatible tools format.
+
+    Returns a list of tool specs suitable for the ``tools`` parameter
+    in OpenAI-compatible chat completion APIs (including DashScope/Qwen).
+    Each tool has ``type: "function"`` and ``function`` with name, description,
+    and parameters (JSON Schema).
+    """
+    openai_tools: List[Dict[str, Any]] = []
+    for name, definition in CHART_TOOLS.items():
+        desc = definition.get("description", "")
+        params = definition.get("parameters", {})
+        required = definition.get("required", [])
+
+        # Build JSON Schema for parameters
+        properties = {}
+        for pname, pdef in params.items():
+            prop = {}
+            ptype = pdef.get("type", "string")
+            # Map parameter type to JSON Schema type
+            prop["type"] = ptype
+            if pdef.get("description"):
+                prop["description"] = pdef["description"]
+            if pdef.get("enum"):
+                prop["enum"] = pdef["enum"]
+            if pdef.get("minimum") is not None:
+                prop["minimum"] = pdef["minimum"]
+            if pdef.get("maximum") is not None:
+                prop["maximum"] = pdef["maximum"]
+            if pdef.get("default") is not None:
+                prop["default"] = pdef["default"]
+            if pdef.get("maxLength") is not None:
+                prop["maxLength"] = pdef["maxLength"]
+            if pdef.get("items"):
+                prop["items"] = pdef["items"]
+            properties[pname] = prop
+
+        schema: Dict[str, Any] = {"type": "object", "properties": properties}
+        if required:
+            schema["required"] = required
+
+        openai_tools.append({
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": desc,
+                "parameters": schema,
+            },
+        })
+
+    return openai_tools
+
+
 def format_tools_for_llm() -> str:
     """Format tool definitions as a string for LLM system prompts.
 

@@ -91,6 +91,33 @@ function mapRawToCandle(k: RawKline): Candle {
   };
 }
 
+export async function fetchMergedCandles(
+  symbol: string,
+  timeframe: string = "1m",
+  limit: number = 100,
+): Promise<Candle[]> {
+  const interval = normalizeTimeframe(timeframe);
+  const cacheKey = makeClientCacheKey(["merged", symbol, interval, limit]);
+  return withClientCache(
+    cacheKey,
+    CANDLE_LATEST_CACHE_MS,
+    async () => {
+      const raw = await apiGet<any>(`/merged/${symbol}?interval=${interval}&limit=${limit}`);
+      if (!Array.isArray(raw)) return [];
+      return raw.map((c: any) => ({
+        time: Math.floor((c.timestamp ?? c.openTime) / 1000),
+        open: parseFloat(String(c.open)),
+        high: parseFloat(String(c.high)),
+        low: parseFloat(String(c.low)),
+        close: parseFloat(String(c.close)),
+        volume: parseFloat(String(c.volume ?? 0)),
+        isClosed: c.isClosed ?? true,
+      } as Candle));
+    },
+    { persist: false, staleOnError: true },
+  );
+}
+
 export async function fetchCandles(
   symbol: string,
   timeframe: string = "1h",
@@ -98,6 +125,9 @@ export async function fetchCandles(
   endTime: number | null = null,
   exchange: string = "binance",
 ): Promise<Candle[]> {
+  // Legacy endpoint, used for historical scroll or mock data.
+  // For live merged candles, use fetchMergedCandles instead.
+
   const interval = normalizeTimeframe(timeframe);
 
   if (DATA_SOURCE === "api") {

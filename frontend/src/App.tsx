@@ -169,6 +169,11 @@ const TradingDashboard: React.FC = () => {
     const [chartType, setChartType] = useState<ChartType>(getInitialChartType);
     const [aiChartController, setAiChartController] =
         useState<AiChartActionController | null>(null);
+    // True while a guided analysis is freezing the chart. Used to pause
+    // non-chart UI updates (RightPanel price/change%, fast ticker poll)
+    // so the user sees a stable screen while the AI walks them through
+    // a multi-step analysis.
+    const [chartFrozen, setChartFrozen] = useState(false);
     const [isDrawing, setIsDrawing] = useState(false);
     const [selectedSymbol, setSelectedSymbol] = useState<string>(() => {
         const stored = loadFromStorage("app_selectedSymbol", "BTCUSDT");
@@ -316,6 +321,49 @@ const TradingDashboard: React.FC = () => {
             clearInterval(id);
         };
     }, [selectedSymbol]);
+
+    // ─── Fast live price update for selected symbol from WS _livePriceMap ───
+    // Updates every 2s, no API call — keeps price/change% in RightPanel synced
+    // with the forming candle moving on chart.
+    // Preserves previous change% if WS doesn't send change24h.
+    useEffect(() => {
+        const fastRefresh = () => {
+            // Pause the live price tick while a guided analysis freezes
+            // the chart, so the user sees a stable UI.
+            if (chartFrozen) return;
+            const livePrices = getLivePrices();
+            setWatchlistItems((prev) =>
+                prev.map((item) => {
+                    if (item.symbol !== selectedSymbol) return item;
+                    const live = livePrices[selectedSymbol];
+                    if (!live) return item;
+                    return {
+                        ...item,
+                        price: live.price,
+                        change: live.change24h !== 0 ? live.change24h : item.change,
+                        activityScore: live.activity_score ?? item.activityScore,
+                        volume: live.volume > 0 ? live.volume : item.volume,
+                        color: live.change24h >= 0 ? "green" : "red",
+                    };
+                }),
+            );
+        };
+        const id = setInterval(fastRefresh, 2_000);
+        return () => clearInterval(id);
+    }, [selectedSymbol, chartFrozen]);
+
+    // Mirror the chart-freeze custom event into App-level state so we
+    // can pause non-chart UI updates (RightPanel price tick, etc.).
+    useEffect(() => {
+        const handler = (event: Event) => {
+            const detail = (event as CustomEvent<{ frozen: boolean }>).detail;
+            if (detail && typeof detail.frozen === "boolean") {
+                setChartFrozen(detail.frozen);
+            }
+        };
+        window.addEventListener("lmview:chart-freeze", handler);
+        return () => window.removeEventListener("lmview:chart-freeze", handler);
+    }, []);
 
     // Persist settings to localStorage
     useEffect(() => {
@@ -614,6 +662,12 @@ const TradingDashboard: React.FC = () => {
 
     // State lifted from CandlestickChart for Overview + DrawingToolbar data.
     const [chartCandles, setChartCandles] = useState<Candle[]>([]);
+    // Indicator settings + visible indicator list, mirrored from
+    // CandlestickChart so the AI panel can build the chart context
+    // (indicator_values + selected_indicators) without needing to live
+    // inside the chart.
+    const [chartIndSettings, setChartIndSettings] = useState<Record<string, import("@/types").IndicatorSettings>>({});
+    const [chartSelectedIndicators, setChartSelectedIndicators] = useState<string[]>([]);
 
     // Chart API refs for floating toolbar positioning
     const [chartApi, setChartApi] = useState<any>(null);
@@ -993,6 +1047,8 @@ const TradingDashboard: React.FC = () => {
                                         onAiActionControllerReady={
                                             setAiChartController
                                         }
+                                        onIndicatorSettingsChange={setChartIndSettings}
+                                        onSelectedIndicatorsChange={setChartSelectedIndicators}
                                     >
                                         {(chartApiRef, candleSeriesRef) => {
                                             if (chartApiRef !== chartApi)
@@ -1264,6 +1320,8 @@ const TradingDashboard: React.FC = () => {
                                             }
                                             candles={chartCandles}
                                             timeframe={currentTimeframe}
+                                            indSettings={chartIndSettings}
+                                            selectedIndicators={chartSelectedIndicators}
                                             onOpenSettings={handleOpenSettings}
                                             activeTopTab={rightPanelTopTab}
                                             activeTab={rightPanelTab}

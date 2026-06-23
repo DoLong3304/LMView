@@ -37,7 +37,7 @@ def get_spark_session() -> SparkSession:
     SQL in src/lakehouse/gold/*.py (`iceberg.crypto_lakehouse.gold_*`)
     and the older pipeline code in src/lakehouse/pipeline.py
     (`iceberg_catalog.bronze.*`) both resolve to the same Hadoop catalog
-    backed by the s3a://lakehouse/warehouse MinIO bucket.
+    backed by the s3a://lmview-warehouse/warehouse S3 bucket.
 
     We also pass `spark.jars.packages` so the iceberg + s3 jars are
     available on the classpath of the local SparkSession. Without these

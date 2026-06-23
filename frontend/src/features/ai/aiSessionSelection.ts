@@ -24,7 +24,7 @@ export function setActiveAiSessionId(userId: string, sessionId: string | null): 
   }
 }
 
-export function selectAiSession(userId: string, sessionId: string): void {
+export function selectAiSession(userId: string, sessionId: string | null): void {
   setActiveAiSessionId(userId, sessionId);
   window.dispatchEvent(
     new CustomEvent(AI_SESSION_SELECTED_EVENT, {

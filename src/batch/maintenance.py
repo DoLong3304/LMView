@@ -50,17 +50,14 @@ spark = (
     .config("spark.sql.catalog.iceberg_catalog.warehouse", "s3://cryptoprice/iceberg")
     .config("spark.sql.catalog.iceberg_catalog.io-impl",
             "org.apache.iceberg.aws.s3.S3FileIO")
-    .config("spark.sql.catalog.iceberg_catalog.s3.endpoint", MINIO_ENDPOINT)
+    .config("spark.sql.catalog.iceberg_catalog.s3.endpoint", MINIO_ENDPOINT)  # S3
     .config("spark.sql.catalog.iceberg_catalog.s3.access-key-id", MINIO_ACCESS_KEY)
     .config("spark.sql.catalog.iceberg_catalog.s3.secret-access-key", MINIO_SECRET_KEY)
-    .config("spark.sql.catalog.iceberg_catalog.s3.path-style-access", "true")
-    .config("spark.hadoop.fs.s3a.endpoint", MINIO_ENDPOINT)
+    .config("spark.hadoop.fs.s3a.endpoint",          MINIO_ENDPOINT)  # S3
     .config("spark.hadoop.fs.s3a.access.key", MINIO_ACCESS_KEY)
     .config("spark.hadoop.fs.s3a.secret.key", MINIO_SECRET_KEY)
-    .config("spark.hadoop.fs.s3a.path.style.access", "true")
     .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
     .config("spark.hadoop.fs.s3.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-    .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
     .config("spark.hadoop.fs.s3a.aws.credentials.provider",
             "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider")
     .config("spark.sql.defaultCatalog", "iceberg_catalog")

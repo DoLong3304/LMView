@@ -7,7 +7,9 @@ a single source of truth for aggregation, merging, querying, and validation.
 
 from __future__ import annotations
 
+import json
 import logging
+import time
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -424,11 +426,16 @@ def collect_base_1m_candles(
     while pages < max_pages and cursor > 0:
         pages += 1
         batch: list[dict] = []
-        if cursor >= influx_cutoff_ms:
-            range_h = min(max((per_page * 60) // 3600 + 2, 1), INFLUX_1M_RETENTION_DAYS * 24)
-            batch = query_influx_candles(symbol, "1m", per_page, range_h, cursor)
+        # Try InfluxDB first for any cursor (including old timestamps).
+        # Influx can store arbitrary historic timestamps; we always query it.
+        # Compute a reasonable hour range based on per_page (same logic as
+        # the recent‑data branch) so the Flux query has a bounded window.
+        range_h = min(max((per_page * 60) // 3600 + 2, 1), INFLUX_1M_RETENTION_DAYS * 24)
+        batch = query_influx_candles(symbol, "1m", per_page, range_h, cursor)
         if not batch and allow_trino:
+            # Fallback to Trino if Influx returns nothing (e.g., bucket empty).
             batch = query_trino_1m(symbol, cursor, per_page)
+
         if not batch:
             break
 
@@ -449,3 +456,63 @@ def collect_base_1m_candles(
             break
 
     return candles
+
+
+async def get_candles_for_ai(
+    symbol: str,
+    exchange: str = "binance",
+    interval: str = "1h",
+    count: int = 50,
+) -> list[dict]:
+    """Fetch candles for AI analysis context.
+
+    Reads from Redis (latest) for hot data, then InfluxDB for older data.
+    Returns a list of candle dicts sorted by time ascending, limited to ``count``.
+
+    Used by the technical_analysis expert to retrieve candle data for
+    pattern detection, S/R calculation, and trend analysis.
+    """
+    target_sec = interval_to_seconds(interval)
+    end_ms = int(time.time() * 1000)
+
+    # Try Redis first for latest candles
+    candles: list[dict] = []
+    try:
+        from backend.core.redis_sentinel import get_redis_client
+        r = await get_redis_client()
+        # Redis key pattern: kline:{exchange}:{symbol}:{interval}
+        raw = r.zrevrange(f"kline:{exchange}:{symbol}:{interval}", 0, count - 1)
+        for item in raw:
+            try:
+                candles.append(json.loads(item))
+            except (json.JSONDecodeError, TypeError):
+                pass
+        candles.sort(key=lambda c: c.get("openTime", 0))
+    except Exception:
+        pass
+
+    # If Redis has enough, return
+    if len(candles) >= count:
+        return candles[-count:]
+
+    # Fall back to InfluxDB for historical data
+    try:
+        from backend.core.influx_client import get_influx_client
+        influx = get_influx_client()
+        influx_candles = query_influx_candles(
+            symbol, interval, exchange,
+            end_ms - target_sec * 1000 * count * 2,  # generous lookback
+            end_ms,
+            limit=count,
+        )
+        # Merge, deduplicate by openTime
+        seen = {c.get("openTime") for c in candles}
+        for c in influx_candles:
+            if c.get("openTime") not in seen:
+                candles.append(c)
+                seen.add(c.get("openTime"))
+        candles.sort(key=lambda c: c.get("openTime", 0))
+    except Exception:
+        pass
+
+    return candles[-count:]

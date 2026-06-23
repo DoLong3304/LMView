@@ -36,6 +36,7 @@ from backend.services.admin_bootstrap_service import ensure_default_admin
 from backend.tasks.news_fetcher import news_fetcher
 from backend.tasks.market_fetcher import market_fetcher, binance_price_poller
 from backend.services.sentiment_service import batch_score_unscored_articles
+from ai_service.nlp.news_feed import news_feed_loop
 
 from common.logging import setup_logging_from_env
 import logging
@@ -78,6 +79,15 @@ async def lifespan(app: FastAPI):
     # AI embedding model is preloaded by the standalone ai-service container.
     # Backend is now a thin gateway — see AI_SERVICE_EMBEDDED in .env.
 
+    # Start RAG auto-ingest on startup if AI is enabled
+    if os.environ.get("AI_ENABLE_RAG", "false").lower() in ("1", "true", "yes"):
+        try:
+            from ai_service.rag.auto_ingest import ingest_all_approved
+            result = await ingest_all_approved()
+            logger.info("RAG auto-ingest startup: %s", result)
+        except Exception as exc:
+            logger.warning("RAG auto-ingest failed on startup: %s", exc)
+
     # Start background tasks
     await news_fetcher.start()
     await market_fetcher.start()
@@ -88,12 +98,20 @@ async def lifespan(app: FastAPI):
     # await binance_price_poller.start()
     sentiment_task = asyncio.create_task(sentiment_score_loop())
 
+    # Batch 8: Start RSS news feed ingestion
+    news_feed_task = asyncio.create_task(news_feed_loop())
+
     yield
 
     # Stop background tasks
     sentiment_task.cancel()
     try:
         await sentiment_task
+    except asyncio.CancelledError:
+        pass
+    news_feed_task.cancel()
+    try:
+        await news_feed_task
     except asyncio.CancelledError:
         pass
     await news_fetcher.stop()

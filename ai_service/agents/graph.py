@@ -17,6 +17,30 @@ from ai_service.agents.types import ExpertName, ExpertOutput, Timer
 
 logger = logging.getLogger("ai_service.agents.graph")
 
+# Agent observability: node execution counter and latency histogram
+# Incremented/observed by _track_node_execution below.
+_NODE_COUNTERS = {"scope_gate": 0, "intent_router": 0, "expert_execution": 0, "synthesis": 0, "reflection": 0}
+_NODE_LATENCIES: dict = {}
+
+
+def get_node_stats() -> dict:
+    """Return aggregate runtime stats for agent nodes."""
+    return {
+        "node_counts": dict(_NODE_COUNTERS),
+        "node_latencies": {k: round(sum(v) / len(v), 2) if v else 0.0 for k, v in _NODE_LATENCIES.items()},
+    }
+
+
+def _track_node_execution(node_name: str, elapsed_ms: float) -> None:
+    """Record node execution for observability."""
+    _NODE_COUNTERS[node_name] = _NODE_COUNTERS.get(node_name, 0) + 1
+    if node_name not in _NODE_LATENCIES:
+        _NODE_LATENCIES[node_name] = []
+    _NODE_LATENCIES[node_name].append(elapsed_ms)
+    # Keep last 100 samples to bound memory
+    if len(_NODE_LATENCIES[node_name]) > 100:
+        _NODE_LATENCIES[node_name] = _NODE_LATENCIES[node_name][-100:]
+
 # ── Expert registry ───────────────────────────────────────────────────────────
 
 _EXPERT_INSTANCES: Dict[str, Any] = {}
@@ -51,6 +75,7 @@ def _get_expert(name: str) -> Any:
 async def scope_gate_node(state: AgentState) -> AgentState:
     """Run scope gate classification."""
     timer = Timer().start()
+    _track_node_execution("scope_gate", 0)  # will update with final timing
     from ai_service.safety.scope_gate import check_scope
 
     user_query = state.get("user_query", "")
@@ -60,8 +85,10 @@ async def scope_gate_node(state: AgentState) -> AgentState:
     from ai_service.context.context_service import assemble_data_caveats
     data_caveats = assemble_data_caveats(state.get("chart_context"))
 
+    elapsed_ms = timer.elapsed_ms()
     timing = dict(state.get("timing", {}))
-    timing["scope_gate"] = timer.elapsed_ms()
+    timing["scope_gate"] = elapsed_ms
+    _track_node_execution("scope_gate", elapsed_ms)
 
     if not scope_result.in_scope:
         return {
@@ -97,6 +124,7 @@ async def expert_execution_node(state: AgentState) -> AgentState:
     via asyncio.gather().
     """
     timer = Timer().start()
+    _track_node_execution("expert_execution", 0)
     activated = state.get("activated_experts", [])
 
     if not activated:
@@ -151,12 +179,18 @@ async def expert_execution_node(state: AgentState) -> AgentState:
         # Collect warnings
         warnings.extend(output.warnings)
 
+    elapsed_expert = timer.elapsed_ms()
     timing = dict(state.get("timing", {}))
-    timing["expert_execution"] = timer.elapsed_ms()
+    timing["expert_execution"] = elapsed_expert
+    _track_node_execution("expert_execution", elapsed_expert)
 
     # Calculate aggregate confidence
     confidences = [o.confidence for o in expert_outputs.values() if not o.error]
     avg_confidence = sum(confidences) / len(confidences) if confidences else 0.3
+
+    # Run ensemble voting for cross-validation
+    from ai_service.agents.ensemble import ensemble_vote
+    ensemble_result = await ensemble_vote(expert_outputs)
 
     return {
         "expert_outputs": expert_outputs,
@@ -166,7 +200,10 @@ async def expert_execution_node(state: AgentState) -> AgentState:
         "market_data": market_data,
         "indicator_data": indicator_data,
         "warnings": warnings,
-        "confidence": avg_confidence,
+        "confidence": ensemble_result["aggregate_confidence"],
+        "cross_validated_signals": ensemble_result["cross_validated_signals"],
+        "conflicting_signals": ensemble_result["conflicting_signals"],
+        "dominant_expert": ensemble_result["dominant_expert"],
         "timing": timing,
     }
 
@@ -261,3 +298,5 @@ def reset_graph() -> None:
     global _compiled_graph
     _compiled_graph = None
     _EXPERT_INSTANCES.clear()
+    _NODE_COUNTERS.clear()
+    _NODE_LATENCIES.clear()

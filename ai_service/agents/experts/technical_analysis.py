@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 from ai_service.agents.base_expert import BaseExpert
 from ai_service.agents.state import AgentState
 from ai_service.agents.types import ExpertOutput
+from ai_service.context.pattern_detector import detect_patterns, detect_trend
+from ai_service.context.support_resistance import calculate_support_resistance, summarize_levels
 
 logger = logging.getLogger("ai_service.agents.experts.technical_analysis")
 
@@ -30,6 +32,7 @@ class TechnicalAnalysisExpert(BaseExpert):
         """Gather and interpret technical indicator data."""
         chart_context = state.get("chart_context")
         symbol = state.get("symbol", "unknown")
+        exchange = state.get("exchange", "binance")
         timeframe = state.get("timeframe", "unknown")
         indicator_data = state.get("indicator_data")
 
@@ -58,7 +61,6 @@ class TechnicalAnalysisExpert(BaseExpert):
         if not indicators and symbol and symbol != "unknown":
             try:
                 from backend.services.indicator_service import get_indicator_snapshot
-                exchange = state.get("exchange", "binance")
                 interval = timeframe if timeframe and timeframe != "unknown" else "1m"
                 snapshot = await get_indicator_snapshot(
                     symbol=symbol,
@@ -180,6 +182,37 @@ class TechnicalAnalysisExpert(BaseExpert):
             except (ValueError, TypeError):
                 pass
 
+        # ── Candle pattern detection ──
+        candles_data = None
+        if chart_context:
+            candles_data = chart_context.get("recent_candles")
+        if not candles_data and symbol != "unknown":
+            try:
+                from backend.services.candle_service import get_candles_for_ai
+                raw_candles = await get_candles_for_ai(symbol, exchange=exchange or "binance", interval=timeframe, count=50)
+                if raw_candles:
+                    candles_data = raw_candles
+            except Exception as exc:
+                logger.warning("Failed to fetch candles for AI: %s", exc)
+
+        if candles_data:
+            patterns = detect_patterns(candles_data)
+            if patterns:
+                structured["patterns"] = patterns
+                for p in patterns:
+                    signals.append({"indicator": f"pattern:{p['name']}", "signal": p.get("direction", "neutral"), "bias": p.get("direction")})
+                    analysis_parts.append(f"Candlestick pattern detected: {p['description']}")
+            trend_info = detect_trend(candles_data)
+            structured["trend_info"] = trend_info
+            if trend_info["direction"] != "neutral":
+                analysis_parts.append(f"Short-term trend: {trend_info['direction']} (strength: {trend_info.get('strength', 0):.2f})")
+
+            # Support / resistance
+            sr = calculate_support_resistance(candles_data)
+            structured["support_resistance"] = sr
+            sr_summary = summarize_levels(sr)
+            analysis_parts.append(f"Support/Resistance: {sr_summary}")
+
         # VWAP
         vwap = indicators.get("vwap")
         if vwap is not None and latest_close is not None:
@@ -228,9 +261,16 @@ def _extract_indicators(chart_context: Dict[str, Any]) -> Dict[str, Any]:
     if iv and isinstance(iv, dict):
         indicators.update(iv)
     elif iv and isinstance(iv, list):
+        # Batch 4 format: list of {name, value, signal, params}
         for item in iv:
             if isinstance(item, dict):
-                indicators.update(item)
+                name = item.get("name")
+                val = item.get("value")
+                if name and val is not None:
+                    indicators[name] = val
+                    sig = item.get("signal")
+                    if sig:
+                        indicators[f"{name}_signal"] = sig
     # Latest candle has some derived values
     candle = chart_context.get("latest_candle")
     if candle and isinstance(candle, dict):

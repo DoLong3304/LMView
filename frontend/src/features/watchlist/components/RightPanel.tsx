@@ -13,6 +13,7 @@ import { useI18n } from "@/i18n";
 import { useToast } from "@/components/ui/ToastProvider";
 import { useAuth } from "@/features/auth/AuthContext";
 import { useSymbolMeta } from "@/hooks/useSymbolMeta";
+import { getLivePrice } from "@/services/marketDataService";
 import { DEFAULT_SYMBOL_ICON } from "@/services/symbolMetaService";
 import OrderBook from "@/features/market/components/OrderBook";
 import RecentTrades from "@/features/market/components/RecentTrades";
@@ -51,6 +52,11 @@ interface RightPanelProps {
   width?: number;
   candles?: Candle[];
   timeframe?: string;
+  /** Indicator settings mirrored from the chart — forwarded to the AI
+   *  panel so it can populate ``indicator_values`` in the chart context. */
+  indSettings?: Record<string, import("@/types").IndicatorSettings>;
+  /** Names of currently visible indicators — forwarded to the AI panel. */
+  selectedIndicators?: string[];
   onOpenSettings?: (tab?: SettingsTab) => void;
   activeTopTab: RightPanelTopTab;
   activeTab: RightPanelTab;
@@ -67,6 +73,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
   width = 360,
   candles = [],
   timeframe = "1m",
+  indSettings,
+  selectedIndicators = [],
   onOpenSettings,
   activeTopTab,
   activeTab,
@@ -120,7 +128,12 @@ const RightPanel: React.FC<RightPanelProps> = ({
   }, [items, selectedSymbol]);
 
   const meta = getMeta(selectedSymbol);
-  const isUp = (selectedItem?.change ?? 0) >= 0;
+  // Prefer live WS price/change over static watchlist item so the right
+  // panel updates in real-time even when REST /api/ticker is slow/empty.
+  const liveSelected = getLivePrice(selectedSymbol);
+  const liveSelectedPrice = liveSelected?.price ?? selectedItem?.price ?? 0;
+  const liveSelectedChange = liveSelected?.change24h ?? selectedItem?.change ?? 0;
+  const isUp = liveSelectedChange >= 0;
 
   const formatPrice = (p: number) => {
     if (p >= 1000) return p.toLocaleString(undefined, { maximumFractionDigits: 2 });
@@ -211,6 +224,8 @@ const RightPanel: React.FC<RightPanelProps> = ({
             selectedSymbol={selectedSymbol}
             timeframe={timeframe}
             candles={candles}
+            indSettings={indSettings}
+            selectedIndicators={selectedIndicators}
             onOpenSettings={() => onOpenSettings?.("aiHelper")}
           />
         )}
@@ -240,7 +255,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
           <div className={`flex items-center gap-1 ${isUp ? "text-green-400" : "text-red-400"}`}>
             {isUp ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
             <span className="text-xs font-medium">
-              {isUp ? "+" : ""}{(selectedItem?.change ?? 0).toFixed(2)}%
+              {isUp ? "+" : ""}{liveSelectedChange.toFixed(2)}%
             </span>
           </div>
         </div>
@@ -248,7 +263,7 @@ const RightPanel: React.FC<RightPanelProps> = ({
         {/* Price */}
         <div className="flex items-baseline gap-2">
           <span className={`text-lg font-bold font-mono ${isUp ? "text-green-400" : "text-red-400"}`}>
-            ${formatPrice(selectedItem?.price ?? 0)}
+            ${formatPrice(liveSelectedPrice)}
           </span>
         </div>
       </div>

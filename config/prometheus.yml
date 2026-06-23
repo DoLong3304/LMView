@@ -88,19 +88,20 @@ scrape_configs:
       - targets: ['node-exporter:9100']
     scrape_interval: 30s
 
-  # Prometheus self-monitoring
+  # Prometheus self-monitoring (metrics at /prometheus/metrics due to --web.route-prefix)
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
+    metrics_path: '/prometheus/metrics'
     scrape_interval: 30s
 
-  # ─── MinIO: native Prometheus endpoint (auth: MINIO_PROMETHEUS_AUTH_TYPE=public)
+  ─── MinIO: native Prometheus endpoint (auth: MINIO_PROMETHEUS_AUTH_TYPE=public)
   - job_name: 'minio'
     static_configs:
       - targets: ['minio:9000']
     metrics_path: '/minio/v2/metrics/cluster'
     scrape_interval: 30s
-
+#
   # ─── Trino: JMX Prometheus Java Agent (port 9404)
   - job_name: 'trino'
     static_configs:

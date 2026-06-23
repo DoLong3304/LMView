@@ -60,6 +60,23 @@ class LLMMessage(BaseModel):
     name: Optional[str] = None
 
 
+class LLMToolCall(BaseModel):
+    """A tool call proposed by the LLM."""
+    id: Optional[str] = None
+    type: str = "function"
+    function: Dict[str, Any] = Field(default_factory=dict)
+
+class LLMToolFunction(BaseModel):
+    """OpenAI-compatible tool definition."""
+    name: str
+    description: str = ""
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+class LLMTool(BaseModel):
+    """OpenAI-compatible tool spec."""
+    type: str = "function"
+    function: LLMToolFunction
+
 class LLMCompletionRequest(BaseModel):
     """Request to generate a chat completion via any provider."""
     messages: List[LLMMessage]
@@ -69,6 +86,8 @@ class LLMCompletionRequest(BaseModel):
     top_p: float = 0.95
     stop: Optional[List[str]] = None
     response_format: Optional[Dict[str, Any]] = None
+    tools: Optional[List[LLMTool]] = None
+    tool_choice: Optional[str] = None  # "auto", "none", "required"
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -82,4 +101,5 @@ class LLMCompletionResponse(BaseModel):
     token_input: Optional[int] = None
     token_output: Optional[int] = None
     latency_ms: Optional[int] = None
+    tool_calls: Optional[List[Dict[str, Any]]] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)

@@ -111,6 +111,12 @@ interface CandlestickChartProps {
   isReplayActive?: boolean;
   /** Freeze live updates (used by Interact mode tours) */
   frozen?: boolean;
+  /** Indicator settings snapshot — shared with the AI panel so it can
+   *  build the ``indicator_values`` array in the chart context. */
+  onIndicatorSettingsChange?: (settings: Record<string, IndicatorSettings>) => void;
+  /** List of currently visible indicator names — shared with the AI panel
+   *  for ``selected_indicators``. */
+  onSelectedIndicatorsChange?: (indicators: string[]) => void;
 }
 
 interface TooltipData {
@@ -142,9 +148,15 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   onAiActionControllerReady,
   isReplayActive = false,
   frozen = false,
+  onIndicatorSettingsChange,
+  onSelectedIndicatorsChange,
 }) => {
   const { t } = useI18n();
   const [eventFrozen, setEventFrozen] = useState(false);
+  const frozenRef = useRef<boolean>(false);
+  const eventFrozenRef = useRef<boolean>(false);
+  useEffect(() => { frozenRef.current = frozen; }, [frozen]);
+  useEffect(() => { eventFrozenRef.current = eventFrozen; }, [eventFrozen]);
   const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartStageRef = useRef<HTMLDivElement>(null);
@@ -196,6 +208,21 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const [candles, setCandles] = useState<Candle[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [indicatorStatus, setIndicatorStatus] = useState<IndicatorPanelStatus>({});
+
+  // Surface indicator settings + selected indicator list to the parent so
+  // the AI panel can build ``indicator_values`` and ``selected_indicators``
+  // for the chart context payload.
+  useEffect(() => {
+    onIndicatorSettingsChange?.(indSettings);
+  }, [indSettings, onIndicatorSettingsChange]);
+
+  useEffect(() => {
+    if (!onSelectedIndicatorsChange) return;
+    const visible = Object.entries(indSettings)
+      .filter(([, cfg]) => cfg?.visible && cfg?.type)
+      .map(([key]) => key);
+    onSelectedIndicatorsChange(visible);
+  }, [indSettings, onSelectedIndicatorsChange]);
 
   useEffect(() => {
     if (!onAiActionControllerReady) return;
@@ -1303,9 +1330,11 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       }
     };
 
-    // ⚠️ CRITICAL: Block WebSocket subscription when frozen or in replay mode
-    // to prevent live fetches or WebSocket updates from interfering with playback.
-    if (isReplayActive || frozen) {
+    // ⚠️ CRITICAL: Block WebSocket subscription when frozen (prop or
+    // event) or in replay mode so live updates don't interfere with
+    // an in-flight guided analysis. The event-driven `eventFrozen`
+    // is what Interact mode toggles via `lmview:chart-freeze`.
+    if (isReplayActive || frozen || eventFrozenRef.current) {
       return () => {
         cancelled = true;
       };
@@ -1456,6 +1485,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     // (CoinSummary price + change%) refreshes even if WS onTicker is idle.
     const pollId = window.setInterval(async () => {
       if (cancelled || !candleRef.current) return;
+      // Don't hammer the backend while the chart is frozen for a tour.
+      if (frozenRef.current || eventFrozenRef.current) return;
       try {
         const ticker = await fetchTicker(symbol);
         if (!ticker || !ticker.price || cancelled) return;
@@ -1575,9 +1606,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     frozen, // ⚠️ Re-run when frozen/replay mode changes to block/unblock WebSocket
   ]);
 
-  // ⚠️ CRITICAL: Cleanup WebSocket immediately when entering replay/frozen mode
+  // ⚠️ CRITICAL: Cleanup WebSocket immediately when entering replay/frozen
+  // mode. The effect depends on `eventFrozen` too so the `chart-freeze`
+  // custom event (fired by Interact mode tours) actually tears down
+  // the live WebSocket + poll, not just the prop.
   useEffect(() => {
-    if (isReplayActive || frozen) {
+    if (isReplayActive || frozen || eventFrozen) {
       // Unsubscribe WebSocket
       if (unsubscribeRef.current) {
         unsubscribeRef.current();

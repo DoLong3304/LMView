@@ -80,6 +80,7 @@ export interface TourExecutionState {
 export interface AiChatState {
   sessionId: string | null;
   messages: AiMessage[];
+  setMessages: React.Dispatch<React.SetStateAction<AiMessage[]>>;
   loading: boolean;
   error: string | null;
   /** Active tour execution, if any */

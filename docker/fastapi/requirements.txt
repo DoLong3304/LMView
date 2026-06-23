@@ -3,7 +3,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # After the v0.25.57 AI overhaul, the backend only acts as a thin gateway
 # that proxies AI requests to the standalone ``ai-service``. The heavy ML
-# / AI libraries (litellm, sentence-transformers, langgraph, dashscope)
+# / AI libraries — needed for AI_SERVICE_EMBEDDED=true mode
+# When running AI in-process (embedded), the backend needs these libs.
+# In proxy mode (default), only the ai-service image needs them.
+litellm>=1.52.0
+langgraph>=1.2.0
+langchain-core>=1.0.0
 # live in ``requirements-ai.txt`` and are installed ONLY in the ai-service
 # image. By default (``AI_SERVICE_EMBEDDED=false``) the backend never
 # touches them at runtime, so we keep the gateway image small and fast.

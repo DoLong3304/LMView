@@ -109,3 +109,6 @@ class AIMessageResponse(BaseModel):
     latency_ms: Optional[int] = None
     created_at: Optional[datetime] = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Surfaced from metadata so a reloaded Interact-mode session can
+    # show the Replay button without needing a new LLM call.
+    tour_plan: Optional[TourPlan] = None

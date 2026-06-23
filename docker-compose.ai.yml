@@ -24,6 +24,7 @@ services:
       - AI_MODE=${AI_MODE:-api}
       - AI_CONFIG_PATH=${AI_CONFIG_PATH:-/app/ai_service/configs/ai.api.yaml}
       - AI_ORCHESTRATION=${AI_ORCHESTRATION:-langgraph}
+      - AI_CONFIG_PATH=${AI_CONFIG_PATH:-/app/ai_service/configs/ai.api.yaml}
       - AI_ENABLE_REAL_LLM=${AI_ENABLE_REAL_LLM:-true}
       - AI_SERVICE_EMBEDDED=false
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
@@ -42,6 +43,8 @@ services:
       - INFLUX_BUCKET=${INFLUX_BUCKET}
       - LITELLM_BASE_URL=http://litellm:4000
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-}
+      - AI_ENABLE_RAG=${AI_ENABLE_RAG:-true}
+      - AI_RERANKER_MODEL=${AI_RERANKER_MODEL:-ms-marco-MiniLM-L-6-v2}
     ports:
       - target: 8100
         published: 8100

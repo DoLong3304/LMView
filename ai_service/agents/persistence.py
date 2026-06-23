@@ -21,7 +21,7 @@ async def store_execution(state: AgentState) -> Optional[str]:
     """
     try:
         from backend.core.postgres import get_pg_pool
-        pool = get_pg_pool()
+        pool = await get_pg_pool()
         if not pool:
             logger.warning("PostgreSQL pool not available for agent execution storage.")
             return None

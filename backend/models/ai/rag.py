@@ -44,6 +44,12 @@ class RAGRetrievalRequest(BaseModel):
     source_type: Optional[str] = None
     credibility_level: Optional[str] = None
     review_status: str = "approved"
+    # Batch 6: symbol/exchange/timeframe metadata filtering
+    symbol: Optional[str] = None
+    exchange: Optional[str] = None
+    timeframe: Optional[str] = None
+    # Batch 6: enable hybrid keyword+vector search
+    use_hybrid_search: bool = False
 
 
 class RAGRetrievalResponse(BaseModel):

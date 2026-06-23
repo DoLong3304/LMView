@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Move, Play, RotateCcw, X } from "lucide-react";
+import { Move, Play, X } from "lucide-react";
 import { INDICATORS } from "@/features/chart/IndicatorPanel";
 import { TOOL_GROUPS } from "@/features/drawing/components/DrawingToolbar";
 import { useI18n } from "@/i18n";
@@ -69,16 +69,6 @@ interface AiActionRuntime {
   chartController?: AiChartActionController | null;
 }
 
-interface TourSnapshot {
-  timeframe?: TimeframeKey;
-  selectedSymbol?: string;
-  chartType?: ChartType;
-  currentView?: AppView;
-  rightPanelOpen?: boolean;
-  rightPanelTopTab?: RightPanelTopTab;
-  rightPanelTab?: RightPanelTab;
-}
-
 interface UiSnapshot {
   currentView?: AppView;
   rightPanelOpen?: boolean;
@@ -101,22 +91,13 @@ interface HighlightState {
   region?: ChartRegion;
 }
 
-interface TourStep {
-  target: string;
-  label: string;
-  message: string;
-  includeChat?: boolean;
-  region?: ChartRegion;
-  action?: AiActionCall;
-  pauseForUser?: boolean;
-  task?: "change_timeframe";
-}
-
 interface AiActionContextValue {
   definitions: AiActionDefinition[];
   executeAction: (call: AiActionCall) => Promise<{ ok: boolean; detail: string }>;
   openDebugWindow: () => void;
   setRuntime: (runtime: Partial<AiActionRuntime>) => void;
+  actionLog: Array<{ call: AiActionCall; at: number; detail: string }>;
+  clearActionLog: () => void;
 }
 
 const AiActionContext = createContext<AiActionContextValue | null>(null);
@@ -155,25 +136,6 @@ function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, value));
 }
 
-function parseDrawingDataPoints(points: unknown[]): Drawing["dataPoints"] | null {
-  const parsed = points.map((point) => {
-    if (!point || typeof point !== "object") return null;
-    const candidate = point as Record<string, unknown>;
-    const time = Number(candidate.time);
-    const price = Number(candidate.price);
-    if (!Number.isFinite(time) || !Number.isFinite(price)) return null;
-    return { time, price };
-  });
-  if (parsed.some((point) => point === null)) return null;
-  return parsed as Drawing["dataPoints"];
-}
-
-function panelTargetToSection(target: PanelTarget): string {
-  if (target === "ai") return "ai";
-  if (target === "overview") return "rightPanelOverview";
-  return target;
-}
-
 function openPanelTarget(runtime: AiActionRuntime, target: PanelTarget): void {
   runtime.setView?.("charts");
   runtime.setRightPanelOpen?.(true);
@@ -195,8 +157,10 @@ function openPanelTarget(runtime: AiActionRuntime, target: PanelTarget): void {
 
 function switchAppView(runtime: AiActionRuntime, view: AppView): void {
   runtime.setView?.(view);
-  if (view === "charts") return;
-  runtime.setRightPanelOpen?.(false);
+  // NB: do NOT auto-close the right panel here. The AI Helper lives
+  // inside the right panel, so closing it mid-tour would hide the
+  // overlay itself. The user (or the next step) can open/close the
+  // panel explicitly if needed.
 }
 
 function actionDefinitions(): AiActionDefinition[] {
@@ -307,12 +271,50 @@ function actionDefinitions(): AiActionDefinition[] {
       },
     },
     {
-      name: "set_market",
-      description: "Switch selected market symbol.",
+      name: "set_symbol",
+      description: "Switch selected market symbol (e.g. BTCUSDT, ETHUSDT).",
       parameters: {
         type: "object",
         properties: { symbol: { type: "string", default: "BTCUSDT" } },
         required: ["symbol"],
+      },
+    },
+    {
+      name: "configure_indicator",
+      description: "Update indicator parameters (period, colors, etc.).",
+      parameters: {
+        type: "object",
+        properties: {
+          indicator: { type: "string", enum: indicators },
+          settings: { type: "object", description: "Indicator settings to override (e.g. { period: 14, color: '#f00' })." },
+        },
+        required: ["indicator", "settings"],
+      },
+    },
+    {
+      name: "clear_drawings",
+      description: "Remove all AI-placed drawings from the chart.",
+      parameters: { type: "object", properties: {} },
+    },
+    {
+      name: "delete_drawing",
+      description: "Delete a specific drawing by id.",
+      parameters: {
+        type: "object",
+        properties: { drawing_id: { type: "string" } },
+        required: ["drawing_id"],
+      },
+    },
+    {
+      name: "set_drawing_color",
+      description: "Recolor an existing drawing.",
+      parameters: {
+        type: "object",
+        properties: {
+          drawing_id: { type: "string" },
+          color: { type: "string", description: "CSS color (hex, rgb, etc.)" },
+        },
+        required: ["drawing_id", "color"],
       },
     },
     {
@@ -410,8 +412,48 @@ function actionDefinitions(): AiActionDefinition[] {
       },
     },
     {
+      name: "open_settings",
+      description: "Open the settings modal.",
+      parameters: { type: "object", properties: {} },
+    },
+    {
+      name: "close_settings",
+      description: "Close the settings modal.",
+      parameters: { type: "object", properties: {} },
+    },
+    {
+      name: "reset_chart_view",
+      description: "Reset chart zoom + scroll to default (latest live candles).",
+      parameters: { type: "object", properties: {} },
+    },
+    {
+      name: "export_chart",
+      description: "Export current chart as image or CSV.",
+      parameters: {
+        type: "object",
+        properties: {
+          format: { type: "string", enum: ["png", "svg", "csv"], default: "png" },
+          filename: { type: "string" },
+        },
+      },
+    },
+    {
+      name: "scroll_chart_to_time",
+      description: "Scroll chart to a specific timestamp (unix seconds or ms).",
+      parameters: {
+        type: "object",
+        properties: { time: { type: "integer" } },
+        required: ["time"],
+      },
+    },
+    {
+      name: "end_tour",
+      description: "End the currently active tour.",
+      parameters: { type: "object", properties: {} },
+    },
+    {
       name: "start_tour",
-      description: "Start a user-paced LMView tour.",
+      description: "Start a user-paced LMView tour. Most use cases use the dynamic Interact-mode tour planner; this is kept for the static overview tour.",
       parameters: {
         type: "object",
         properties: {
@@ -434,17 +476,12 @@ function actionDefinitions(): AiActionDefinition[] {
 }
 
 export function AiActionProvider({ children }: { children: React.ReactNode }) {
-  const { t } = useI18n();
   const definitions = useMemo(actionDefinitions, []);
   const runtimeRef = useRef<AiActionRuntime>({});
   const [debugOpen, setDebugOpen] = useState(false);
   const [highlight, setHighlight] = useState<HighlightState | null>(null);
-  const [tourIndex, setTourIndex] = useState<number | null>(null);
-  const [tourDone, setTourDone] = useState(false);
-  const [tourBaseline, setTourBaseline] = useState<{ timeframe?: TimeframeKey } | null>(null);
   const [actionLog, setActionLog] = useState<Array<{ call: AiActionCall; at: number; detail: string }>>([]);
   const actionLogRef = useRef<Array<{ call: AiActionCall; at: number; detail: string }>>([]);
-  const tourSnapshotRef = useRef<TourSnapshot | null>(null);
   const uiSnapshotRef = useRef<UiSnapshot | null>(null);
   const [restoreAvailable, setRestoreAvailable] = useState(false);
 
@@ -467,7 +504,9 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
       rightPanelTopTab: runtime.rightPanelTopTab,
       rightPanelTab: runtime.rightPanelTab,
     };
-    setRestoreAvailable(true);
+    // NB: do NOT setRestoreAvailable(true) here. The banner is only
+    // useful AFTER a tour finishes so the user can decide whether to
+    // revert; flashing it during every step is noise.
   }, []);
 
   const restoreUiState = useCallback(() => {
@@ -520,293 +559,101 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
       return { ok, detail };
     };
 
-    // Try handler registry first (Batch 10 modular handlers)
+    // Build a dispatch context for the modular handlers. Handlers do the
+    // real work; this function just routes + records.
     const handler = getActionHandler(call.name);
-    if (handler) {
-      const detail = await handler(call, (msg) => setHighlight({ target: "debug", message: msg }));
-      return done(true, detail);
+    if (!handler) {
+      return done(false, `unsupported action: ${call.name}`);
     }
-
-    // Fallback to inline handlers for LMView-specific UI actions
-    switch (call.name) {
-      case "add_indicator":
-        runtime.chartController?.setIndicatorVisible(String(args.indicator), true);
-        return done(true, `Added indicator ${String(args.indicator)}`);
-      case "remove_indicator":
-        runtime.chartController?.setIndicatorVisible(String(args.indicator), false);
-        return done(true, `Removed indicator ${String(args.indicator)}`);
-      case "toggle_indicator":
-        runtime.chartController?.toggleIndicator(String(args.indicator));
-        return done(true, `Toggled indicator ${String(args.indicator)}`);
-      case "draw_tool": {
-        const tool = String(args.tool || "cursor");
-        runtime.setDrawingTool?.(tool);
-        const points = Array.isArray(args.points) ? args.points : [];
-        if (points.length && runtime.addDrawing) {
-          const dataPoints = parseDrawingDataPoints(points);
-          if (!dataPoints) {
-            return done(false, 'Drawing points must be [{"time": unixSeconds, "price": value}].');
-          }
-          runtime.addDrawing({
-            id: `ai-${Date.now()}`,
-            tool,
-            dataPoints,
-            text: typeof args.text === "string" ? args.text : undefined,
-            settings: { color: "#38bdf8", lineWidth: 2 },
-          });
-          runtime.setDrawingTool?.("cursor");
-          return done(true, `Placed ${tool} drawing`);
-        }
-        return done(true, `Selected drawing tool ${tool}`);
-      }
-      case "highlight_section":
-        showSection(String(args.target || "chart"));
-        setHighlight({
-          target: String(args.target || "chart"),
-          label: typeof args.label === "string" ? args.label : undefined,
-          message: typeof args.message === "string" ? args.message : undefined,
-          includeChat: args.include_chat === true || String(args.target || "") === "ai",
-        });
-        return done(true, `Highlighted ${String(args.target || "chart")}`);
-      case "highlight_chart_area": {
-        showSection("chart");
-        setHighlight({
-          target: "chartCanvas",
-          label: typeof args.label === "string" ? args.label : "Chart area",
-          message: typeof args.message === "string" ? args.message : undefined,
-          region: {
-            leftPct: clampPercent(Number(args.left_pct ?? 20)),
-            topPct: clampPercent(Number(args.top_pct ?? 20)),
-            widthPct: clampPercent(Number(args.width_pct ?? 40)),
-            heightPct: clampPercent(Number(args.height_pct ?? 30)),
-          },
-        });
-        return done(true, "Highlighted chart area");
-      }
-      case "highlight_candles": {
-        showSection("chart");
-        const region = runtime.chartController?.rangeToChartRegion(args) || {
-          leftPct: 25,
-          topPct: 18,
-          widthPct: 35,
-          heightPct: 58,
-        };
-        setHighlight({
-          target: "chartCanvas",
-          label: typeof args.label === "string" ? args.label : "Candles",
-          message: typeof args.message === "string" ? args.message : undefined,
-          region,
-        });
-        return done(true, "Highlighted candle range");
-      }
-      case "set_chart_type": {
-        const chartType = String(args.chart_type || "candles") as ChartType;
-        runtime.setChartType?.(chartType);
-        showSection("chartToolbar");
-        return done(true, `Changed chart type to ${chartType}`);
-      }
-      case "set_timeframe": {
-        const timeframe = String(args.timeframe || "1h") as TimeframeKey;
-        runtime.setTimeframe?.(timeframe);
-        showSection("chartToolbar");
-        return done(true, `Changed timeframe to ${timeframe}`);
-      }
-      case "set_market": {
-        const symbol = String(args.symbol || "BTCUSDT").toUpperCase();
-        runtime.setSymbol?.(symbol);
-        showSection("chartToolbar");
-        return done(true, `Changed market to ${symbol}`);
-      }
-      case "open_panel": {
-        const target = PANEL_TARGETS.includes(String(args.target) as PanelTarget)
-          ? String(args.target) as PanelTarget
-          : "overview";
-        captureUiSnapshot();
-        openPanelTarget(runtime, target);
-        if (args.highlight !== false) {
-          setHighlight({
-            target: panelTargetToSection(target),
-            label: typeof args.label === "string" ? args.label : undefined,
-            message: typeof args.message === "string" ? args.message : undefined,
-            includeChat: target === "ai",
-          });
-        }
-        return done(true, `Opened ${target} panel`);
-      }
-      case "close_panel": {
-        captureUiSnapshot();
-        runtime.setRightPanelOpen?.(false);
-        return done(true, "Closed right panel");
-      }
-      case "switch_panel_tab": {
-        const tab = String(args.tab || "watchlist") as RightPanelTab;
-        if (!["watchlist", "orderBook", "recentTrades"].includes(tab)) {
-          return done(false, `Unsupported right-panel tab: ${String(args.tab)}`);
-        }
-        captureUiSnapshot();
-        openPanelTarget(runtime, tab);
-        if (args.highlight !== false) {
-          setHighlight({ target: panelTargetToSection(tab), label: tab });
-        }
-        return done(true, `Switched right panel to ${tab}`);
-      }
-      case "switch_app_view": {
-        const view = String(args.view || "charts") as AppView;
-        if (!APP_VIEWS.includes(view)) {
-          return done(false, `Unsupported app view: ${String(args.view)}`);
-        }
-        captureUiSnapshot();
-        switchAppView(runtime, view);
-        if (args.highlight !== false) {
-          setHighlight({
-            target: view === "marketsNews" ? "marketsNews" : view === "screener" ? "screener" : "chart",
-            label: view,
-          });
-        }
-        return done(true, `Switched app view to ${view}`);
-      }
-      case "view_section": {
-        const target = String(args.target || "chart");
-        showSection(target);
-        setHighlight({ target, label: target });
-        return done(true, `Opened ${target}`);
-      }
-      case "restore_ui_state":
-        restoreUiState();
-        return done(true, "Restored previous UI state");
-      case "zoom_chart": {
-        const direction = String(args.direction || "in") === "out" ? "out" : "in";
-        runtime.chartController?.zoomChart(direction, Number(args.anchor_ratio ?? 0.5));
-        return done(true, `Zoomed chart ${direction}`);
-      }
-      case "scroll_chart": {
-        const target = String(args.target || "end") as "start" | "end" | "left" | "right";
-        const bars = Number(args.bars ?? 20);
-        runtime.chartController?.scrollChart(target === "left" || target === "right" ? (target === "left" ? -Math.abs(bars) : Math.abs(bars)) : target);
-        return done(true, `Scrolled chart ${target}`);
-      }
-      case "fetch_historical_prices": {
-        const symbol = String(args.symbol || runtime.selectedSymbol || "BTCUSDT").toUpperCase();
-        const timeframe = String(args.timeframe || runtime.currentTimeframe || "1h");
-        if (timeframe === "1s") {
-          return done(false, "1s historical candles are not supported. Use live mode or choose 1m+.");
-        }
-        const candles = await fetchHistoricalCandles(
-          symbol,
-          Number(args.start_ms),
-          Number(args.end_ms),
-          Number(args.limit ?? 100),
-          timeframe,
-        );
-        return done(true, `Fetched ${candles.length} historical ${timeframe} candles for ${symbol}`);
-      }
-      case "start_tour":
-        tourSnapshotRef.current = {
-          timeframe: runtime.currentTimeframe,
-          selectedSymbol: runtime.selectedSymbol,
-          chartType: runtime.chartType,
-          currentView: runtime.currentView,
-          rightPanelOpen: runtime.rightPanelOpen,
-          rightPanelTopTab: runtime.rightPanelTopTab,
-          rightPanelTab: runtime.rightPanelTab,
-        };
-        actionLogRef.current = [];
-        setActionLog([]);
-        setTourBaseline({ timeframe: runtime.currentTimeframe });
-        setTourDone(false);
-        setTourIndex(Number(args.start_step || 0));
-        return done(true, "Started tour");
-      case "clear_ai_annotations":
-        setHighlight(null);
-        setTourIndex(null);
-        setTourDone(false);
-        return done(true, "Cleared AI annotations");
-      default:
-        return done(false, `Unsupported action: ${call.name}`);
+    try {
+      const dispatchContext: import("@/features/ai/actions/handlers").ActionDispatchContext = {
+        runtime: runtime as unknown as import("@/features/ai/actions/handlers").ActionDispatchContext["runtime"],
+        setHighlight: ((highlight) => setHighlight(highlight as HighlightState | null)) as import("@/features/ai/actions/handlers").ActionDispatchContext["setHighlight"],
+        showSection: (target) => showSection(target),
+        captureUiSnapshot: () => captureUiSnapshot(),
+        restoreUiState: () => restoreUiState(),
+        args,
+        fetchHistoricalCandles: async (
+          symbol: string,
+          startMs: number,
+          endMs: number,
+          limit: number,
+          timeframe: string,
+        ) => {
+          const candles = await fetchHistoricalCandles(symbol, startMs, endMs, limit, timeframe);
+          return candles as unknown as Array<Record<string, unknown>>;
+        },
+      };
+      const detail = await handler(dispatchContext);
+      // NOTE: We deliberately do NOT call `setHighlight` from the success
+      // breadcrumb anymore. The highlight overlay is a full-screen dim
+      // (z-[680]) — using it to flash a "what just happened" message
+      // would dim the whole UI and mask the very step overlay the
+      // breadcrumb was meant to complement. The action log in the
+      // AI Action debug window already records every action; that's
+      // the right place for a breadcrumb.
+      return done(detail.startsWith("success"), detail);
+    } catch (error) {
+      return done(false, `error: ${sanitizeTechnicalDetails(error || "unknown")}`);
     }
   }, [captureUiSnapshot, recordAction, restoreUiState, showSection]);
 
   useEffect(() => {
     const openDebug = () => setDebugOpen(true);
+    const captureUi = () => captureUiSnapshot();
+    const restoreUi = () => restoreUiState();
     window.addEventListener("lmview:open-ai-action-debug", openDebug);
-    return () => window.removeEventListener("lmview:open-ai-action-debug", openDebug);
-  }, []);
+    window.addEventListener("lmview:ai-tour-capture-ui", captureUi);
+    window.addEventListener("lmview:ai-tour-restore-ui", restoreUi);
+    const clearHighlights = () => setHighlight(null);
+    const onTourStart = () => {
+      // Capture the pre-tour UI state so the user can revert after the
+      // tour finishes. We do this on tour START (not on first step)
+      // so the banner doesn't flash mid-tour.
+      captureUiSnapshot();
+    };
+    const onTourEnd = () => {
+      clearHighlights();
+      // Show the restore banner ONLY after the tour ends, if a
+      // snapshot was captured. This replaces the old behaviour of
+      // flashing the banner on every highlight_section step.
+      if (uiSnapshotRef.current) {
+        setRestoreAvailable(true);
+      }
+    };
+    window.addEventListener("lmview:ai-clear-highlights", clearHighlights);
+    window.addEventListener("lmview:ai-tour-start", onTourStart);
+    window.addEventListener("lmview:ai-tour-end", onTourEnd);
+    return () => {
+      window.removeEventListener("lmview:open-ai-action-debug", openDebug);
+      window.removeEventListener("lmview:ai-tour-capture-ui", captureUi);
+      window.removeEventListener("lmview:ai-tour-restore-ui", restoreUi);
+      window.removeEventListener("lmview:ai-clear-highlights", clearHighlights);
+      window.removeEventListener("lmview:ai-tour-start", onTourStart);
+      window.removeEventListener("lmview:ai-tour-end", onTourEnd);
+    };
+  }, [captureUiSnapshot, restoreUiState]);
 
-  const tourSteps = useMemo<TourStep[]>(
-    () => [
-      { target: "app", label: t("tourOverallTitle"), message: t("tourOverallBody") },
-      { target: "chartCanvas", label: t("tourChartTitle"), message: t("tourChartBody") },
-      { target: "chartToolbar", label: t("tourMarketTitle"), message: t("tourMarketBody"), pauseForUser: true },
-      { target: "chartToolbar", label: t("tourTimeframeTitle"), message: t("tourTimeframeBody"), pauseForUser: true, task: "change_timeframe" },
-      { target: "chartToolbar", label: t("tourChartTypeTitle"), message: t("tourChartTypeBody") },
-      { target: "chartToolbar", label: t("tourHistoricalTitle"), message: t("tourHistoricalBody") },
-      { target: "drawingTools", label: t("tourDrawingTitle"), message: t("tourDrawingBody"), action: { name: "draw_tool", arguments: { tool: "rectangle" } }, pauseForUser: true },
-      { target: "chartCanvas", label: t("tourRectangleTitle"), message: t("tourRectangleBody"), region: { leftPct: 24, topPct: 28, widthPct: 36, heightPct: 28 } },
-      { target: "chartToolbar", label: t("tourIndicatorsTitle"), message: t("tourIndicatorsBody") },
-      { target: "chartCanvas", label: t("tourZoomTitle"), message: t("tourZoomBody") },
-      { target: "rightPanelOverview", label: t("tourRightPanelTitle"), message: t("tourRightPanelBody") },
-      { target: "watchlistList", label: t("tourWatchlistTitle"), message: t("tourWatchlistBody"), action: { name: "open_panel", arguments: { target: "watchlist", highlight: false } } },
-      { target: "orderBook", label: t("tourOrderBookTitle"), message: t("tourOrderBookBody"), action: { name: "switch_panel_tab", arguments: { tab: "orderBook", highlight: false } } },
-      { target: "recentTrades", label: t("tourTradesTitle"), message: t("tourTradesBody"), action: { name: "switch_panel_tab", arguments: { tab: "recentTrades", highlight: false } } },
-      { target: "marketsNews", label: t("tourMarketsNewsTitle"), message: t("tourMarketsNewsBody"), action: { name: "switch_app_view", arguments: { view: "marketsNews", highlight: false } } },
-      { target: "screener", label: t("tourScreenerTitle"), message: t("tourScreenerBody"), action: { name: "switch_app_view", arguments: { view: "screener", highlight: false } } },
-      { target: "header", label: t("tourHeaderTitle"), message: t("tourHeaderBody") },
-      { target: "settings", label: t("tourSettingsTitle"), message: t("tourSettingsBody"), action: { name: "view_section", arguments: { target: "settings" } } },
-      { target: "ai", label: t("tourAiTitle"), message: t("tourAiBody"), includeChat: true },
-    ],
-    [t],
-  );
-  const activeTourStep = tourIndex !== null ? tourSteps[Math.min(tourIndex, tourSteps.length - 1)] : null;
-  const activeHighlight = activeTourStep || highlight;
-
-  const restoreTourState = useCallback(() => {
-    const runtime = runtimeRef.current;
-    const snapshot = tourSnapshotRef.current;
-    if (snapshot?.selectedSymbol) runtime.setSymbol?.(snapshot.selectedSymbol);
-    if (snapshot?.timeframe) runtime.setTimeframe?.(snapshot.timeframe);
-    if (snapshot?.chartType) runtime.setChartType?.(snapshot.chartType);
-    runtime.setDrawingTool?.("cursor");
-    runtime.closeSettings?.();
-    if (snapshot?.currentView) runtime.setView?.(snapshot.currentView);
-    runtime.setRightPanelOpen?.(snapshot?.rightPanelOpen ?? true);
-    if (snapshot?.rightPanelTopTab) runtime.setRightPanelTopTab?.(snapshot.rightPanelTopTab);
-    if (snapshot?.rightPanelTab) runtime.setRightPanelTab?.(snapshot.rightPanelTab);
-  }, []);
-
-  function completeTour() {
-    restoreTourState();
-    setTourIndex(null);
-    setHighlight(null);
-    setTourDone(true);
-    window.dispatchEvent(new CustomEvent("lmview:ai-tour-complete", {
-      detail: {
-        summary: t("tourRecapBody"),
-        actions: actionLogRef.current,
-      },
-    }));
-  }
-
-  useEffect(() => {
-    if (tourIndex === null) return;
-    const step = tourSteps[tourIndex];
-    if (!step) return;
-    showSection(step.target);
-    if (step.action) {
-      void executeAction(step.action);
-    }
-  }, [executeAction, showSection, tourIndex, tourSteps]);
-
-  const isCurrentTourTaskComplete = useCallback(() => {
-    const step = tourIndex === null ? null : tourSteps[tourIndex];
-    if (!step?.task) return true;
-    if (step.task === "change_timeframe") {
-      return Boolean(tourBaseline?.timeframe && runtimeRef.current.currentTimeframe !== tourBaseline.timeframe);
-    }
-    return true;
-  }, [tourBaseline?.timeframe, tourIndex, tourSteps]);
+  // Static tour steps are deprecated. The Interact-mode tour planner
+  // in useAiChat produces dynamic plans at runtime; the static
+  // ``lmview-overview`` tour is still triggerable via the start_tour
+  // action for the AI Action debug window.
+  const activeHighlight = highlight;
 
   return (
-    <AiActionContext.Provider value={{ definitions, executeAction, openDebugWindow: () => setDebugOpen(true), setRuntime }}>
+    <AiActionContext.Provider
+      value={{
+        definitions,
+        executeAction,
+        openDebugWindow: () => setDebugOpen(true),
+        setRuntime,
+        actionLog,
+        clearActionLog: () => {
+          actionLogRef.current = [];
+          setActionLog([]);
+        },
+      }}
+    >
       {children}
       {restoreAvailable && (
         <RestoreUiBanner
@@ -824,59 +671,17 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
           message={activeHighlight.message}
           includeChat={activeHighlight.includeChat}
           region={activeHighlight.region}
-          onClose={() => {
-            setHighlight(null);
-            if (tourIndex !== null) {
-              restoreTourState();
-              setTourIndex(null);
-            }
-          }}
-        />
-      )}
-      {tourIndex !== null && (
-        <TourControls
-          index={tourIndex}
-          count={tourSteps.length}
-          paused={Boolean(activeTourStep?.pauseForUser)}
-          taskComplete={isCurrentTourTaskComplete()}
-          onPrev={() => setTourIndex((value) => Math.max(0, (value || 0) - 1))}
-          onNext={() => {
-            if (tourIndex >= tourSteps.length - 1) completeTour();
-            else setTourIndex(tourIndex + 1);
-          }}
-          onClose={() => {
-            restoreTourState();
-            setTourIndex(null);
-            setHighlight(null);
-          }}
-        />
-      )}
-      {tourDone && (
-        <TourRecap
-          actionCount={actionLog.length}
-          onReplay={() => {
-            const runtime = runtimeRef.current;
-            tourSnapshotRef.current = {
-              timeframe: runtime.currentTimeframe,
-              selectedSymbol: runtime.selectedSymbol,
-              chartType: runtime.chartType,
-              currentView: runtime.currentView,
-              rightPanelOpen: runtime.rightPanelOpen,
-              rightPanelTopTab: runtime.rightPanelTopTab,
-              rightPanelTab: runtime.rightPanelTab,
-            };
-            actionLogRef.current = [];
-            setActionLog([]);
-            setTourBaseline({ timeframe: runtime.currentTimeframe });
-            setTourDone(false);
-            setTourIndex(0);
-          }}
-          onClose={() => setTourDone(false)}
+          onClose={() => setHighlight(null)}
         />
       )}
       {debugOpen && (
         <AiActionDebugWindow
           definitions={definitions}
+          actionLog={actionLog}
+          onClearLog={() => {
+            actionLogRef.current = [];
+            setActionLog([]);
+          }}
           onRun={(call) => executeAction(call)}
           onClose={() => setDebugOpen(false)}
         />
@@ -939,6 +744,22 @@ function HighlightOverlay({
 }) {
   const [rects, setRects] = useState<DOMRect[]>([]);
   const selector = SECTION_SELECTORS[target] || target;
+  // When a guided analysis is active, the step overlay is rendered
+  // inside the AI panel (via a portal to body). We want the AI panel
+  // to stay UN-dimmed so the user can still read the step text and
+  // click Next/Finish. So we always add the AI panel rect to the
+  // cutouts when a tour is running.
+  const [tourActive, setTourActive] = useState(false);
+  useEffect(() => {
+    const onTourStart = () => setTourActive(true);
+    const onTourEnd = () => setTourActive(false);
+    window.addEventListener("lmview:ai-tour-start", onTourStart);
+    window.addEventListener("lmview:ai-tour-end", onTourEnd);
+    return () => {
+      window.removeEventListener("lmview:ai-tour-start", onTourStart);
+      window.removeEventListener("lmview:ai-tour-end", onTourEnd);
+    };
+  }, []);
 
   useEffect(() => {
     const update = () => {
@@ -947,7 +768,7 @@ function HighlightOverlay({
       const primaryRect = targetRect && region
         ? rectFromRegion(targetRect, region)
         : targetRect;
-      const aiEl = includeChat ? document.querySelector(SECTION_SELECTORS.ai) : null;
+      const aiEl = (includeChat || tourActive) ? document.querySelector(SECTION_SELECTORS.ai) : null;
       const menuRects = Array.from(document.querySelectorAll(".lm-menu-surface, [data-ai-highlight-hole='true']"))
         .map((element) => element.getBoundingClientRect());
       const next = [primaryRect, aiEl?.getBoundingClientRect(), ...menuRects]
@@ -1047,65 +868,16 @@ function rectFromRegion(base: DOMRect, region: ChartRegion): DOMRect {
   return new DOMRect(left, top, width, height);
 }
 
-function TourControls({
-  index,
-  count,
-  paused,
-  taskComplete,
-  onPrev,
-  onNext,
-  onClose,
-}: {
-  index: number;
-  count: number;
-  paused: boolean;
-  taskComplete: boolean;
-  onPrev: () => void;
-  onNext: () => void;
-  onClose: () => void;
-}) {
-  const { t } = useI18n();
-  return (
-    <div className="fixed bottom-5 left-1/2 z-[700] flex -translate-x-1/2 items-center gap-2 rounded border border-gray-700 bg-gray-950 px-3 py-2 shadow-2xl">
-      <span className="text-xs text-gray-400">{index + 1} / {count}</span>
-      <button type="button" onClick={onPrev} disabled={index === 0} className="rounded border border-gray-700 px-2 py-1 text-xs text-gray-200 disabled:opacity-40">{t("previous")}</button>
-      <button
-        type="button"
-        onClick={onNext}
-        className={`rounded px-2 py-1 text-xs font-semibold text-white ${paused && !taskComplete ? "bg-amber-600" : "bg-blue-600"}`}
-      >
-        {index === count - 1 ? t("finish") : paused && !taskComplete ? t("skip") : t("next")}
-      </button>
-      <button type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"><X size={14} /></button>
-    </div>
-  );
-}
-
-function TourRecap({ actionCount, onReplay, onClose }: { actionCount: number; onReplay: () => void; onClose: () => void }) {
-  const { t } = useI18n();
-  return (
-    <div className="fixed bottom-5 right-5 z-[690] w-80 rounded border border-gray-700 bg-gray-950 p-3 text-sm text-gray-100 shadow-2xl">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <h3 className="font-semibold text-white">{t("tourRecapTitle")}</h3>
-          <p className="mt-1 text-xs leading-5 text-gray-400">{t("tourRecapBody")}</p>
-          <p className="mt-1 text-[11px] text-gray-500">{actionCount} {t("actionsSaved")}</p>
-        </div>
-        <button type="button" onClick={onClose} className="rounded p-1 text-gray-400 hover:bg-gray-800 hover:text-white"><X size={14} /></button>
-      </div>
-      <button type="button" onClick={onReplay} className="mt-3 inline-flex items-center gap-2 rounded bg-blue-600 px-2.5 py-1.5 text-xs font-semibold text-white">
-        <RotateCcw size={13} /> {t("replay")}
-      </button>
-    </div>
-  );
-}
-
 function AiActionDebugWindow({
   definitions,
+  actionLog,
+  onClearLog,
   onRun,
   onClose,
 }: {
   definitions: AiActionDefinition[];
+  actionLog: Array<{ call: AiActionCall; at: number; detail: string }>;
+  onClearLog: () => void;
   onRun: (call: AiActionCall) => Promise<{ ok: boolean; detail: string }>;
   onClose: () => void;
 }) {
@@ -1238,6 +1010,48 @@ function AiActionDebugWindow({
         </div>
         <div className="min-h-8 rounded border border-gray-800 bg-gray-900 px-2 py-1.5 text-xs text-gray-300">
           {result || t("debugNoResult")}
+        </div>
+        {/* Action log — shows everything that's been executed */}
+        <div className="mt-2 border-t border-gray-800 pt-2">
+          <div className="mb-1 flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+              {t("actionLogTitle")} ({actionLog.length})
+            </span>
+            <button
+              type="button"
+              onClick={onClearLog}
+              className="rounded px-1.5 py-0.5 text-[10px] text-gray-500 hover:bg-gray-800 hover:text-gray-200"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="max-h-40 overflow-y-auto rounded border border-gray-800 bg-gray-900/50 text-[10px] font-mono">
+            {actionLog.length === 0 ? (
+              <div className="px-2 py-1.5 text-gray-600">{t("actionLogEmpty")}</div>
+            ) : (
+              actionLog.slice(-20).reverse().map((entry, idx) => (
+                <div key={`${entry.at}-${idx}`} className="border-b border-gray-800/50 px-2 py-1 last:border-b-0">
+                  <div className="flex items-center gap-2 text-gray-400">
+                    <span className="text-gray-600">{new Date(entry.at).toLocaleTimeString()}</span>
+                    <span className="font-semibold text-amber-300">{entry.call.name}</span>
+                    {entry.call.reason && (
+                      <span className="truncate text-gray-500" title={entry.call.reason}>
+                        {String(entry.call.reason)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="ml-1 mt-0.5 truncate text-gray-500" title={entry.detail}>
+                    {entry.detail}
+                  </div>
+                  {entry.call.arguments && Object.keys(entry.call.arguments).length > 0 && (
+                    <div className="ml-1 mt-0.5 truncate text-gray-600" title={JSON.stringify(entry.call.arguments)}>
+                      {JSON.stringify(entry.call.arguments)}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
     </div>

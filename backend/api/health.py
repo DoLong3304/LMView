@@ -11,6 +11,8 @@ from fastapi import APIRouter
 from backend.core.database import get_redis, get_influx, get_trino_connection
 from backend.core.postgres import pg_health_check
 from backend.core.redis_sentinel import get_redis_health
+import aiohttp
+import os
 
 router = APIRouter(prefix="/api", tags=["health"])
 
@@ -76,6 +78,18 @@ async def health():
     status = "ok" if (redis_ok and influx_ok and trino_ok and pg_ok) else "degraded"
 
     total_latency_ms = round((time.perf_counter() - overall_start) * 1000, 2)
+    # AI service health check (optional)
+    ai_service_url = os.getenv("AI_SERVICE_URL", "http://ai-service:8100")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{ai_service_url}/health", timeout=5) as resp:
+                ai_status = await resp.json()
+                checks["ai_service"] = {"status": ai_status.get("status", "unknown"), "detail": ai_status}
+                latencies["ai_service_ms"] = round((time.perf_counter() - overall_start) * 1000, 2)
+    except Exception as e:
+        checks["ai_service"] = {"status": "error", "error": str(e)}
+        latencies["ai_service_ms"] = None
+
     return {
         "status": status,
         "checks": checks,

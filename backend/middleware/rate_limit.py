@@ -68,7 +68,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         ),
     ) -> None:
         super().__init__(app)
-        self.per_minute = per_minute or int(os.environ.get("RATE_LIMIT_PER_MINUTE", "200"))
+        self.per_minute = per_minute or int(os.environ.get("RATE_LIMIT_PER_MINUTE", "1200"))
         self.exempt_paths = exempt_paths
         # window: IP -> deque of request timestamps
         self._window: Dict[str, Deque[float]] = defaultdict(deque)

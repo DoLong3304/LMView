@@ -11,11 +11,11 @@ networks:
 # VOLUMES
 # ─────────────────────────────────────────────────────────────────────────────
 volumes:
+  minio-data:
   kafka-1-data:
   kafka-2-data:
   kafka-3-data:
   zookeeper-data:
-  minio-data:
   influxdb-data:
   influxdb-config:
   postgres-data:
@@ -203,32 +203,6 @@ services:
   # SCHEMA REGISTRY  (Apicurio — Confluent-compatible API)
   # ═══════════════════════════════════════════════════════════════════════════════
 
-  schema-registry:
-    profiles: ["dev", "prod"]
-    image: apicurio/apicurio-registry-mem:2.6.2.Final
-    container_name: schema-registry
-    hostname: schema-registry
-    restart: unless-stopped
-    ports:
-      - "8085:8080"
-    environment:
-      QUARKUS_HTTP_PORT: 8080
-    networks:
-      - crypto-net
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-    depends_on:
-      kafka-1:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 20s
-
   minio:
     profiles: ["dev", "prod"]
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
@@ -278,6 +252,34 @@ services:
     networks:
       - crypto-net
     restart: "no"
+
+
+
+  schema-registry:
+    profiles: ["dev", "prod"]
+    image: apicurio/apicurio-registry-mem:2.6.2.Final
+    container_name: schema-registry
+    hostname: schema-registry
+    restart: unless-stopped
+    ports:
+      - "8085:8080"
+    environment:
+      QUARKUS_HTTP_PORT: 8080
+    networks:
+      - crypto-net
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
 
   influxdb:
     profiles: ["dev", "prod"]
@@ -347,7 +349,7 @@ services:
     hostname: redis-master
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "16379:6379"
     command: >
       redis-server
       --appendonly yes
@@ -540,7 +542,6 @@ services:
       REDIS_PORT: 6379
       KEYDB_1S_RETENTION_DAYS: 1
       KEYDB_1M_RETENTION_DAYS: 7
-      MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
@@ -608,7 +609,6 @@ services:
       REDIS_PORT: 6379
       KEYDB_1S_RETENTION_DAYS: 1
       KEYDB_1M_RETENTION_DAYS: 7
-      MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
@@ -672,8 +672,6 @@ services:
         reservations:
           memory: 512M
     depends_on:
-      minio:
-        condition: service_healthy
       postgres:
         condition: service_healthy
 
@@ -700,8 +698,6 @@ services:
       spark-master:
         condition: service_started
       kafka-1:
-        condition: service_healthy
-      minio:
         condition: service_healthy
       postgres:
         condition: service_healthy
@@ -843,7 +839,6 @@ services:
       REDIS_MASTER_NAME: mymaster
       REDIS_HOST: redis-master
       REDIS_PORT: 6379
-      MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       FLINK_CHECKPOINT_DIR: s3a://flink-checkpoints/flink-checkpoints
@@ -887,8 +882,6 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      minio:
-        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -918,7 +911,6 @@ services:
       KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
-      MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -952,7 +944,6 @@ services:
       KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
-      MINIO_ENDPOINT: http://minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -980,7 +971,7 @@ services:
     build:
       context: .
       dockerfile: docker/fastapi/Dockerfile
-    image: cryptoprice/fastapi:0.25.60
+    image: cryptoprice/fastapi:0.28.0
     restart: unless-stopped
     environment:
       REDIS_SENTINELS: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
@@ -1098,7 +1089,7 @@ services:
     build:
       context: .
       dockerfile: docker/nginx/Dockerfile
-    image: cryptoprice/nginx:1.31.0
+    image: cryptoprice/nginx:1.44.0
     restart: unless-stopped
     networks:
       crypto-net:
@@ -1248,16 +1239,17 @@ services:
       # logs; they will be re-enabled if the cluster moves to a region
       # where the WS endpoints are reachable.
       #
-      # v0.25.60+: ENABLE_TICKER_WS is false because the legacy multi-
-      # stream ticker client (combined + 5 fallbacks + 5 v2) is being
-      # 403'd by Binance from the AWS datacenter IPs. The new
-      # binance-ticker-ws service runs the same ticker feeds on a
-      # single coordinated shard pool, and Binance appears to allow
-      # only the newer ``/stream`` endpoint hostname.
-      ENABLE_TICKER_WS: "true"
-      ENABLE_TRADES_WS: "true"
+      # v0.25.60+: All 4 WS flags are false. The legacy producer's
+      # per-symbol WebSocket connections are 403 Forbidden from AWS.
+      # The new combined-stream-producer service uses Binance's
+      # combined-stream endpoint (single connection, no 403) and
+      # publishes to the same Kafka topics with the same message
+      # format.  The binance-ticker-ws shard pool still writes live
+      # ticker directly to Redis for low-latency forming candles.
+      ENABLE_TICKER_WS: "false"
+      ENABLE_TRADES_WS: "false"
       ENABLE_DEPTH_WS: "false"
-      ENABLE_KLINE_WS: "true"
+      ENABLE_KLINE_WS: "false"
     volumes:
       - ./:/app
     networks:
@@ -1318,6 +1310,47 @@ services:
           memory: 512M
 
   # ══════════════════════════════════════════════════════════════════════════════
+  # COMBINED-STREAM KAFKA PRODUCER (replaces legacy producer's WS paths)
+  #
+  # Uses Binance's combined-stream endpoint (single /stream WS connection)
+  # to subscribe to ticker, kline_1s, depth20@100ms, and aggTrade for all
+  # USDT symbols. The legacy producer's per-symbol WS connections were
+  # 403 Forbidden from the AWS datacenter IP range; the combined-stream
+  # endpoint works because it uses a different hostname and fewer
+  # connection handshakes.
+  # ══════════════════════════════════════════════════════════════════════════════
+
+  combined-stream-producer:
+    profiles: ["dev", "prod"]
+    build:
+      context: .
+      dockerfile: docker/combined-stream/Dockerfile
+    image: cryptoprice/combined-stream:0.25.60
+    container_name: combined-stream-producer
+    hostname: combined-stream-producer
+    restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+      MAX_SYMBOLS: "200"
+      LOG_LEVEL: INFO
+    networks:
+      - crypto-net
+    depends_on:
+      kafka-1:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://localhost:8000/', timeout=3); sys.exit(0 if r.status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ══════════════════════════════════════════════════════════════════════════════
   # BINANCE REST KLINE FEED (Phase 5 — replaces dead producer's kline path)
   #
   # Binance WS is 403-geofenced from this AWS region, but the REST API on
@@ -1345,7 +1378,7 @@ services:
       REDIS_MASTER_NAME: mymaster
       KEYDB_1S_RETENTION_DAYS: "1"
       KEYDB_1M_RETENTION_DAYS: "7"
-      KLINE_REST_TOP_N: "100"
+      KLINE_REST_TOP_N: "200"
       KLINE_REST_POLL_1M_S: "30"
       KLINE_REST_LIMIT_1M: "100"
       KLINE_REST_ENABLE_1S: "false"
@@ -1400,7 +1433,7 @@ services:
       REDIS_DB: "0"
       REDIS_SENTINELS: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
       REDIS_MASTER_NAME: mymaster
-      DEPTH_TRADES_TOP_N: "30"
+      DEPTH_TRADES_TOP_N: "200"
       DEPTH_TRADES_SYMBOL_REFRESH_S: "3600"
       DEPTH_TRADES_DEPTH_POLL_S: "30.0"
       DEPTH_TRADES_TRADES_POLL_S: "20.0"

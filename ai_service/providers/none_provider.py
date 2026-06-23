@@ -5,8 +5,10 @@ bounded system help and avoids pretending to analyze markets without a model.
 """
 from __future__ import annotations
 
+import json
 import time
 from datetime import datetime, timezone
+from typing import AsyncGenerator
 
 from backend.models.ai.providers import (
     LLMCompletionRequest,
@@ -58,6 +60,31 @@ class NoneProvider(BaseProvider):
             latency_ms=elapsed_ms,
             metadata={"provider_type": "none"},
         )
+
+    async def generate_chat_completion_stream(
+        self,
+        request: LLMCompletionRequest,
+    ) -> AsyncGenerator[str, None]:
+        """Stream stub: yields full none-provider response as single token."""
+        user_message = ""
+        for message in reversed(request.messages):
+            if message.role == "user":
+                user_message = message.content.strip()
+                break
+        content = (
+            "LMView AI has no local or API model available right now. "
+            "I can still give generic platform guidance: use the chart, indicators, "
+            "order book, trades, market overview, news, alerts, and settings panels "
+            "to inspect crypto market context. Live chart data in LMView is runtime "
+            "data and may be newer than an LLM training cutoff.\n\n"
+            f"Your request was: {user_message[:300] or 'No message provided.'}\n\n"
+            "For market analysis, configure `AI_MODE=auto|local|api` with a healthy "
+            "local endpoint or `DASHSCOPE_API_KEY`. This response is educational only "
+            "and is not financial advice."
+        )
+        # Yield entire content as a single chunk
+        yield f'{{"content": {json.dumps(content)}, "done": false}}'
+        yield f'{{"content": {json.dumps(content)}, "done": true}}'
 
     async def health_check(self) -> ProviderHealthStatus:
         return ProviderHealthStatus(

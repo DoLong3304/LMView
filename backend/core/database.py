@@ -16,13 +16,20 @@ _influx: InfluxDBClient | None = None
 
 async def get_redis() -> Redis:
     """
-    Get Redis client for general use (reads from replica, writes to master)
+    Get Redis client for general use.
+
+    Reads and writes go to master directly. Replica reads were too slow
+    to catch up with high-frequency ticker/1s/1m writes, causing stale
+    data on realtime endpoints (/api/ticker, WS /stream/all, 1s/1m
+    candles) while 5m-1w aggregates (read from Influx/Trino) still
+    looked fine. Master writes only scale the same way since they all
+    target the same Redis instance.
 
     For explicit read/write splitting, use:
-    - get_redis_master() for writes
-    - get_redis_replica() for reads
+    - get_redis_master() for writes (now same as get_redis)
+    - get_redis_replica() for read-only access (analytics, exports)
     """
-    return await get_redis_replica()
+    return await get_redis_master()
 
 
 def get_influx() -> InfluxDBClient:

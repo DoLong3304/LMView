@@ -71,12 +71,58 @@ async def retrieve(
     emb_duration = time.monotonic() - emb_start
     if query_embedding is None:
         ai_metrics.record_embedding(model="unknown", duration_sec=emb_duration, success=False)
+        # Fallback to BM25-only search
+        from ai_service.rag.bm25_search import bm25_search
+        bm25_hits = await bm25_search(request.query, top_k=request.top_k or AI_RAG_TOP_K, language=request.language)
+        chunks = []
+        async with pool.acquire() as conn:
+            for cid_uuid, score in bm25_hits:
+                row = await conn.fetchrow(
+                    """
+                    SELECT c.id AS chunk_id, c.content AS chunk_text,
+                           c.heading, c.language AS chunk_language,
+                           c.document_id, d.title AS doc_title,
+                           d.domain AS doc_domain, d.tags AS doc_tags,
+                           s.credibility_level,
+                           s.id AS source_uuid, s.title AS source_title
+                    FROM ai_knowledge_chunks c
+                    JOIN ai_knowledge_documents d ON d.id = c.document_id
+                    LEFT JOIN ai_knowledge_sources s ON s.id = d.source_id
+                    WHERE c.id = $1
+                    """,
+                    cid_uuid,
+                )
+                if row is None:
+                    continue
+                chunks.append(RAGChunkResult(
+                    chunk_id=str(row["chunk_id"]),
+                    text=row["chunk_text"] or "",
+                    score=round(min(score * 100, 1.0), 4),
+                    document_id=str(row["document_id"]),
+                    document_title=row.get("doc_title", "") or "",
+                    source_id=str(row["source_uuid"]) if row.get("source_uuid") else None,
+                    source_title=row.get("source_title"),
+                    heading=row.get("heading"),
+                    language=row.get("chunk_language"),
+                    domain=row.get("doc_domain"),
+                    tags=json.loads(row["doc_tags"]) if row.get("doc_tags") else [],
+                    credibility_level=row.get("credibility_level"),
+                    citation={
+                        "document_title": row.get("doc_title", "") or "",
+                        "source_title": row.get("source_title"),
+                        "heading": row.get("heading"),
+                    },
+                ))
+        elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
         return RAGRetrievalResponse(
             query=request.query,
+            chunks=chunks,
+            total_results=len(chunks),
+            latency_ms=elapsed_ms,
             warnings=[RAGRetrievalWarning(
                 code="embedding_unavailable",
-                message="Embedding model unavailable — cannot perform vector search",
-                severity="error",
+                message="Embedding model unavailable — used BM25 keyword search",
+                severity="warning",
             )],
         )
     ai_metrics.record_embedding(model="default", duration_sec=emb_duration, success=True)
@@ -96,6 +142,11 @@ async def retrieve(
         source_type=request.source_type,
         credibility_level=request.credibility_level,
         review_status=request.review_status,
+        symbol=request.symbol,
+        exchange=request.exchange,
+        timeframe=request.timeframe,
+        use_hybrid_search=request.use_hybrid_search,
+        query_text=request.query,
     )
 
     # Mark the start of the vector-search phase so we can split the
@@ -125,31 +176,102 @@ async def retrieve(
     ai_metrics.record_rag_vector_search(duration_sec=vs_duration, success=True)
 
     chunks: List[RAGChunkResult] = []
-    for row in rows:
-        score = 1.0 - (row.get("distance", 1.0))  # cosine distance → similarity
-        if score < min_score:
-            continue
 
-        chunks.append(RAGChunkResult(
-            chunk_id=str(row["chunk_id"]),
-            text=row["chunk_text"],
-            score=round(score, 4),
-            document_id=str(row["document_id"]),
-            document_title=row.get("doc_title", ""),
-            source_id=str(row["source_uuid"]) if row.get("source_uuid") else None,
-            source_title=row.get("source_title"),
-            heading=row.get("heading"),
-            language=row.get("chunk_language"),
-            domain=row.get("doc_domain"),
-            tags=json.loads(row["doc_tags"]) if row.get("doc_tags") else [],
-            credibility_level=row.get("credibility_level"),
-            citation={
-                "document_title": row.get("doc_title", ""),
-                "source_title": row.get("source_title"),
-                "heading": row.get("heading"),
-                "chunk_index": row.get("chunk_index"),
-            },
-        ))
+    # --- Batch 6: BM25 + RRF + reranker integration ---
+    if request.use_hybrid_search and rows:
+        from ai_service.rag.bm25_search import bm25_search
+        from ai_service.rag.reranker import rerank
+
+        # BM25 search
+        bm25_hits = await bm25_search(request.query, top_k=top_k, language=request.language)
+        bm25_map = {int(cid): rank for rank, (cid, _score) in enumerate(bm25_hits, start=1)}
+
+        # Vector hits with rank
+        vector_map = {}
+        for idx, row in enumerate(rows, start=1):
+            vector_map[int(row["chunk_id"])] = idx
+
+        all_cids = set(bm25_map.keys()) | set(vector_map.keys())
+        rrf_candidates = []
+        for cid in all_cids:
+            r_b = bm25_map.get(cid, 0)
+            r_v = vector_map.get(cid, 0)
+            rrf_score = 0.0
+            if r_b:
+                rrf_score += 1.0 / (60 + r_b)
+            if r_v:
+                rrf_score += 1.0 / (60 + r_v)
+            rrf_candidates.append((cid, rrf_score))
+        rrf_candidates.sort(key=lambda x: x[1], reverse=True)
+        rrf_candidates = rrf_candidates[:top_k]
+
+        # Load chunk texts for reranker
+        candidate_texts = []
+        for cid, _score in rrf_candidates:
+            for row in rows:
+                if int(row["chunk_id"]) == cid:
+                    candidate_texts.append((cid, row["chunk_text"]))
+                    break
+
+        # Rerank
+        reranked = await rerank(request.query, candidate_texts)
+        reranked = reranked[:top_k]
+
+        # Build results from reranked list
+        id_to_row = {int(row["chunk_id"]): row for row in rows}
+        for cid, _score in reranked:
+            row = id_to_row.get(cid)
+            if row is None:
+                continue
+            score = 1.0 - float(row.get("distance", 1.0))
+            if score < min_score:
+                continue
+            chunks.append(RAGChunkResult(
+                chunk_id=str(row["chunk_id"]),
+                text=row["chunk_text"],
+                score=round(score, 4),
+                document_id=str(row["document_id"]),
+                document_title=row.get("doc_title", ""),
+                source_id=str(row["source_uuid"]) if row.get("source_uuid") else None,
+                source_title=row.get("source_title"),
+                heading=row.get("heading"),
+                language=row.get("chunk_language"),
+                domain=row.get("doc_domain"),
+                tags=json.loads(row["doc_tags"]) if row.get("doc_tags") else [],
+                credibility_level=row.get("credibility_level"),
+                citation={
+                    "document_title": row.get("doc_title", ""),
+                    "source_title": row.get("source_title"),
+                    "heading": row.get("heading"),
+                    "chunk_index": row.get("chunk_index"),
+                },
+            ))
+    else:
+        # Pure vector search (existing behavior)
+        for row in rows:
+            score = 1.0 - (row.get("distance", 1.0))
+            if score < min_score:
+                continue
+            chunks.append(RAGChunkResult(
+                chunk_id=str(row["chunk_id"]),
+                text=row["chunk_text"],
+                score=round(score, 4),
+                document_id=str(row["document_id"]),
+                document_title=row.get("doc_title", ""),
+                source_id=str(row["source_uuid"]) if row.get("source_uuid") else None,
+                source_title=row.get("source_title"),
+                heading=row.get("heading"),
+                language=row.get("chunk_language"),
+                domain=row.get("doc_domain"),
+                tags=json.loads(row["doc_tags"]) if row.get("doc_tags") else [],
+                credibility_level=row.get("credibility_level"),
+                citation={
+                    "document_title": row.get("doc_title", ""),
+                    "source_title": row.get("source_title"),
+                    "heading": row.get("heading"),
+                    "chunk_index": row.get("chunk_index"),
+                },
+            ))
 
     elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
 
@@ -219,14 +341,55 @@ def _build_retrieval_query(
     source_type: Optional[str] = None,
     credibility_level: Optional[str] = None,
     review_status: Optional[str] = None,
+    symbol: Optional[str] = None,
+    exchange: Optional[str] = None,
+    timeframe: Optional[str] = None,
+    use_hybrid_search: bool = False,
+    query_text: Optional[str] = None,
 ) -> tuple:
-    """Build the pgvector similarity search SQL query with filters."""
+    """Build the pgvector similarity search SQL query with filters.
+
+    Supports:
+    - Vector cosine similarity (default)
+    - Hybrid search (vector + keyword via ``query_text``)
+    - Metadata filtering by symbol, exchange, timeframe, tags
+    """
     # cosine distance: 1 - similarity
     max_distance = 1.0 - min_score
 
-    sql_parts = [
+    # Determine the ORDER BY and score expressions based on search mode
+    if use_hybrid_search and query_text:
+        # Hybrid: combine vector similarity with keyword ts_rank
+        # Use ts_query for keyword matching on chunk content
+        select_expr = """
+            e.chunk_id,
+            c.content AS chunk_text,
+            c.heading,
+            c.chunk_index,
+            c.language AS chunk_language,
+            e.document_id,
+            d.title AS doc_title,
+            d.domain AS doc_domain,
+            d.tags AS doc_tags,
+            s.id AS source_uuid,
+            s.title AS source_title,
+            s.credibility_level,
+            -- Hybrid score: 60% vector + 40% keyword
+            (0.6 * (1.0 - (e.embedding <=> $1::vector)) +
+             0.4 * COALESCE(
+                ts_rank_cd(
+                    c.content_tsv,
+                    plainto_tsquery('english', $2::text)
+                ), 0.0)
+            ) AS hybrid_score
         """
-        SELECT
+        order_expr = "ORDER BY hybrid_score DESC"
+        score_filter = f"AND (1.0 - (e.embedding <=> $1::vector)) >= {max_distance}"
+        params: List[Any] = [embedding_str, query_text]
+        param_idx = 3
+    else:
+        # Pure vector search (default)
+        select_expr = """
             e.chunk_id,
             c.content AS chunk_text,
             c.heading,
@@ -240,15 +403,26 @@ def _build_retrieval_query(
             s.title AS source_title,
             s.credibility_level,
             e.embedding <=> $1::vector AS distance
+        """
+        order_expr = f"ORDER BY distance ASC LIMIT ${param_idx + 6}"
+        score_filter = f"AND e.embedding <=> $1::vector < ${param_idx}"
+        params: List[Any] = [embedding_str]
+        param_idx = 2
+
+    # Build score filter and placeholder for hybrid vs vector
+    sql_parts = [
+        """
+        SELECT
+        """,
+        select_expr,
+        """
         FROM ai_knowledge_embeddings e
         JOIN ai_knowledge_chunks c ON c.id = e.chunk_id
         JOIN ai_knowledge_documents d ON d.id = e.document_id
         LEFT JOIN ai_knowledge_sources s ON s.id = c.source_id
         WHERE d.status = 'active'
-        """
+        """,
     ]
-    params: List[Any] = [embedding_str]
-    param_idx = 2
 
     # Apply filters
     if AI_KB_APPROVED_ONLY or review_status == "approved":
@@ -275,12 +449,43 @@ def _build_retrieval_query(
         params.append(credibility_level)
         param_idx += 1
 
-    sql_parts.append(f"AND e.embedding <=> $1::vector < ${param_idx}")
-    params.append(max_distance)
-    param_idx += 1
+    # Metadata filtering by symbol/exchange/timeframe
+    if symbol:
+        sql_parts.append(f"AND (d.tags @> ${param_idx}::jsonb OR c.content ILIKE '%' || ${param_idx + 1}::text || '%')")
+        params.append(json.dumps([symbol]))
+        params.append(symbol)
+        param_idx += 2
 
-    sql_parts.append(f"ORDER BY distance ASC LIMIT ${param_idx}")
-    params.append(top_k)
+    if exchange:
+        sql_parts.append(f"AND (d.tags @> ${param_idx}::jsonb OR c.content ILIKE '%' || ${param_idx + 1}::text || '%')")
+        params.append(json.dumps([exchange]))
+        params.append(exchange)
+        param_idx += 2
+
+    if timeframe:
+        sql_parts.append(f"AND d.tags @> ${param_idx}::jsonb")
+        params.append(json.dumps([timeframe]))
+        param_idx += 1
+
+    # Tag filtering with AND logic for multiple tags
+    if tags and len(tags) > 0:
+        for tag in tags:
+            sql_parts.append(f"AND d.tags @> ${param_idx}::jsonb")
+            params.append(json.dumps([tag]))
+            param_idx += 1
+
+    if use_hybrid_search and query_text:
+        # Keyword filter for hybrid
+        sql_parts.append(f"AND c.content_tsv @@ plainto_tsquery('english', $2::text)")
+        # Already applied score_filter above
+    else:
+        # Vector distance filter
+        sql_parts.append(score_filter)
+        params.append(max_distance)
+        param_idx += 1
+
+        sql_parts.append(order_expr)
+        params.append(top_k)
 
     return "\n".join(sql_parts), params
 

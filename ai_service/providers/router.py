@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Dict, List, Optional
+from typing import AsyncGenerator, Dict, List, Optional
 
 from backend.models.ai.providers import (
     LLMCompletionRequest,
@@ -226,6 +226,47 @@ class ProviderRouter:
             routing_reason="No local/API provider available; using generic none provider",
         )
         return response, routing
+
+    async def route_completion_stream(
+        self,
+        request: LLMCompletionRequest,
+    ) -> AsyncGenerator[str, None]:
+        """Route a streaming completion request.
+
+        Yields SSE-encoded token strings from the first healthy provider.
+        Falls through providers on failure.
+        """
+        self.initialize()
+        providers_tried: List[str] = []
+        streamed = False
+
+        from ai_service.providers.health import get_health_monitor
+        monitor = get_health_monitor()
+
+        for provider_name in self.get_provider_order():
+            if provider_name != "none" and not monitor.should_try(provider_name):
+                logger.warning("Skipping AI provider '%s' for stream (circuit breaker)", provider_name)
+                providers_tried.append(provider_name)
+                continue
+
+            provider = self._providers.get(provider_name)
+            if provider is None:
+                continue
+            providers_tried.append(provider_name)
+
+            try:
+                async for event in provider.generate_chat_completion_stream(request):
+                    yield event
+                    streamed = True
+                if streamed:
+                    return
+            except Exception as exc:
+                logger.warning("Stream provider %s failed: %s", provider_name, exc)
+                monitor.record_failure(provider_name)
+                continue
+
+        # All providers exhausted — yield error event
+        yield '{"error": "All AI providers unavailable for streaming", "done": true}'
 
     async def health_check_all(self) -> Dict[str, ProviderHealthStatus]:
         self.initialize()

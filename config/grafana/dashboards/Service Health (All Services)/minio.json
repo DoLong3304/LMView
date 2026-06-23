@@ -2,7 +2,7 @@
   "annotations": {
     "list": []
   },
-  "description": "Service-level health for MinIO - per-service deep-dive with verified metrics.",
+  "description": "Service-level health for AWS S3 - per-service deep-dive with verified metrics.",
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
@@ -204,7 +204,7 @@
   },
   "timepicker": {},
   "timezone": "browser",
-  "title": "Service Health / MinIO",
+  "title": "Service Health / MinIO (S3 Storage)",
   "uid": "phase5-health-minio",
   "version": 1,
   "weekStart": "",

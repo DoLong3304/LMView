@@ -1,11 +1,12 @@
 """LiteLLM provider for local and API OpenAI-compatible endpoints."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import Optional
+from typing import AsyncGenerator, Optional
 
 from backend.models.ai.providers import (
     LLMCompletionRequest,
@@ -70,11 +71,14 @@ class LiteLLMProvider(BaseProvider):
         - HTTP 429 (rate limit)
         - HTTP 401/402/403 with quota/exhausted wording
         - LiteLLM's built-in rate limit detection
+        - Generic "exhausted" / "insufficient_quota" patterns
         """
         msg = str(exc).lower()
 
         # Alibaba Cloud ModelStudio: free quota exhausted per model
         if "allocationquota" in msg or "freetieronly" in msg:
+            return True
+        if "free tier" in msg and "exhaust" in msg:
             return True
 
         # HTTP status code + keyword matching
@@ -84,6 +88,10 @@ class LiteLLMProvider(BaseProvider):
 
         # LiteLLM-specific rate limit
         if "rate_limit_error" in msg or "rate limit" in msg:
+            return True
+
+        # Generic exhaustion patterns (catch-all for provider-specific wording)
+        if any(kw in msg for kw in ["quota", "exhaust", "insufficient_quota", "free tier", "billing", "credit balance"]):
             return True
 
         # Content policy / safety violations are NOT quota errors
@@ -142,11 +150,31 @@ class LiteLLMProvider(BaseProvider):
                     if request.stop:
                         kwargs["stop"] = request.stop
 
+                    if request.tools:
+                        kwargs["tools"] = [t.model_dump() for t in request.tools]
+                    if request.tool_choice:
+                        kwargs["tool_choice"] = request.tool_choice
+
                     response = await litellm.acompletion(**kwargs)
 
                     elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
                     content = response.choices[0].message.content or ""
                     usage = getattr(response, "usage", None)
+
+                    # Extract tool_calls if present
+                    tool_calls = None
+                    msg = response.choices[0].message
+                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                        tool_calls = []
+                        for tc in msg.tool_calls:
+                            tool_calls.append({
+                                "id": getattr(tc, "id", None),
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments,
+                                },
+                            })
 
                     return LLMCompletionResponse(
                         content=content,
@@ -157,10 +185,12 @@ class LiteLLMProvider(BaseProvider):
                         token_input=getattr(usage, "prompt_tokens", None),
                         token_output=getattr(usage, "completion_tokens", None),
                         latency_ms=elapsed_ms,
+                        tool_calls=tool_calls,
                         metadata={
                             "provider_type": "litellm",
                             "model_fallback_used": model_idx > 0,
                             "key_fallback_used": key_attempt > 0,
+                            "tool_calls": tool_calls,
                             "usage": {
                                 "prompt_tokens": getattr(usage, "prompt_tokens", None),
                                 "completion_tokens": getattr(usage, "completion_tokens", None),
@@ -199,6 +229,85 @@ class LiteLLMProvider(BaseProvider):
             f"All models/keys exhausted for {self.provider_name}: "
             f"{models_to_try}"
         ) from last_error
+
+    async def generate_chat_completion_stream(
+        self,
+        request: LLMCompletionRequest,
+    ) -> AsyncGenerator[str, None]:
+        """Stream chat completion via LiteLLM with key rotation.
+
+        Yields SSE-encoded token strings for streaming consumption.
+        Uses the model fallback chain on failure.
+        Handles quota errors via key rotation per batch.
+        """
+        litellm = self._get_litellm()
+        messages = [{"role": m.role, "content": m.content} for m in request.messages]
+
+        models_to_try = [self.model_name] + self.fallback_models if self.model_name else self.fallback_models
+        if not models_to_try:
+            raise ValueError(f"No model specified for provider {self.provider_name}")
+
+        env_key = "DASHSCOPE_API_KEY"
+        keys = get_api_keys(env_key) if not self.is_local else []
+        last_error: Optional[Exception] = None
+
+        for model_idx, model in enumerate(models_to_try):
+            max_key_attempts = max(len(keys), 1) if not self.is_local else 1
+            for key_attempt in range(max_key_attempts):
+                try:
+                    kwargs: dict = {
+                        "model": model,
+                        "messages": messages,
+                        "temperature": request.temperature,
+                        "max_tokens": request.max_tokens,
+                        "top_p": request.top_p,
+                        "stream": True,
+                    }
+                    if self.base_url:
+                        kwargs["api_base"] = self.base_url
+                    active_key = get_current_api_key(env_key) if not self.is_local else self.api_key
+                    if active_key:
+                        kwargs["api_key"] = active_key
+                    elif self.api_key:
+                        kwargs["api_key"] = self.api_key
+
+                    accumulated = ""
+                    response = await litellm.acompletion(**kwargs)
+                    async for chunk in response:
+                        delta = chunk.choices[0].delta if chunk.choices else None
+                        if delta and delta.content:
+                            accumulated += delta.content
+                            yield f'{{"content": {json.dumps(delta.content)}, "done": false}}'
+                        finish = chunk.choices[0].finish_reason if chunk.choices else None
+                        if finish == "stop" or (delta and delta.content is None):
+                            yield f'{{"content": {json.dumps(accumulated)}, "done": true}}'
+                            return
+                    # If loop ends without finish_reason, yield accumulated
+                    yield f'{{"content": {json.dumps(accumulated)}, "done": true}}'
+                    return
+
+                except Exception as exc:
+                    last_error = exc
+                    if self._is_quota_error(exc) and len(keys) > 1:
+                        rotate_api_key(env_key)
+                        logger.warning(
+                            "Stream quota exhausted for %s — key %d/%d, rotating",
+                            model, key_attempt + 1, max_key_attempts,
+                        )
+                        continue
+                    if self._is_quota_error(exc):
+                        logger.warning(
+                            "All keys exhausted for %s — trying next model (%d/%d)",
+                            model, model_idx + 1, len(models_to_try),
+                        )
+                        break
+                    logger.error("LiteLLM stream failed for %s: %s", model, exc)
+                    raise
+
+        # All models + keys exhausted — yield error as stream event
+        error_msg = f"All models/keys exhausted: {models_to_try}"
+        logger.error(error_msg)
+        yield f'{{"error": {json.dumps(error_msg)}, "done": true}}'
 
     async def health_check(self) -> ProviderHealthStatus:
         """Check provider health by attempting a minimal completion."""

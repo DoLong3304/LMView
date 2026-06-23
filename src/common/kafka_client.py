@@ -87,7 +87,7 @@ def init_producer() -> None:
     _producer = create_kafka_producer()
 
 
-def _on_send_error(topic: str, symbol: str, exc: Exception) -> None:
+def _on_send_error(exc: Exception, topic: str, symbol: str) -> None:
     log.error("[KAFKA] Async send failed | topic=%s symbol=%s error=%s", topic, symbol, exc)
 
 

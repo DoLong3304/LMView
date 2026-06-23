@@ -391,3 +391,78 @@ export function calcParabolicSAR(
 
   return out;
 }
+
+// ── Support & Resistance ─────────────────────────────────────────────────────
+
+export interface SRLevel {
+  price: number;
+  type: "support" | "resistance";
+  label: string;
+}
+
+export function calcSupportResistance(candles: Candle[], lookback: number = 50): SRLevel[] {
+  if (candles.length < 3) return [];
+
+  const recent = candles.slice(-lookback);
+  const swingLows: number[] = [];
+  const swingHighs: number[] = [];
+
+  // Detect swing points via 3-candle pivot
+  for (let i = 1; i < recent.length - 1; i++) {
+    const prev = recent[i - 1];
+    const curr = recent[i];
+    const nxt = recent[i + 1];
+
+    if (curr.low < prev.low && curr.low < nxt.low) {
+      swingLows.push(curr.low);
+    }
+    if (curr.high > prev.high && curr.high > nxt.high) {
+      swingHighs.push(curr.high);
+    }
+  }
+
+  // Add absolute extremes
+  swingLows.push(Math.min(...recent.map(c => c.low)));
+  swingHighs.push(Math.max(...recent.map(c => c.high)));
+
+  // Deduplicate nearby levels (within 0.5%)
+  function dedupe(arr: number[], tol: number = 0.005): number[] {
+    if (!arr.length) return [];
+    const sorted = [...new Set(arr)].sort((a, b) => a - b);
+    const result: number[] = [sorted[0]];
+    for (let i = 1; i < sorted.length; i++) {
+      if (Math.abs(sorted[i] - result[result.length - 1]) / result[result.length - 1] > tol) {
+        result.push(sorted[i]);
+      }
+    }
+    return result;
+  }
+
+  const supports = dedupe(swingLows);
+  const resistances = dedupe(swingHighs);
+
+  const currentPrice = recent[recent.length - 1].close;
+
+  const levels: SRLevel[] = [];
+  // Supports below current price (most relevant)
+  for (const s of supports) {
+    if (s < currentPrice) {
+      levels.push({ price: s, type: "support", label: `S ${s.toFixed(2)}` });
+    }
+  }
+  // Resistances above current price
+  for (const r of resistances) {
+    if (r > currentPrice) {
+      levels.push({ price: r, type: "resistance", label: `R ${r.toFixed(2)}` });
+    }
+  }
+
+  // Sort: closest to current price first
+  levels.sort((a, b) => Math.abs(a.price - currentPrice) - Math.abs(b.price - currentPrice));
+
+  // Keep top 6 (3 support, 3 resistance)
+  const supportsOut = levels.filter(l => l.type === "support").slice(0, 3);
+  const resistancesOut = levels.filter(l => l.type === "resistance").slice(0, 3);
+
+  return [...supportsOut, ...resistancesOut];
+}

@@ -37,7 +37,7 @@ export const INDICATORS: IndicatorDef[] = [
   { key: "ichimoku", labelKey: "indicatorIchimoku", group: "trend", pane: "chart", descriptionKey: "indicatorDescIchimoku" },
   { key: "supertrend", labelKey: "indicatorSupertrend", group: "trend", pane: "chart", descriptionKey: "indicatorDescSupertrend" },
   { key: "psar", labelKey: "indicatorPsar", group: "trend", pane: "chart", descriptionKey: "indicatorDescPsar" },
-  { key: "support_resistance", labelKey: "indicatorSupportResistance", group: "trend", pane: "chart", descriptionKey: "indicatorDescSupportResistance", available: false },
+  { key: "support_resistance", labelKey: "indicatorSupportResistance", group: "trend", pane: "chart", descriptionKey: "indicatorDescSupportResistance" },
   { key: "rsi", labelKey: "indicatorRsi", group: "momentum", pane: "pane", descriptionKey: "indicatorDescRsi" },
   { key: "macd", labelKey: "indicatorMacd", group: "momentum", pane: "pane", descriptionKey: "indicatorDescMacd" },
   { key: "stochastic", labelKey: "indicatorStochastic", group: "momentum", pane: "pane", descriptionKey: "indicatorDescStochastic" },

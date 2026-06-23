@@ -173,4 +173,12 @@ export const DEFAULT_INDICATOR_SETTINGS: Record<string, IndicatorSettings> = {
     type: "Stochastic",
   },
   atr: { period: 14, color: THEME.atr, lineWidth: 1.5, visible: false, type: "ATR" },
+  support_resistance: {
+    lookback: 50,
+    resistanceColor: THEME.sma20,
+    supportColor: THEME.volumeMa,
+    lineWidth: 1,
+    visible: false,
+    type: "S/R",
+  },
 };
