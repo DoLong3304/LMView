@@ -674,6 +674,11 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
   spark-submit:
     profiles: ["dev", "prod"]
@@ -753,6 +758,11 @@ services:
           memory: 4G
     depends_on:
       - spark-master
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
   spark-worker-2:
     profiles: ["dev", "prod"]
@@ -791,6 +801,11 @@ services:
           memory: 4G
     depends_on:
       - spark-master
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8085"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
 
   job-watchdog:
     profiles: ["dev", "prod"]
@@ -928,6 +943,12 @@ services:
     depends_on:
       - postgres
       - spark-master
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 
   dagster-daemon:
     profiles: ["dev", "prod"]
@@ -961,6 +982,11 @@ services:
           memory: 512M
     depends_on:
       - dagster-webserver
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://dagster-webserver:3000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # ══════════════════════════════════════════════════════════════════════════════
   # API LAYER (FastAPI)

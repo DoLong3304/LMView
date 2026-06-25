@@ -136,8 +136,8 @@ swarm-down: ## Remove the Swarm stack (keeps registry and volumes)
 # ─── Jobs ────────────────────────────────────────────────────────────────────
 
 .PHONY: submit-jobs
-submit-jobs: ## Submit Flink and Spark streaming jobs
-	bash scripts/auto_submit_jobs.sh
+submit-jobs: ## Submit Flink streaming job
+	bash scripts/submit_flink_job.sh
 
 # ─── Testing ─────────────────────────────────────────────────────────────────
 
@@ -164,17 +164,8 @@ status: ## Show status and RAM usage of all containers
 	@docker stats --no-stream --format "table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}" | head -20
 
 .PHONY: docs-version
-docs-version: ## Sync version string across all .md files (usage: make docs-version V=0.25.42)
-	@if [ -z "$(V)" ]; then \
-		echo "Usage: make docs-version V=<version> (e.g. V=0.25.42)"; \
-		python3 scripts/sync_docs_version.py --dry-run; \
-	else \
-		python3 scripts/sync_docs_version.py --version $(V); \
-	fi
-
-.PHONY: docs-version-check
-docs-version-check: ## Show which version would be synced (dry-run)
-	python3 scripts/sync_docs_version.py --dry-run
+docs-version: ## Show current docs version
+	@echo "Version is set in VERSION: $$(cat VERSION 2>/dev/null || echo 'unknown')"
 
 .PHONY: clean
 clean: ## Remove all containers, volumes, and networks (DANGEROUS)

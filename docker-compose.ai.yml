@@ -1,15 +1,14 @@
-version: "3.9"
-
 # ══════════════════════════════════════════════════════════════════════════════
-# AI SERVICE — standalone FastAPI service
+# docker-compose.ai.yml — AI Service override
 #
-# Runs on the core node, exposes port 8100, and is reachable from the
-# backend (FastAPI) on the same `crypto-net` overlay network. The backend
-# proxies AI chat requests here instead of running AI logic in-process.
+# Adds a standalone ai-service container that runs LLM inference and
+# LangGraph DAG orchestration. Backend proxies AI requests to this
+# container when AI_SERVICE_EMBEDDED=false (default).
 #
-# Image tag follows the `cryptoprice/<name>:<tag>` convention so the
-# deploy script's registry rewrite (`cryptoprice/*` → `${REGISTRY_ADDR}/cryptoprice/*`)
-# rewrites it to the Swarm registry address automatically.
+# Merge with the main compose file:
+#   docker compose -f docker-compose.yml -f docker-compose.ai.yml up -d
+# Or for Swarm:
+#   docker stack deploy -c docker-compose.yml -c docker-compose.swarm.yml -c docker-compose.ai.yml cryptoprice
 # ══════════════════════════════════════════════════════════════════════════════
 
 services:
@@ -18,15 +17,19 @@ services:
     build:
       context: .
       dockerfile: docker/ai-service/Dockerfile
-    image: cryptoprice/ai-service:latest
+      args:
+        - APP_VERSION=${APP_VERSION:-0.28.0}
+    image: cryptoprice/ai-service:${AI_SERVICE_TAG:-latest}
     hostname: ai-service
+    restart: unless-stopped
     environment:
       - AI_MODE=${AI_MODE:-api}
       - AI_CONFIG_PATH=${AI_CONFIG_PATH:-/app/ai_service/configs/ai.api.yaml}
       - AI_ORCHESTRATION=${AI_ORCHESTRATION:-langgraph}
-      - AI_CONFIG_PATH=${AI_CONFIG_PATH:-/app/ai_service/configs/ai.api.yaml}
       - AI_ENABLE_REAL_LLM=${AI_ENABLE_REAL_LLM:-true}
       - AI_SERVICE_EMBEDDED=false
+      - AI_ENABLE_RAG=${AI_ENABLE_RAG:-true}
+      - AI_RERANKER_MODEL=${AI_RERANKER_MODEL:-ms-marco-MiniLM-L-6-v2}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
       - REDIS_HOST=redis-master
       - REDIS_MASTER_NAME=${REDIS_MASTER_NAME:-mymaster}
@@ -41,17 +44,12 @@ services:
       - INFLUX_TOKEN=${INFLUX_TOKEN}
       - INFLUX_ORG=${INFLUX_ORG}
       - INFLUX_BUCKET=${INFLUX_BUCKET}
-      - LITELLM_BASE_URL=http://litellm:4000
+      - LITELLM_BASE_URL=${LITELLM_BASE_URL:-http://litellm:4000}
       - LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY:-}
-      - AI_ENABLE_RAG=${AI_ENABLE_RAG:-true}
-      - AI_RERANKER_MODEL=${AI_RERANKER_MODEL:-ms-marco-MiniLM-L-6-v2}
     ports:
-      - target: 8100
-        published: 8100
-        protocol: tcp
-        mode: ingress
+      - "8100:8100"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8100/health', timeout=3)\""]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8100/health', timeout=3)"]
       interval: 30s
       timeout: 10s
       retries: 3

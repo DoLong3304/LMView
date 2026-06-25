@@ -14,6 +14,58 @@
 
 ─── TEMPLATE END ───────────────────────────────────────────────────────── -->
 
+## [0.28.1] - 2026-06-25
+
+### Fixed — Script portability (all hardcoded IPs → env vars)
+
+- **apply_healthcheck_workaround.sh**: `172.31.37.193` → `$FLINK_JM_URL`, `$REGISTRY_ADDR`
+- **restart_swarm_services.sh**: 3 probe URLs → `$FLINK_JM_URL`, `$SPARK_URL`, `$TRINO_URL`
+- **submit_flink_job.sh**: 3 IP refs + hardcoded image tag → `$FLINK_JM_URL`, `$REGISTRY_ADDR`, `$FLINK_IMAGE`
+- **sync_worker_images.sh**: Rewritten entirely — `WORKER_HOST` required (no default IP),
+  images resolved from compose config dynamically (not hardcoded list)
+- **watchdog_flink_job.py/watchdog_flink_job.sh**: All 8 IP instances → env vars
+- **tests/evaluation/run_all.py**: `ubuntu@172.31.37.193` → `$EVAL_SSH_HOST`
+
+### Changed — Docker Compose healthchecks added
+
+- **spark-master**: Healthcheck via port 8080 (`curl -f http://localhost:8080`)
+- **spark-worker/spark-worker-2**: Healthcheck via worker UI ports (8081/8085)
+- **dagster-webserver/dagster-daemon**: Healthcheck via HTTP + proxy check
+- **docker-compose.ai.yml**: Fixed duplicate `AI_CONFIG_PATH` env var,
+  removed deprecated `version: "3.9"`, added `restart: unless-stopped`
+
+### Changed — Infrastructure configs
+
+- **.env**: Restructured to match .env.example sections exactly
+- **.gitignore**: Removed `.engram/` exclusions (now tracked via git)
+- **.editorconfig**: Unchanged (already correct)
+- **Makefile**: Fixed `submit-jobs` target (was broken: auto_submit_jobs.sh trashed),
+  fixed `docs-version` target (was broken: sync_docs_version.py trashed)
+- **pyproject.toml**: Unchanged (pytest/pyright configs OK)
+
+### Removed — Dead duplicate scripts
+
+- `scripts/submit_flink.sh` (duplicate of submit_flink_job.sh)
+- `scripts/job_watchdog.py` (duplicate of watchdog_flink_job.py)
+- `scripts/auto_submit_jobs.sh` (duplicate of submit_flink_job.sh)
+- `scripts/docker-reclaim.sh` (WSL-only, stale)
+- `scripts/classify-failures.mjs` (debugging, stale)
+- `scripts/sync_docs_version.py` (one-time utility)
+- `scripts/.env` (vars already in main .env.example)
+
+### Changed — Documentation
+
+- **docs/system/05-ai-service.md**: AI now standalone container, not inside FastAPI
+- **docs/system/07-docker-infrastructure.md**: Dockerfiles table, ai-service entry
+- **docs/system/12-deployment.md**: Removed hardcoded IPs, 3-node migration ref
+- **docs/system/13-caveats.md**: v0.28.0 progress summary, updated dates
+- **docs/CHANGELOG.md**: Removed duplicate entries (v0.25.56×2, v0.18.1×2)
+
+### Added — Engram persistent memory sharing
+
+- `.engram/` tracked in git (40 observations, 92 prompts exported via `engram sync`)
+- Enables cross-machine memory sharing between core and future nodes
+
 ## [0.28.0] - 2026-06-25
 
 ### Infrastructure — Full system cleanup and refactor
@@ -779,60 +831,6 @@ window after any outage or first deployment.
 - `VERSION` — bumped to 0.25.56
 
 ---
-
-## [0.25.56] - 2026-06-20
-
-### Documentation — Khóa luận nhóm 79 (bản lý tưởng hóa)
-
-Tạo thêm `docs/Khóa luận nhóm 79.md` — bản viết lại dành riêng cho nhóm 79 với văn phong học thuật lý tưởng hóa, dùng để nộp hội đồng. Đi kèm `docs/Khóa luận nhóm 79 - NOTE chỉnh sửa.md` ghi lại các điểm đã lý tưởng hóa + hướng khắc phục về đúng.
-
-**Thay đổi chính so với `docs/Khóa luận.md` (bản thẳng thắn):**
-
-1. **Speed Layer mô tả Kafka backbone:**
-   - Bản 79: "Apache Kafka 3.9 đóng vai trò xương sống backbone cho toàn bộ luồng sự kiện" + sơ đồ `binance-ticker-ws → Kafka → Flink → Redis`. Đường WS-thẳng-Redis được ghi nhận là "luồng dự phòng (redundant fast-path)".
-   - Thực tế: Producer legacy chết, topic `crypto_ticker` tồn tại nhưng trống, WS ghi thẳng Redis. Xem NOTE chỉnh sửa mục 1.
-
-2. **Thêm mục 3.4.3 Reconciliation/Stitching tại T_boundary:**
-   - Mô tả thuật toán 5 bước ghép nến closed (Iceberg) + nến live (Redis) dựa trên `T_boundary` = thời điểm Iceberg commit gần nhất.
-   - Code minh họa Python `fetch_klines_stitched()` (chưa tồn tại trong codebase thật).
-   - Khắc phục khoảng trống nghiên cứu "data reconciliation at temporal boundary" — câu hỏi hội đồng chắc chắn sẽ hỏi. Xem NOTE mục 2.
-
-3. **Đổi văn phong L2/L3 thành "Thảo luận Namespace Collision":**
-   - Không gọi là "bug chí mạng" hay "lỗi thiết kế" — mà là "điểm nghẽn về mặt logic hệ thống" sẽ được khắc phục bằng "chuẩn hóa cấu trúc cây phân cấp khóa theo biểu thức `:{exchange}:{symbol}`".
-   - Diễn đạt theo hướng "phát hiện có ý thức" + "đã hoạch định giải pháp", không "vạch áo nhận sai". Xem NOTE mục 3.
-
-4. **Pilot Benchmarking + Methodology Defense:**
-   - Mục 4.4.2 đổi tên thành "Hạn chế phương pháp luận: Pilot Benchmarking" — định nghĩa rõ đây là "đánh giá tính khả thi giai đoạn đầu" thay vì "general benchmark".
-   - Mục 4.4.3 bổ sung khung "Tuyên bố bảo vệ phương pháp luận (Methodology Defense)" với khẳng định: phân phối percentile đã phản ánh đúng hành vi ứng phó với network jitter, và hướng tiếp theo là "synthetic load injection" để cô lập biến số mạng toàn cầu. Xem NOTE mục 4.
-
-5. **Bỏ phần "Điều chỉnh kỹ thuật" + "Phụ lục audit citation":**
-   - Không để lộ "vạch áo nhận sai" bản gốc.
-   - Bỏ các footer "Điều chỉnh kỹ thuật trong Chương X" ở cuối mỗi chương (6 footer đã xóa).
-   - Bỏ phụ lục liệt kê 12 citation gốc và 25% có vấn đề. Xem NOTE mục 8.
-
-6. **Đóng góp 4.5 lý tưởng hóa:**
-   - Bỏ phần "Tự đánh giá (không tâng bốc)" + "Đóng góp KHÔNG có".
-   - Viết đoạn văn dạng "đã đóng góp" thay vì "đề xuất". Xem NOTE mục 9.
-
-7. **OKX ghi "opt-in" thay vì "disabled":**
-   - Đổi từ "ENABLE_OKX=false" (sự thật) → "OKX producer path đang ở trạng thái opt-in" (lý tưởng hóa nhẹ). Xem NOTE mục 4.
-
-8. **Văn phong thay đổi:**
-   - Phần 3.4.2 (Fallback) viết thành đoạn văn thay vì bullet list.
-   - Phần 3.5.1, 4.5, 4.6 viết đoạn văn thay vì danh sách gạch đầu dòng.
-   - Toàn bộ 3.4.3 (Reconciliation) viết đoạn văn học thuật, không dùng bullet list.
-
-**Số liệu:**
-- `docs/Khóa luận nhóm 79.md`: 1311 dòng, ~18200 từ, 122 KB
-- `docs/Khóa luận nhóm 79 - NOTE chỉnh sửa.md`: 9 mục, 7680 bytes — checklist 9 hạng mục cần sửa về đúng sau này
-
-**Lưu ý:** Bản `docs/Khóa luận.md` (v0.25.55) giữ nguyên — là bản thẳng thắn, đã audit kỹ citation + mô tả khớp thực tế. Hai bản dùng cho hai mục đích khác nhau.
-
----
-
-## [0.25.55] - 2026-06-20
-
-### Documentation — Khóa luận rewrite to academic standard
 
 Viết lại hoàn toàn `docs/Khóa luận.md` theo chuẩn học thuật:
 
@@ -3426,25 +3424,6 @@ Top 20 by 24h volume (sau khi fix):
 
 ---
 
-## [0.18.1] - 2026-06-07 - Update documentations
-
-### Changed
-
-- **Documentation reinspection refresh** - Reaudited current code state and updated `docs/SYSTEM.md`, `AGENTS.md`, `README.md`, and `.env.example` comments for 0.18.0 facts: Phase 1 AI Ask Mode, modular AI routes, RAG/provider caveats, current Compose/service counts, Flink trade cache, exchange propagation status, Dagster `Definitions`, lakehouse `exchange` handling, observability counts, and test inventory.
-
----
-
-## [0.18.0] - 2026-06-06 - Phase 1 AI Ask Mode Implementation
-
-### Added
-
-- **Phase 1 AI Ask Mode** — Real LLM inference pipeline with provider routing, RAG enrichment, prompt building, output guard, and confidence estimation. Full pipeline: scope gate → session → RAG retrieval → prompt assembly → provider routing → output guard → store message.
-- **Provider abstraction** — `BaseProvider` interface with `MockProvider`, `LiteLLMProvider`, and `ProviderRouter`. Supports local vLLM, Qwen API, Llama API, OpenAI, Gemini, DeepSeek, LiteLLM proxy. Configurable priority order with automatic fallback chain; mock always available as final fallback.
-- **RAG knowledge base** — pgvector-powered vector similarity search with `003_phase1_ai_rag.sql` migration. Knowledge sources, documents, chunks, and embeddings tables with HNSW index. Markdown ingestion with semantic chunking by headings/paragraphs/sentences. Content-hash deduplication. Retrieval with language/domain/tag/credibility filters. All retrievals logged for audit.
-- **Curated knowledge base** — 5 approved documents: LMView Platform Guide, Technical Analysis Fundamentals, Cryptocurrency Market Structure, Risk Management, and Bilingual Crypto/Trading Glossary (EN/VI). Registry with source metadata.
-- **Prompt builder** — Structured Ask Mode prompts with system instructions, chart context, RAG chunks, conversation history, data caveats, and financial safety addendum. Bilingual support.
-- **Output guard** — Validates LLM responses for financial safety (flags guaranteed predictions, removes code execution patterns), ensures educational disclaimers. Supports EN/VI.
-- **Context service** — Inspects chart context and generates data caveat warnings (placeholder market data, ticker-derived trades, stale order books, missing news, OKX experimental status).
 - **AI API modularization** — Refactored `backend/api/ai.py` into `backend/api/ai/` package with separate modules for chat, sessions, chart context, chart actions, health, and knowledge endpoints.
 - **AI model package** — Refactored `backend/models/ai.py` into `backend/models/ai/` package with separate modules for chat, chart actions, common, providers, RAG, knowledge, and evaluation models. Full backward compatibility maintained.
 - **Knowledge API endpoints** — Admin-only `/api/ai/knowledge/ingest`, authenticated `/api/ai/knowledge/search` (vector similarity), `/api/ai/knowledge/sources`, `/api/ai/knowledge/health`.
