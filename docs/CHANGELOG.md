@@ -1,3 +1,102 @@
+# LMView Changelog
+
+<!-- ─── TEMPLATE (copy for new entries) ──────────────────────────────────────
+
+## [X.Y.Z] - YYYY-MM-DD
+
+### <Added|Fixed|Changed|Removed> — <title>
+
+- **<Component/Area>: <Brief>** (`path/to/file`): <What changed and why.> Accepts/returns <types>. Works <how>.
+
+### Changed
+- `<image name>`: <version A → B> <reason>
+- `<file>`: <what changed>
+
+─── TEMPLATE END ───────────────────────────────────────────────────────── -->
+
+## [0.28.0] - 2026-06-25
+
+### Infrastructure — Full system cleanup and refactor
+
+- **All services stopped** (`docker stack rm cryptoprice`): Swarm stack removed, all containers terminated, ~7GB reclaimed via `docker system prune -a -f --volumes`.
+- **Worker node decommissioned**: Node `ip-172-31-9-171` confirmed Down/terminated. Swarm left on core node.
+- **Docker system reclaim**: ~7GB total freed.
+
+### Changed — Backend/AI separation
+
+- **Backend Dockerfile optimized** (`docker/fastapi/Dockerfile`): Removed heavy AI deps from base requirements. AI libs moved to `requirements-ai.txt` (ai-service image only).
+- **Backend requirements cleaned** (`docker/fastapi/requirements.txt`): Stripped all AI/ML deps (litellm, langgraph, langchain-core). Gateway-only deps remain.
+- **AI service Dockerfile updated** (`docker/ai-service/Dockerfile`): Properly separated build with its own requirements sets.
+- **Default AI proxy mode** (`backend/services/ai/ai_proxy.py`): `AI_SERVICE_EMBEDDED` default `true`→`false`. Embedded imports now lazy (inside functions).
+- **Code import hygiene**: All `ai_service` imports in `backend/services/ai/*.py` converted to lazy imports.
+
+### Changed — Config & scripts adaptability
+
+- **Deploy script hardened** (`scripts/deploy_aws_swarm.sh`): Hardcoded `CUSTOM_IMAGES` removed — images resolved dynamically from `docker compose config`. Added `REGISTRY_ADDR` env var, `--registry-addr`, `--stack-name` flags.
+- **Node setup script added** (`scripts/setup_node.sh`): Reusable bootstrap with env var overrides (EFS ID, region, mount point). Installs Docker, configures EFS fstab.
+- **Environment example rewritten** (`.env.example`): All vars use `${VAR:-default}`, organized by concern (InfluxDB, PostgreSQL, Redis, Kafka, AI, Cloud). 3-node ready.
+- **Gitignore updated** (`.gitignore`): Organized sections. Added test-results, playwright-report, metastore_db, debug scripts.
+
+### Changed — Docs reorganization
+
+- **SYSTEM.md marked legacy** (`docs/SYSTEM.md`): Header archival notice. Points to `docs/system/README.md`.
+- **Module docs refreshed** (`docs/system/README.md`): Version→0.27.0, date→2026-06-25, added 3NODE-MIGRATION-PLAN.md ref.
+- **3-node migration proposal** (`docs/3NODE-MIGRATION-PLAN.md`): EC2 setup, security groups, EFS vs local storage, service placement (core/data/compute), PG replication, migration phases, cost comparison.
+- **AGENTS.md updated**: 2-node/3-node support, AI Service Restriction rule, node placement table.
+- **Thesis/backup docs moved to `trash/`**: 32 files (~68MB). Debug test scripts and test results also trashed.
+
+### Removed
+- Duplicate Docker images (stale registry-tagged, ~7GB)
+- Thesis versions v1-v6, debug files, temp artifacts
+- CHANGELOG duplicate entries (v0.27.1/0.27.0/0.26.11 from 2026-06-22)
+
+## [0.27.0] - 2026-06-24
+
+### Added — Tour recap persistence + Interact mode UX overhaul
+
+- **Backend: POST /api/ai/sessions/{id}/messages** (`backend/api/ai/sessions.py`): New endpoint to persist non-LLM messages (tour recap) so they survive page reload. Accepts `role`, `content`, and optional `metadata`. Stores via `chat_store.store_message`.
+- **Frontend: `aiPersistSessionMessage`** (`frontend/src/services/aiService.ts`): API client method that calls the new endpoint.
+- **Frontend: Recap persistence** (`AiAssistantPanel.tsx`): `onTourComplete` handler now persists the recap message to the server via `aiPersistSessionMessage`. Includes `tool_calls` in metadata so the frontend can detect recap messages on reload.
+- **Frontend: Replay from stored tour_plan** (`AiAssistantPanel.tsx`): Replay button now extracts `tour_plan` from `tool_calls.arguments.tour_plan` embedded in the recap message. Works after page reload when `lastTourPlanRef` is empty.
+- **Keep / Revert moved to recap bubble** (`AiAssistantPanel.tsx`): Keep/Revert buttons removed from last-step overlay and placed inside the recap message bubble, alongside the Replay button. Chat list is now the single source of truth for analysis outcome.
+- **Chart pointer-events-none when frozen** (`CandlestickChart.tsx`): When `frozen={true}`, chart root gets `pointer-events-none select-none` — blocks accidental clicks during tours.
+- **Dim overlay absorbs clicks during tour** (`AiActionProvider.tsx`): When `tourActive`, the dim overlay gets `pointer-events-auto` so clicks outside the step overlay are absorbed — prevents unintentional chart/UI interaction.
+- **lmview:right-panel-top-tab handler opens right panel** (`App.tsx`): When dispatching "aiHelper" tab, also calls `setIsRightPanelOpen(true)` so the recap is visible even if the panel was collapsed.
+- **Recap render priority** (`AiAssistantPanel.tsx`): `tour_recap` tool_call checked before `tour_plan` — fixes recap being hidden behind analysis card render after page reload.
+
+### Fixed — Interact mode UX bugs
+
+- **AI panel hidden after tour finish** (`AiAssistantPanel.tsx`): Changed Finish and Cancel from dispatching `lmview:open-panel` (no listener) to `lmview:right-panel-top-tab` with `tab: "aiHelper"` (has listener in App.tsx). AI panel now correctly shows after tour ends.
+- **Recap metadata missing tool_calls** (`AiAssistantPanel.tsx`): Added `tool_calls` array to persisted metadata so the frontend can detect recap messages on reload.
+- **Tour overlay overflow detection** (`waitForOverlay` in probes): Fixed strict mode violations by using `.first()` on locators.
+
+### Normal user verification
+
+- Created normal user account (`user1@example.com`)
+- Verified tour trigger, step navigation (5 steps), recap persistence after reload
+- All UI elements (Recap, Replay, Keep, Revert) present and visible
+- Backend returns tour_plan with 5 steps (set_timeframe, highlight_candles, draw_horizontal_line, add_indicator, open_panel)
+- First-call latency ~67s (LLM cold start)
+
+### Infrastructure
+
+- Deployed `cryptoprice/fastapi:0.28.8` — new POST endpoint
+- Deployed `cryptoprice/nginx:1.71.0` — bundle `index-BrSg97Zm.js`
+
+## [0.26.13] - 2026-06-22
+
+### Added — Bilingual support (Vietnamese) in Interact mode tour system
+
+- **VN tour query detection** (`ai_service/agents/experts/tour_planner.py`): Added Vietnamese keyword equivalents to `_is_lmview_tour_query` and `_intent_fallback_tour` (sổ lệnh, độ sâu, thanh khoản, phân tích, đánh giá, hướng dẫn, etc.) so Vietnamese users get visual tours.
+- **Bilingual system prompt** (`ai_service/agents/experts/tour_planner.py`): `TOUR_PLANNER_SYSTEM_PROMPT` now explicitly instructs "Respond in the same language the user writes in" with bilingual examples.
+- **EN language override** (`ai_service/agents/synthesis.py`): When `language="en"`, adds "Respond in English only. Do NOT mix Vietnamese into the response." — prevents LLM from defaulting to Vietnamese on English queries.
+- **Frontend language pass-through** (`AiAssistantPanel.tsx`, `useAiChat.ts`, `types.ts`): Captures `lang` from `useI18n()` and passes as `language` in AIChatRequest's chart context. Backend adds it to the synthesis prompt.
+- **VN tour verification** (`test-ai-bilingual.mjs`): New test suite with 7 bilingual scenarios covering EN Ask, VN Ask, EN Interact, VN Interact, and EN→VN mode switch. All 7 PASS.
+- **Deep Interact verification** (`test-ai-interact-deep.mjs`): 10 tests covering step navigation, overlay buttons, analysis quality, console errors (0 critical), interruption, textarea recovery, explanation quality, replay recap, and previous-step navigation. All 10 PASS.
+
+### Fixed — Interact mode state management (coverage)
+- **`sendInteractAndGetSteps`**: Removed spurious `lmview:ai-clear-chat` dispatch that reset session state mid-flight, causing "no tour" failures in multi-step tests.
+
 ## [0.26.12] - 2026-06-22
 
 ### Fixed — 7 UX bugs in Interact mode tour system
@@ -29,57 +128,6 @@
 - `backend version`: cryptoprice/fastapi:0.28.0 (unchanged)
 - `frontend version`: cryptoprice/nginx:1.62.0 (bundle `index-DecRvn1B.js`)
 - `docs/CHANGELOG.md`: added v0.26.11 entry
-- **Restructured Chương 2**: 2.1.1 FR, 2.1.2 NFR, 2.2.1 Các kiểu dữ liệu (mới), 2.2.2 Lambda ba tầng (2.2.2.1 Speed, 2.2.2.2 Batch, 2.2.2.3 Serving), 2.2.3 Cấu trúc lưu trữ, 2.3 Kiến trúc AI, 2.4.1 Use case, 2.4.2 Sequence.
-- **Restructured Chương 3**: 3.1 Công nghệ (3.1.1-3.1.6), 3.2 Triển khai (3.2.1, 3.2.2), 3.3 UI.
-- **Citations chuẩn APA**: Toàn bộ trích dẫn dùng (Author, Year), reference list ở cuối tài liệu.
-
-## [0.27.1] - 2026-06-22
-
-### Added — Thesis v6 (khoa-luan-nhom-79-v6.md) theo đề cương mới v6
-
-- **Created `docs/khoa-luan-nhom-79-v6.md`** (~2195 dòng) từ v5 với cấu trúc section mới.
-- **Restructured Chương 1**: 1.2 tách 1.2.3 (Nến+OHLCV) và 1.2.4 (Mô hình nến), thêm 1.3 Tác động tin tức, 1.4 Xử lý dữ liệu lớn, 1.5 AI với 1.5.3 DAG/MoE/Multi-Agents/FinBERT và 1.5.4 Vector DB+HNSW mới.
-- **Restructured Chương 2**: 2.2.1 Các kiểu dữ liệu mới, 2.2.2 Lambda với sub-section 2.2.2.1-2.2.2.3, 2.3 Kiến trúc AI, 2.4.1 Use case + 2.4.2 Sequence.
-- **Restructured Chương 3**: 3.1 Công nghệ (3.1.1-3.1.6), 3.2 Triển khai, 3.3 UI.
-- **APA citations**: 227 APA-style citations, 0 IEEE.
-
-## [0.27.0] - 2026-06-22
-
-### Added — Thesis v5 (khoa-luan-nhom-79-v5.md) with restructured đề cương
-
-- **Created `docs/khoa-luan-nhom-79-v5.md`** (~1936 dòng, ~44,640 từ) theo HƯỚNG DẪN VIẾT KHÓA LUẬN LMVIEW mới.
-- **Chương 1 restructured** theo đề cương mới: 1.1 Tiền điện tử (1.1.1-1.1.5), 1.2 Phân tích kỹ thuật (1.2.1 Nền tảng, 1.2.2 Chỉ báo, 1.2.3 Nến Nhật+OHLCV+Mô hình nến, 1.2.4 Tác động tin tức), 1.3 Xử lý dữ liệu lớn (1.3.1 Lambda, 1.3.2 Lakehouse, 1.3.3 Streaming), 1.4 AI (1.4.1 LLM, 1.4.2 RAG). Sections 1.4.3 DAG/MoE và 1.4.4 Vector DB REMOVED theo đề cương.
-- **Chương 3.3 reordered** 3.3.1 → 3.3.6 (v3 có 3.3.6 trước 3.3.3-3.3.5).
-- **Chương 4.2.7-4.2.8 moved** từ sau "TÀI LIỆU THAM KHẢO" về đúng vị trí trước References.
-- **1.2.3 và 1.2.4 added** (Biểu đồ nến Nhật, Mô hình nến) - bị mất trong rewrite script đầu tiên, đã restore từ v3 source.
-- **1.2.3 combined** Nến Nhật + OHLCV + Mô hình nến vào một section thay vì tách riêng.
-
-### Technical
-
-- File `docs/khoa-luan-nhom-79-v5.md` synced với cấu trúc đề cương mới, nội dung văn phong lấy từ v3.
-- **Ch1 thuần lý thuyết**: đã loại bỏ toàn bộ 19 tham chiếu "LMView" trong Chương 1 (cơ sở lý thuyết), thay bằng diễn đạt học thuật trung tính ("các hệ thống phân tích kỹ thuật", "trong thực tế", "trong bối cảnh phân tích tài chính", v.v.). Ch2-Ch4 vẫn đề cập LMView bình thường (đây là phần mô tả và đánh giá hệ thống).
-- **Hình 3.0 — AWS 3-AZ infrastructure diagram**: thêm sơ đồ mới mô phỏng đúng bộ icon chuẩn Amazon (VPC, Subnet, AZ, EC2, EBS, EFS, ALB, CloudWatch, Route 53, Secrets Manager) bọc ngoài 3 node Docker Swarm hiện hữu. Đánh số lại toàn bộ Hình 3.x: 3.0 (AWS 3-AZ), 3.1 (Docker Swarm internal), 3.2–3.5 (Node 1/2/3, UI, Frontend). DANH MỤC HÌNH cập nhật khớp với body.
-- **Mở Đầu Mục 1, 2, 3, 4 — bẻ nhỏ + bold keywords**: thay các khối văn dài đặc chữ bằng các đoạn ngắn 3–5 dòng, sử dụng **in đậm** cho keyword chính (đặc điểm thị trường, 6 bước DSRM, 4 bài toán con, 5 câu hỏi nghiên cứu, 4 đóng góp chính), thêm bullet list cho các thành phần liệt kê.
-- **Luồng backup Lakehouse → S3 (Iceberg nguyên bản)**: thêm Mục 3.1.6.1 mới mô tả Spark job backup hằng ngày từ MinIO lên S3, bảo toàn metadata Iceberg (manifest, snapshot, schema). Cập nhật Hình 2.2 (batch path) thêm nhánh backup sang S3. Cập nhật Hình 3.0 thêm mũi tên MinIO → S3 + dòng backup trong external services. Thêm đoạn mô tả luồng batch path vào Mục 2.3.1. Chi phí S3 ~0.20 USD/tháng.
-- **Rà soát toàn bộ tài liệu và tham chiếu S3 backup**: cập nhật Mục 3.1.3 (thêm backup Lakehouse như cấp thứ 4 của cơ chế chịu lỗi); Mục 3.2.6 (bổ sung ghi chú backup); Mục 4.2.3 (MinIO SPOF + S3 backup là mitigation; monitoring backup đã được tự động hóa cho MinIO); Mục 4.2.7 (CN2 nâng "ba cơ chế" lên "bốn cơ chế"); Mục 4.3.1 (tổng kết + abstract VN/EN đều đề cập backup); Phụ lục A.6 (bổ sung cấu hình backup_catalog).
-
-## [0.26.11] - 2026-06-22
-
-### Fixed — Infinite re-render loop + overlay stacking context + live-id gate
-
-Diagnosed with a headless browser probe (`probe-tour.mjs`, `probe-direct.mjs`) by instrumenting the tour auto-start / auto-execute / clearChat code paths and dumping overlay DOM probes after each step.
-
-- **Root cause: infinite re-render loop cleared `activeTour` on every render.** The initial-load effect in `useAiChat.ts` had `refreshApiSessions` in its deps. `refreshApiSessions` had `loadApiSession` in its deps. `loadApiSession` had `sessions` in its deps. So when `sessions` was updated, `loadApiSession` got a new ref, `refreshApiSessions` got a new ref, the initial-load effect re-fired, called `refreshApiSessions(true)`, which called `loadApiSession`, which called `setActiveTour(null)` — every single render. The tour would start, render once, then get wiped on the next re-render. **Fix**: guard with an `initialisedRef` so the initial-load effect only fires once per hook lifetime.
-- **Step overlay was covered by the highlight dim.** The overlay was `absolute left-2 right-2 top-2 z-[700]` inside the AI panel (`data-ai-section="ai-panel"`). The dim is `fixed inset-0 z-[680]` at body level. Z-index only escapes a stacking context when you're at the body level, so the dim always won. **Fix**: render the overlay via `createPortal(overlayNode, document.body)` so its z-720 actually competes against the dim's z-680.
-- **`liveMessageIdsRef` was too strict — blocked tours on reload AND on loaded sessions.** The v0.26.7 fix used this ref to gate auto-start, but the ref was cleared by `loadApiSession` on page load and by the auto-load effect's infinite loop, so the tour never auto-started for sessions that were loaded from the server. **Fix**: replaced with `autoExecutedTourIdsRef` keyed on message id only. Re-running on reload is fine because the ref is per-mount, so each page load gets a fresh set.
-- **Highlight dim now always cuts out the AI panel during an active tour.** Added a `lmview:ai-tour-start` / `lmview:ai-tour-end` event pair; the `HighlightOverlay` listens and includes the AI panel rect in the cutouts whenever a tour is running, so the step text + nav buttons stay readable even when the dim is focused on a different chart section.
-
-### Technical
-
-- Bundle `index-DecRvn1B.js` (475.40 kB / 133.49 kB gzip)
-- Deployed: `cryptoprice/nginx:1.62.0`
-- Verified end-to-end with Playwright: overlay renders, Next button advances through all 5 steps (40% → 60% → ...), step counter updates correctly.
-- Also deleted all 54 stale admin AI sessions so the user has a clean slate.
 
 ## [0.26.10] - 2026-06-22
 

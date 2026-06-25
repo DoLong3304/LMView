@@ -33,6 +33,7 @@
     "build:mock": "tsc --noEmit && vite build --mode mock",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:full-ui": "playwright test e2e/full-suite --config=e2e/full-suite/playwright.config.ts"
   }
 }

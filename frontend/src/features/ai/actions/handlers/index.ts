@@ -75,7 +75,7 @@ export type ActionHandler = (
  * and the front-end dispatcher share the same source of truth.
  */
 import { handleAddIndicator } from "./indicatorHandler";
-import { handleDrawTool, handleCreateAnnotation } from "./drawToolHandler";
+import { handleDrawTool, handleCreateAnnotation, handleDrawHorizontalLine, handleDrawFib, handleDrawRectangle } from "./drawToolHandler";
 import {
   handleHighlight,
   handleHighlightSection,
@@ -122,6 +122,9 @@ export const handlerRegistry: Record<string, ActionHandler> = {
   // Drawing tools
   draw_tool: handleDrawTool,
   draw_trendline: handleDrawTool,
+  draw_horizontal_line: handleDrawHorizontalLine,
+  draw_fib: handleDrawFib,
+  draw_rectangle: handleDrawRectangle,
   create_annotation: handleCreateAnnotation,
   clear_drawings: handleClearDrawings,
   delete_drawing: handleDeleteDrawing,

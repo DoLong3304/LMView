@@ -190,6 +190,7 @@ async def stream_all(websocket: WebSocket):
                 if trade_qty > 0 and result[iv]:
                     result[iv]["volume"] = round(result[iv].get("volume", 0) + trade_qty, 8)
 
+            result["T3"] = int(time.time() * 1000)
             push_start = time.monotonic()
             wire = json.dumps(result, default=str).encode("utf-8")
             try:
@@ -421,6 +422,7 @@ async def stream_interval(
 
             now_push = time.monotonic()
             if candle and candle != last_sent:
+                candle["T3"] = int(time.time() * 1000)
                 push_start = now_push
                 payload = json.dumps(candle, default=str).encode("utf-8")
                 try:
@@ -511,6 +513,7 @@ async def stream_indicators(
 
             now_push = time.monotonic()
             if payload and payload != last_sent:
+                payload["T3"] = int(time.time() * 1000)
                 push_start = now_push
                 wire = json.dumps(payload, default=str).encode("utf-8")
                 try:
@@ -738,6 +741,7 @@ async def _stream_all_impl(websocket: WebSocket, symbol: str = "", exchange: str
             if any_changed or ticker_updated:
                 if ticker_updated:
                     last_ticker_ts = live_ts
+                result["T3"] = int(time.time() * 1000)
                 push_start = now_push
                 payload = json.dumps(result, default=str).encode("utf-8")
                 try:

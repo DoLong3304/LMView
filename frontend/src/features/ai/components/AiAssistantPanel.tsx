@@ -20,6 +20,8 @@ import {
   Newspaper,
   Plus,
   RotateCcw,
+  Undo2,
+  Check,
   Send,
   Shield,
   Sparkles,
@@ -73,7 +75,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
   onOpenSettings,
   indSettings,
 }) => {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { user } = useAuth();
   const { executeAction } = useAiActions();
   const {
@@ -88,6 +90,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
     setActiveTour,
     liveMessageIdsRef,
     setMessages,
+    sessionId,
   } = useAiChat();
   const [inputValue, setInputValue] = useState("");
   // Suggested prompts visible until user sends their first message in the session.
@@ -282,8 +285,9 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
           }
         : null,
       frontend_context_version: "3.0.1",
+      language: lang,
     };
-  }, [selectedSymbol, exchange, timeframe, selectedIndicators, candles, indSettings]);
+  }, [selectedSymbol, exchange, timeframe, selectedIndicators, candles, indSettings, lang]);
 
   // Only auto-scroll the chat when a *new* message arrives, not on every
   // re-render. The chat is anchored to the bottom only on incremental
@@ -499,7 +503,14 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
           tool_calls: [
             {
               name: "tour_recap",
-              arguments: { action_count: actionCount, tour_id: lastTourPlanRef.current?.tour_id || "" },
+              arguments: {
+                action_count: actionCount,
+                tour_id: lastTourPlanRef.current?.tour_id || "",
+                title: lastTourPlanRef.current?.title || "",
+                // Embed the tour plan so the replay button works after
+                // page reload (lastTourPlanRef.current resets on remount).
+                tour_plan: lastTourPlanRef.current || null,
+              },
               reason: "Analysis complete",
               requires_approval: false,
             },
@@ -507,10 +518,53 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
         };
         return [...withoutProgressing, recapMessage];
       });
+
+      // Persist the recap to the server so it survives page reload.
+      // Without this, reloading a session loses the recap and the
+      // Replay button (the original tour message comes back from the
+      // DB but the recap was only in local state).
+      if (sessionId && user?.id) {
+        void (async () => {
+          try {
+            const { aiPersistSessionMessage } = await import("@/services/aiService");
+            await aiPersistSessionMessage(sessionId, {
+              role: "assistant",
+              content: summary,
+              metadata: {
+                tour_complete: true,
+                tour_plan: lastTourPlanRef.current || null,
+                action_count: actionCount,
+                // Include tool_calls in metadata so the server stores
+                // it in the JSONB field. On reload, the frontend reads
+                // metadata.tool_calls to detect recap messages and
+                // render the Replay / Keep / Revert buttons.
+                tool_calls: [
+                  {
+                    name: "tour_recap",
+                    arguments: {
+                      action_count: actionCount,
+                      tour_id: lastTourPlanRef.current?.tour_id || "",
+                      title: lastTourPlanRef.current?.title || "",
+                      tour_plan: lastTourPlanRef.current || null,
+                    },
+                    reason: "Analysis complete",
+                    requires_approval: false,
+                  },
+                ],
+                provider: "tour_recap",
+                model_name: "tour_recap",
+              },
+            });
+          } catch (err) {
+            // Non-blocking: log and continue; local state still has the recap.
+            if (isAdmin) console.warn("[AI] failed to persist tour recap:", err);
+          }
+        })();
+      }
     };
     window.addEventListener("lmview:ai-tour-complete", onTourComplete);
     return () => window.removeEventListener("lmview:ai-tour-complete", onTourComplete);
-  }, [setMessages, t]);
+  }, [setMessages, t, sessionId, user?.id, isAdmin]);
 
   // Auto-execute current tour step action
   useEffect(() => {
@@ -560,7 +614,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
       window.dispatchEvent(new CustomEvent("lmview:ai-tour-complete", {
         detail: { summary: activeTour.plan.summary, actions: activeTour.plan.steps },
       }));
-      window.dispatchEvent(new CustomEvent("lmview:open-panel", { detail: { target: "ai" } }));
+      window.dispatchEvent(new CustomEvent("lmview:right-panel-top-tab", { detail: { tab: "aiHelper" } }));
       return;
     }
     setActiveTour({ ...activeTour, currentStep: nextIdx });
@@ -586,7 +640,7 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
     // Restore the right panel to the AI Helper tab so the textarea is
     // visible. During the tour, open_panel steps may have switched the
     // right panel to "overview" / "orderBook" / etc.
-    window.dispatchEvent(new CustomEvent("lmview:open-panel", { detail: { target: "ai" } }));
+    window.dispatchEvent(new CustomEvent("lmview:right-panel-top-tab", { detail: { tab: "aiHelper" } }));
   }, [setActiveTour]);
 
   // Reset overlay position when a new tour starts so the box is
@@ -859,62 +913,111 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
                           : "border border-gray-800 bg-gray-850 text-gray-200"
                     }`}
                   >
-                    {message.tour_plan && message.tour_plan.steps?.length ? (
-                      // In Interact mode the assistant message *is* the
-                      // visual analysis: don't dump the LLM narrative in
-                      // chat (it's repeated in the step overlay + recap).
-                      // Render a compact card pointing to the step overlay.
-                      <div className="space-y-1.5" data-testid="ai-analysis-card">
-                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-200">
-                          <Sparkles size={11} className="text-amber-300" />
-                          {message.tour_plan.title || "Guided analysis"}
-                        </div>
-                        <div className="text-[11px] leading-5 text-amber-100/90">
-                          {message.tour_plan.summary || t("analysisReadyBody")}
-                        </div>
-                        <div className="flex items-center gap-1.5 text-[10px] text-amber-200/70">
-                          <Sparkles size={9} />
-                          {message.tour_plan.steps.length} {t("analysisSteps")}
-                          {activeTour?.plan?.tour_id === message.tour_plan.tour_id && (
-                            <span className="ml-1 rounded bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-semibold">
-                              Running
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ) : message.tool_calls?.some((call) => call.name === "tour_recap") ? (
-                      // The final response of a guided analysis: the
-                      // recap. Rendered as a regular chat bubble with
-                      // an embedded Replay button so the chat list is
-                      // the single source of truth for the analysis
-                      // outcome (no floating banner).
-                      <div className="space-y-1.5" data-testid="ai-tour-recap">
-                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-200">
-                          <Sparkles size={11} className="text-emerald-300" />
-                          {t("tourRecapTitle")}
-                        </div>
-                        <div className="text-[11px] leading-5 text-emerald-100/90 whitespace-pre-line">
-                          {message.content}
-                        </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={replayTour}
-                            disabled={!lastTourPlanRef.current}
-                            className="flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
-                            data-testid="ai-tour-replay"
-                          >
-                            <RotateCcw size={10} />
-                            {t("replay")}
-                          </button>
-                          <span className="text-[9px] text-emerald-100/60">
-                            {lastTourPlanRef.current?.title}
-                          </span>
-                        </div>
-                      </div>
-                    ) : (
-                      <MarkdownContent content={message.content} compact={isUser} />
-                    )}
+                    {(() => {
+                      // Render priority: tour_recap > tour_plan > markdown.
+                      // Check tour_recap FIRST because the server surfaces
+                      // tour_plan from metadata for recap messages too.
+                      const recapCall = message.tool_calls?.find(
+                        (c) => c.name === "tour_recap",
+                      );
+                      if (recapCall) {
+                        return (
+                          // The final response of a guided analysis: the
+                          // recap. Rendered as a regular chat bubble with
+                          // an embedded Replay button so the chat list is
+                          // the single source of truth for the analysis
+                          // outcome (no floating banner).
+                          <div className="space-y-1.5" data-testid="ai-tour-recap">
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-200">
+                              <Sparkles size={11} className="text-emerald-300" />
+                              {t("tourRecapTitle")}
+                            </div>
+                            <div className="text-[11px] leading-5 text-emerald-100/90 whitespace-pre-line">
+                              {message.content}
+                            </div>
+                            <div className="mt-1 flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const embeddedPlan = (recapCall.arguments as { tour_plan?: unknown } | undefined)?.tour_plan;
+                                  if (embeddedPlan && typeof embeddedPlan === "object") {
+                                    lastTourPlanRef.current = embeddedPlan as typeof lastTourPlanRef.current;
+                                  }
+                                  replayTour();
+                                }}
+                                disabled={
+                                  !lastTourPlanRef.current &&
+                                  !(recapCall.arguments as { tour_plan?: unknown } | undefined)?.tour_plan
+                                }
+                                className="flex items-center gap-1 rounded bg-emerald-600 px-2.5 py-1 text-[10px] font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                                data-testid="ai-tour-replay"
+                              >
+                                <RotateCcw size={10} />
+                                {t("replay")}
+                              </button>
+                              <span className="text-[9px] text-emerald-100/60">
+                                {lastTourPlanRef.current?.title ||
+                                  (recapCall.arguments as { title?: string } | undefined)?.title || ""}
+                              </span>
+                            </div>
+                            {/* Keep / Revert live inside the recap message
+                                instead of cluttering the last-step overlay. */}
+                            <div className="mt-2 flex items-center gap-2 border-t border-emerald-500/20 pt-2">
+                              <span className="text-[9px] text-emerald-100/60">{t("tourFinalChoiceLabel")}</span>
+                              <button
+                                type="button"
+                                onClick={cancelTour}
+                                className="flex items-center gap-1 rounded bg-emerald-700 px-2 py-1 text-[10px] font-semibold text-white hover:bg-emerald-600"
+                                data-testid="ai-tour-keep"
+                              >
+                                <Check size={10} />
+                                {t("tourKeep")}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  cancelTour();
+                                  window.dispatchEvent(new CustomEvent("lmview:ai-tour-restore-ui"));
+                                }}
+                                className="flex items-center gap-1 rounded border border-emerald-500/30 px-2 py-1 text-[10px] text-emerald-100 hover:bg-emerald-500/10"
+                                data-testid="ai-tour-revert"
+                              >
+                                <Undo2 size={10} />
+                                {t("tourRevert")}
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      }
+                      const tp = message.tour_plan;
+                      if (tp && tp.steps?.length) {
+                        return (
+                          // In Interact mode the assistant message *is* the
+                          // visual analysis: don't dump the LLM narrative in
+                          // chat (it's repeated in the step overlay + recap).
+                          // Render a compact card pointing to the step overlay.
+                          <div className="space-y-1.5" data-testid="ai-analysis-card">
+                            <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-200">
+                              <Sparkles size={11} className="text-amber-300" />
+                              {tp.title || "Guided analysis"}
+                            </div>
+                            <div className="text-[11px] leading-5 text-amber-100/90">
+                              {tp.summary || t("analysisReadyBody")}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-[10px] text-amber-200/70">
+                              <Sparkles size={9} />
+                              {tp.steps.length} {t("analysisSteps")}
+                              {activeTour?.plan?.tour_id === tp.tour_id && (
+                                <span className="ml-1 rounded bg-amber-500/30 px-1.5 py-0.5 text-[9px] font-semibold">
+                                  Running
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      }
+                      return <MarkdownContent content={message.content} compact={isUser} />;
+                    })()}
                   </div>
                   {/* Admin tool-call replay buttons. These used to be
                       rendered inline in the chat, but exposing action
@@ -1249,43 +1352,9 @@ const AiAssistantPanel: React.FC<AiAssistantPanelProps> = ({
               </button>
             </div>
           </div>
-          {/* Keep / Revert ONLY on the last step */}
-          {isLastStep && (
-            <div className="mt-2 flex flex-col gap-1.5 rounded border border-amber-500/20 bg-gray-900/50 p-2">
-              <p className="text-[10px] font-semibold text-amber-200/90">
-                Tour complete — keep the chart as the AI left it, or revert to your previous view?
-              </p>
-              <div className="flex items-center justify-end gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    // Keep: just close the tour; leave the chart as-is.
-                    cancelTour();
-                  }}
-                  className="rounded border border-emerald-500/40 px-2.5 py-1 text-[10px] font-semibold text-emerald-200 hover:bg-emerald-500/10"
-                  data-testid="ai-tour-keep"
-                >
-                  Keep current state
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    // Revert: restore captured UI snapshot, unfreeze chart,
-                    // clear highlights, end tour.
-                    window.dispatchEvent(new CustomEvent("lmview:ai-tour-restore-ui"));
-                    window.dispatchEvent(new CustomEvent("lmview:chart-freeze", { detail: { frozen: false } }));
-                    window.dispatchEvent(new CustomEvent("lmview:ai-clear-highlights"));
-                    window.dispatchEvent(new CustomEvent("lmview:open-panel", { detail: { target: "ai" } }));
-                    cancelTour();
-                  }}
-                  className="rounded border border-gray-600 px-2.5 py-1 text-[10px] font-semibold text-gray-200 hover:bg-gray-700"
-                  data-testid="ai-tour-revert"
-                >
-                  Revert to previous view
-                </button>
-              </div>
-            </div>
-          )}
+          {/* Keep / Revert moved to the recap message bubble — they
+              only matter after the tour finishes, so showing them on
+              the last step is redundant clutter. */}
           </div>
         );
         // Portal the overlay to body so its z-[720] escapes the AI

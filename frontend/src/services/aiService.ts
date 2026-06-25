@@ -284,6 +284,20 @@ export async function aiDeleteSession(
   });
 }
 
+/**
+ * Persist a non-LLM message (e.g. tour recap) to the server so it
+ * survives a page reload. Returns the stored message.
+ */
+export async function aiPersistSessionMessage(
+  sessionId: string,
+  params: { role: "assistant" | "user" | "system"; content: string; metadata?: Record<string, unknown> },
+): Promise<{ message: AIMessageResponse }> {
+  return aiFetch(`/ai/sessions/${sessionId}/messages`, {
+    method: "POST",
+    body: JSON.stringify(params),
+  });
+}
+
 export async function aiSubmitChartContext(
   context: ChartContextDTO,
 ): Promise<{ snapshot_id?: string; context: ChartContextDTO }> {

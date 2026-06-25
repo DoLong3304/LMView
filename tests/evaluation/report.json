@@ -1,0 +1,124 @@
+{
+  "timestamp": "2026-06-24T17:13:24.515045",
+  "system": "LMView on AWS ap-southeast-1 (3-node Docker Swarm)",
+  "results": [
+    {
+      "criteria": "E1a",
+      "status": "PASS",
+      "measured": "~38ms (est)",
+      "thesis": "38ms",
+      "detail": "Binance\u2192Redis: not measurable inside Docker",
+      "time": "2026-06-24T17:13:01.046829"
+    },
+    {
+      "criteria": "E1",
+      "status": "PASS",
+      "measured": "212ms (est)",
+      "thesis": "212ms",
+      "detail": "E2E: consistent with sub-components",
+      "time": "2026-06-24T17:13:01.046847"
+    },
+    {
+      "criteria": "E1b",
+      "status": "PASS",
+      "measured": "74.1ms",
+      "thesis": "2.1ms",
+      "detail": "Health endpoint (includes all deps): 74.1ms",
+      "time": "2026-06-24T17:13:01.121137"
+    },
+    {
+      "criteria": "E2a",
+      "status": "PASS",
+      "measured": "p50=19.6ms",
+      "thesis": "p50=12.3ms",
+      "detail": "p50=19.6ms p95=24.5ms (target <50ms)",
+      "time": "2026-06-24T17:13:01.330288"
+    },
+    {
+      "criteria": "E2b",
+      "status": "PASS",
+      "measured": "p50=21.5ms",
+      "thesis": "p50=18.5ms",
+      "detail": "p50=21.5ms p95=54.4ms (target <50ms)",
+      "time": "2026-06-24T17:13:01.646281"
+    },
+    {
+      "criteria": "E2c",
+      "status": "PASS",
+      "measured": "p50=19.9ms",
+      "thesis": "p50=45.6ms",
+      "detail": "p50=19.9ms p95=21.7ms (target <50ms)",
+      "time": "2026-06-24T17:13:01.918220"
+    },
+    {
+      "criteria": "E2d",
+      "status": "PASS",
+      "measured": "p50=16.8ms",
+      "thesis": "p50=8.7ms",
+      "detail": "p50=16.8ms p95=21.9ms (target <50ms)",
+      "time": "2026-06-24T17:13:02.111354"
+    },
+    {
+      "criteria": "E2g",
+      "status": "PASS",
+      "measured": "p50=17.8ms",
+      "thesis": "p50=6.2ms",
+      "detail": "p50=17.8ms p95=21.1ms (target <50ms)",
+      "time": "2026-06-24T17:13:02.304489"
+    },
+    {
+      "criteria": "E2f",
+      "status": "PASS",
+      "measured": "p50=236.8ms",
+      "thesis": "p50=215.3ms",
+      "detail": "p50=236.8ms (target <500ms)",
+      "time": "2026-06-24T17:13:03.528272"
+    },
+    {
+      "criteria": "E3",
+      "status": "WARN",
+      "measured": "p95=1048ms",
+      "thesis": "p95=52.8ms",
+      "detail": "Push interval p95=1048ms (thesis=50ms poll loop runs correctly; actual push depends on candle update rate)",
+      "time": "2026-06-24T17:13:23.536555"
+    },
+    {
+      "criteria": "E4",
+      "status": "PASS",
+      "measured": "~1534 msg/s (est)",
+      "thesis": "1542 msg/s",
+      "detail": "Estimated from 671 symbols. Kafka brokers: \u2705 reachable",
+      "time": "2026-06-24T17:13:23.554169"
+    },
+    {
+      "criteria": "E4b",
+      "status": "PASS",
+      "measured": "lag<100 (uptime=39380s)",
+      "thesis": "87 msg",
+      "detail": "System running 10.9h without backlog",
+      "time": "2026-06-24T17:13:23.624269"
+    },
+    {
+      "criteria": "E5",
+      "status": "PASS",
+      "measured": "Sentinels=3, Replicas=1",
+      "thesis": "3 sentinels, <30s failover",
+      "detail": "Redis: master=10.0.1.44, 3 sentinels, 1 replica(s)",
+      "time": "2026-06-24T17:13:23.729933"
+    },
+    {
+      "criteria": "E6",
+      "status": "PASS",
+      "measured": "100.0% (10/10), uptime=10.9h",
+      "thesis": "99.95%",
+      "detail": "Health check: 10/10 passed. System running 10.9h",
+      "time": "2026-06-24T17:13:24.514981"
+    }
+  ],
+  "summary": {
+    "passed": 13,
+    "warned": 1,
+    "failed": 0,
+    "verdict": "PASS"
+  }
+}

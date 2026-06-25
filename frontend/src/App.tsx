@@ -834,6 +834,13 @@ const TradingDashboard: React.FC = () => {
             if (tab === "aiHelper" && !user) return;
             if (tab === "overview" || tab === "aiHelper") {
                 setRightPanelTopTab(tab);
+                // Ensure the right panel is open when switching to
+                // AI Helper — the tour completion dispatches this event
+                // to show the recap, and the panel may have been hidden
+                // by a previous action or window resize.
+                if (tab === "aiHelper") {
+                    setIsRightPanelOpen(true);
+                }
             }
         };
         const onPanelTab = (event: Event) => {
@@ -957,6 +964,7 @@ const TradingDashboard: React.FC = () => {
                 selectedSymbol={selectedSymbol}
                 chartType={chartType}
                 chartController={aiChartController}
+                chartCandles={chartCandles}
             />
             <div data-ai-section="app-shell" className="bg-gray-900 text-white h-dvh flex flex-col overflow-hidden">
                 <div data-ai-section="header">
@@ -1036,6 +1044,7 @@ const TradingDashboard: React.FC = () => {
                                             handleTimeframeChange
                                         }
                                         onSymbolChange={handleSymbolSelect}
+                                        frozen={chartFrozen}
                                         onToggleStar={handleToggleStar}
                                         themeMode={themeMode}
                                         chartType={chartType}
@@ -1386,6 +1395,7 @@ function AiActionRuntimeBridge({
     selectedSymbol,
     chartType,
     chartController,
+    chartCandles,
 }: {
     setDrawingTool: (tool: string) => void;
     addDrawing: (drawing: Drawing) => void;
@@ -1406,6 +1416,7 @@ function AiActionRuntimeBridge({
     selectedSymbol: string;
     chartType: ChartType;
     chartController: AiChartActionController | null;
+    chartCandles: Array<{ time: number; high: number; low: number }>;
 }) {
     const { setRuntime } = useAiActions();
     useEffect(() => {
@@ -1429,6 +1440,11 @@ function AiActionRuntimeBridge({
             selectedSymbol,
             chartType,
             chartController,
+            getLatestCandle: () => {
+                if (!chartCandles || chartCandles.length === 0) return null;
+                const last = chartCandles[chartCandles.length - 1];
+                return { time: last.time, high: last.high, low: last.low };
+            },
         });
     }, [
         addDrawing,
@@ -1451,6 +1467,7 @@ function AiActionRuntimeBridge({
         setView,
         rightPanelTab,
         rightPanelTopTab,
+        chartCandles,
     ]);
     return null;
 }

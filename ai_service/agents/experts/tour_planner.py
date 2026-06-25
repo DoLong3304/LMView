@@ -42,6 +42,9 @@ SUPPORTED_ACTIONS = [
     "highlight_candles",        # highlight a candle range (index-based)
     "draw_tool",                # select drawing tool + draw on chart
     "draw_trendline",           # alias for draw_tool/trendline
+    "draw_horizontal_line",     # support / resistance horizontal line
+    "draw_fib",                 # Fibonacci retracement overlay
+    "draw_rectangle",           # highlight a price/time box
     "create_annotation",        # text label on chart at time/price
     "clear_drawings",           # remove AI-placed drawings
     "delete_drawing",           # remove one specific drawing
@@ -72,7 +75,9 @@ SUPPORTED_ACTIONS = [
 
 # ── LLM Prompt ─────────────────────────────────────────────────────────────────
 
-TOUR_PLANNER_SYSTEM_PROMPT = """You are LMView's chart analysis tour guide. Your job is to convert raw market analysis into a step-by-step *visual* tour that teaches the user about the current market situation through hands-on chart exploration.
+TOUR_PLANNER_SYSTEM_PROMPT = """You are LMView's chart analysis tour guide. You are bilingual (English/Vietnamese). Your job is to convert raw market analysis into a step-by-step *visual* tour that teaches the user about the current market situation through hands-on chart exploration. Respond in the same language the user writes in. Plan a tour for ANY language — Vietnamese queries like "phân tích BTC" or "hướng dẫn sử dụng" should receive the same tour as their English equivalents: set_symbol, highlight_candles, add_indicator, open_panel steps.
+
+Key rules:
 
 ## Decision: tour or no tour?
 * Lean toward planning a tour whenever the user asks for visual information ("show me", "analyze", "compare", "what does X look like") or about a specific market setup. Most user questions in Interact mode deserve at least a short visual tour.
@@ -699,7 +704,7 @@ def _intent_fallback_tour(
     title = None
 
     # Order book intent
-    if any(tok in lowered for tok in ("order book", "orderbook", "depth", "liquidity", "bids", "asks")):
+    if any(tok in lowered for tok in ("order book", "orderbook", "depth", "liquidity", "bids", "asks", "sổ lệnh", "độ sâu", "thanh khoản")):
         title = f"{target_symbol} order book walkthrough"
         if want_symbol_switch:
             steps.append({
@@ -719,7 +724,7 @@ def _intent_fallback_tour(
         })
 
     # Compare intent
-    elif any(tok in lowered for tok in ("compare", "vs", "versus", "against", "between")):
+    elif any(tok in lowered for tok in ("compare", "vs", "versus", "against", "between", "so sánh", "giữa", "khác")):
         symbols = []
         for sym, patterns in _SYMBOL_PATTERNS:
             if any(p in lowered for p in patterns):
@@ -744,7 +749,7 @@ def _intent_fallback_tour(
                 })
 
     # News / market overview intent
-    elif any(tok in lowered for tok in ("news", "headlines", "market overview", "broader market", "macro")):
+    elif any(tok in lowered for tok in ("news", "headlines", "market overview", "broader market", "macro", "tin tức", "thị trường", "vĩ mô")):
         title = "News & market overview"
         steps.append({
             "action_type": "highlight_candles",
@@ -758,24 +763,60 @@ def _intent_fallback_tour(
         })
 
     # Analyze intent
-    elif any(tok in lowered for tok in ("analyze", "analysis", "review", "what do you see", "thoughts on", "look at")):
+    elif any(
+        tok in lowered
+        for tok in (
+            "analyze", "analysis", "review", "what do you see", "thoughts on", "look at",
+            "phân tích", "đánh giá", "nhận xét",
+            # price / market / situation probes
+            "yesterday", "today", "tonight", "last week", "last night",
+            "this week", "this month", "this morning", "hôm qua", "tuần", "tháng",
+            "what can you say", "what's happening", "what is happening", "whats happening",
+            "what do you think", "your thoughts", "give me", "tell me about",
+            "price action", "market action", "market today", "price today",
+            "price now", "how is", "how's", "cách", "thế nào", "như thế nào",
+            "btc", "eth", "bitcoin", "ethereum", "solana", "bnb", "xrp",
+            "coin", "crypto", "currency", "asset", "tiền", "đồng",
+        )
+    ):
         title = f"{target_symbol} analysis"
         if want_symbol_switch:
             steps.append({
                 "action_type": "set_symbol",
                 "params": {"symbol": target_symbol},
-                "explanation": f"Switching to {target_symbol} for this analysis.",
+                "explanation": f"Switching the chart to {target_symbol} so the analysis is anchored to the right market.",
             })
+        # 1) zoom to a useful timeframe
+        steps.append({
+            "action_type": "set_timeframe",
+            "params": {"timeframe": "1h"},
+            "explanation": f"Switching to the 1h timeframe so you can see {target_symbol}'s recent price action clearly.",
+        })
+        # 2) highlight the candles we'll be discussing
         steps.append({
             "action_type": "highlight_candles",
-            "params": {"from_index": -20, "to_index": -1, "label": "Recent action"},
-            "explanation": f"Last 20 candles of {target_symbol} action — this is the setup we're analyzing.",
+            "params": {"from_index": -24, "to_index": -1, "label": "Recent action"},
+            "explanation": f"Highlighting the last 24 candles of {target_symbol} — this is the setup we're analyzing.",
         })
+        # 3) draw a horizontal line at the recent swing high
+        steps.append({
+            "action_type": "draw_horizontal_line",
+            "params": {"label": "Recent resistance"},
+            "explanation": "Drawing a horizontal line at the recent swing high — this is the resistance level price has struggled to break above.",
+        })
+        # 4) RSI for momentum confirmation
         steps.append({
             "action_type": "add_indicator",
             "params": {"indicator": "rsi"},
-            "explanation": "RSI shows momentum. Watch for overbought (>70) or oversold (<30) zones — divergences between RSI and price often signal reversals.",
+            "explanation": "RSI (Relative Strength Index) shows momentum. Watch for overbought (>70) or oversold (<30) zones — divergences between RSI and price often signal reversals.",
         })
+        # 5) EMA50 for trend confirmation
+        steps.append({
+            "action_type": "add_indicator",
+            "params": {"indicator": "ema50"},
+            "explanation": "Adding the 50 EMA — price above the EMA = bullish trend, below = bearish. Watch for the EMA as dynamic support/resistance.",
+        })
+        # 6) open the order book for live liquidity context
         steps.append({
             "action_type": "open_panel",
             "params": {"target": "orderBook"},
@@ -783,7 +824,7 @@ def _intent_fallback_tour(
         })
 
     # Indicator tutorial intent
-    elif any(tok in lowered for tok in ("rsi", "macd", "bollinger", "indicator", "moving average", "sma", "ema")):
+    elif any(tok in lowered for tok in ("rsi", "macd", "bollinger", "indicator", "moving average", "sma", "ema", "chỉ báo", "chỉ số")):
         title = "Technical indicators"
         if "rsi" in lowered:
             steps.append({
@@ -808,6 +849,88 @@ def _intent_fallback_tour(
                 "action_type": "add_indicator",
                 "params": {"indicator": "sma20"},
                 "explanation": "SMA 20 (20-period simple moving average) smooths out price. Price above = bullish trend, below = bearish.",
+            })
+
+    # Support / Resistance intent
+    elif any(tok in lowered for tok in (
+        "support", "resistance", "s/r", "key level", "price level",
+        "hỗ trợ", "kháng cự", "ngưỡng",
+    )):
+        title = f"{target_symbol} support & resistance"
+        if want_symbol_switch:
+            steps.append({
+                "action_type": "set_symbol",
+                "params": {"symbol": target_symbol},
+                "explanation": f"Switching chart to {target_symbol} for S/R analysis.",
+            })
+        steps.append({
+            "action_type": "set_timeframe",
+            "params": {"timeframe": "1h"},
+            "explanation": f"1h chart gives a clear view of key price levels for {target_symbol}.",
+        })
+        steps.append({
+            "action_type": "highlight_candles",
+            "params": {"from_index": -30, "to_index": -1, "label": "Price action zone"},
+            "explanation": "The recent price action — support forms at lows where price bounces, resistance at highs where it rejects.",
+        })
+        steps.append({
+            "action_type": "draw_horizontal_line",
+            "params": {"label": "Key resistance level"},
+            "explanation": "Drawing a line at the recent high — this is where resistance sits. A break above signals bullish momentum.",
+        })
+        steps.append({
+            "action_type": "draw_horizontal_line",
+            "params": {"label": "Key support level"},
+            "explanation": "Drawing a line at the recent low — support zone where buyers stepped in. A break below signals bearish continuation.",
+        })
+
+    # Chart type change intent
+    elif any(tok in lowered for tok in (
+        "heikin ashi", "heikin-ashi", "heiken ashi",
+        "candle type", "chart type", "switch to",
+        "biểu đồ nến", "loại nến",
+    )):
+        title = f"{target_symbol} chart type change"
+        if want_symbol_switch:
+            steps.append({
+                "action_type": "set_symbol",
+                "params": {"symbol": target_symbol},
+                "explanation": f"Switching to {target_symbol}.",
+            })
+        steps.append({
+            "action_type": "set_chart_type",
+            "params": {"chart_type": "heikin_ashi"},
+            "explanation": "Switching to Heikin-Ashi candles — these smooth out noise and make trends easier to spot. Consecutive green bodies = strong uptrend.",
+        })
+
+    # Highlight / drawing intent
+    elif any(tok in lowered for tok in (
+        "highlight", "draw", "fibonacci", "fib", "trendline", "trend line",
+        "vẽ", "đường",
+    )):
+        title = f"{target_symbol} chart annotations"
+        if want_symbol_switch:
+            steps.append({
+                "action_type": "set_symbol",
+                "params": {"symbol": target_symbol},
+                "explanation": f"Switching to {target_symbol}.",
+            })
+        steps.append({
+            "action_type": "highlight_candles",
+            "params": {"from_index": -20, "to_index": -1, "label": "Highlighted area"},
+            "explanation": "Highlighting recent price action so you can see the context for the drawing.",
+        })
+        if "fib" in lowered or "fibonacci" in lowered:
+            steps.append({
+                "action_type": "draw_fib",
+                "params": {},
+                "explanation": "Drawing Fibonacci retracement from the recent swing low to swing high — key levels at 0.382, 0.5, and 0.618 often act as support/resistance.",
+            })
+        else:
+            steps.append({
+                "action_type": "draw_horizontal_line",
+                "params": {"label": "Reference line"},
+                "explanation": "Drawing a reference line so you can track this level as price moves.",
             })
 
     if not steps or title is None:
@@ -841,6 +964,10 @@ def _is_lmview_tour_query(query: str) -> bool:
         "lmview features", "lmview overview", "overview of lmview",
         "what's in lmview", "what is in lmview",
         "guide me", "give me a tour", "take me through",
+        # Vietnamese triggers
+        "hướng dẫn", "cách sử dụng", "làm thế nào",
+        "tour", "chỉ dẫn", "chỉ cho tôi",
+        "lmview là gì", "ứng dụng này", "tính năng",
     ]
     return any(tok in lowered for tok in triggers)
 

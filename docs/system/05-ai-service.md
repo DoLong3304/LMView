@@ -1,113 +1,131 @@
 # AI Service — ai_service/
 
-AI Ask Mode (Phase 1) — modular AI assistant running inside FastAPI container.
+The `ai_service` module powers LMView's AI Ask & Interact Modes. It operates as a modular, multi-agent AI assistant driven by a **LangGraph DAG**, running inside the FastAPI container. This system is designed to provide contextual market analysis, execute chart interactions, retrieve real-time data, and offer guided platform tours.
 
-## Architecture
+---
 
-```
-User Query → Scope Gate → Intent Router → Context Builder → Provider Router → LLM → Output Guard → Action Validator → Response
-                                   ↓
-                              RAG Retrieval ← Knowledge Service
-                                   ↓
-                              Prompt Builder
-```
+## 1. Core Architecture (LangGraph DAG)
 
-## Structure
+The AI orchestration has migrated away from a linear pipeline to a robust **Multi-Agent Directed Acyclic Graph (DAG)**. This allows for parallel execution of domain experts, ensemble voting, and self-reflective revision loops.
 
 ```
+User Query 
+   ↓
+Scope Gate & Knowledge Boundary (Safety Checks)
+   ↓
+Intent Router (Classifies intent and activates specific experts)
+   ↓
+Expert Execution (Parallel MoE - Mixture of Experts)
+   ├── Technical Analysis Expert
+   ├── Market Data Expert
+   ├── News & Sentiment Expert
+   ├── RAG Knowledge Expert
+   ├── Chart Interaction Expert
+   └── General Market Expert
+   ↓
+Ensemble Voting (Cross-validates signals & resolves conflicts)
+   ↓
+Synthesis (Combines outputs into a coherent LLM response) ↔ Reflection (Validates safety & actions; triggers revision if needed)
+   ↓
+Output & Action Execution
+```
+
+---
+
+## 2. Directory Structure & Key Modules
+
+```text
 ai_service/
-├── config.py              Settings from env/files, feature flags
-├── configs/               YAML configs (ai.api.yaml, ai.local.yaml, litellm.yaml)
-├── core/
-│   └── orchestrator.py    Main entry point: orchestrates AI query flow
-├── providers/
-│   ├── router.py           Routes to active provider (auto/local/api/none)
-│   ├── litellm_provider.py LiteLLM wrapper (OpenAI, Anthropic, local vLLM)
-│   ├── none_provider.py    Stub provider (always returns "not available")
-│   ├── base.py             Abstract provider base
-│   └── health.py           Provider health check
-├── agents/
-│   ├── graph.py             LangGraph multi-agent DAG (optional)
-│   ├── intent_router.py     Classifies query intent (ask vs interact)
-│   ├── synthesis.py         Synthesizes multi-expert responses
-│   ├── state.py             Agent state management
-│   ├── persistence.py       Agent execution persistence
-│   ├── reflection.py        Self-reflection / improvement loop
-│   ├── types.py             Type definitions
-│   ├── base_expert.py       Base expert class
-│   └── experts/
-│       ├── chart_interaction.py  Chart manipulation expert
-│       ├── general.py            General market knowledge
-│       ├── market_data.py        Market data retrieval expert
-│       ├── news_sentiment.py     News/sentiment expert
-│       ├── rag_knowledge.py      RAG knowledge expert
-│       └── technical_analysis.py TA expert
-├── context/
-│   ├── context_service.py  Chart/market context assembler
-│   └── news_context.py     News context assembler
-├── persistence/
-│   └── chat_store.py       Chat session/message persistence (PostgreSQL)
-├── prompts/
-│   └── prompt_builder.py   Prompt template builder
-├── rag/
-│   ├── knowledge_service.py Knowledge base ingestion/management
-│   ├── retrieval_service.py  Embedding search + pgvector HNSW
-│   └── registry.py           Knowledge doc registry
-├── safety/
-│   ├── scope_gate.py        Query scope validation (crypto only)
-│   └── output_guard.py      Response safety guard
-├── actions/
-│   ├── executor.py          Action execution (chart, trades, etc.)
-│   ├── registry.py          Action type registry
-│   ├── validator.py         Action parameter validation
-│   ├── undo.py              Action undo support
-│   └── tool_definitions.py  Tool/function definitions for LLM
-└── nlp/
-    ├── entity_extractor.py  Symbol/entity extraction
-    ├── finbert.py           FinBERT sentiment analysis
-    ├── news_processor.py    News article processing
-    └── types.py             NLP type definitions
+├── actions/         # Chart action registry, execution, undo, and tool schemas
+├── agents/          # LangGraph implementation, state management, and experts
+├── config.py        # Settings, feature flags, provider configs
+├── configs/         # YAML configs (ai.api.yaml, ai.local.yaml, litellm.yaml)
+├── context/         # TA pattern detection, support/resistance, market caveats
+├── core/            # Main orchestrator (`orchestrator.py`)
+├── nlp/             # FinBERT sentiment analysis, entity extraction, news processing
+├── persistence/     # PostgreSQL chat store, execution trace persistence
+├── prompts/         # Dynamic prompt building
+├── providers/       # LLM provider routing (LiteLLM, mock, none)
+├── rag/             # Vector retrieval, pgvector HNSW, knowledge management
+└── safety/          # Scope gate, output guard, knowledge boundary checks
 ```
 
-## Provider Routing
+---
+
+## 3. Multi-Agent Expert System (`agents/experts/`)
+
+The system uses a Mixture of Experts (MoE) pattern. The `Intent Router` determines which experts to activate based on the user's query, saving compute and improving accuracy.
+
+- **Technical Analysis (TA) Expert:** Analyzes chart context, indicators, patterns, and support/resistance levels.
+- **Market Data Expert:** Fetches and interprets historical prices, order book data, and recent trades.
+- **News & Sentiment Expert:** Leverages `nlp/finbert.py` to analyze sentiment from recent news and social feeds.
+- **RAG Knowledge Expert:** Queries the vector database for LMView platform documentation and domain knowledge.
+- **Chart Interaction Expert:** Determines if the user wants to manipulate the UI (e.g., add indicators, change timeframe) and issues tool calls.
+- **General Market Expert:** Handles general cryptocurrency questions that don't require specific chart data.
+- **Tour Planner:** A specialized module that plans user-paced, guided visual tours of the LMView platform.
+
+---
+
+## 4. NLP & Context Subsystems (`nlp/` & `context/`)
+
+To ground the LLM in reality without exposing it to raw, unparsed data, the service uses localized NLP models and contextual algorithms:
+
+- **FinBERT (`nlp/finbert.py`):** Uses `ProsusAI/finbert` (with auto GPU/CPU fallback and lazy loading) to provide robust financial sentiment scores (Positive/Negative/Neutral) on news streams.
+- **Entity Extraction (`nlp/entity_extractor.py`):** Identifies cryptocurrency symbols and markets from free-text queries.
+- **Context Services (`context/`):** Includes deterministic algorithms like `pattern_detector.py` and `support_resistance.py` to feed mathematically accurate structural data to the TA Expert before LLM synthesis.
+
+---
+
+## 5. Chart Actions & Tools (`actions/`)
+
+The **Interact Mode** allows the AI to manipulate the user's frontend UI using deterministic tool schemas defined in `actions/registry.py`.
+
+- **Action Catalog:** Supports actions like `add_indicator`, `draw_tool`, `highlight_section`, `set_timeframe`, `fetch_historical_prices`, and `start_tour`.
+- **Validation & Execution:** The `validator.py` ensures that requested indicators and tools exist in the system. The `executor.py` handles the application of these tools, and `undo.py` provides rollback capabilities.
+- **State Persistence:** Chart actions and tool calls are persisted alongside the chat history so that a page reload preserves the interactive UI elements.
+
+---
+
+## 6. Safety & Guardrails (`safety/`)
+
+Before an LLM is ever invoked, and before a response is returned to the user, multiple guardrails ensure the system remains safe and on-topic:
+
+- **Scope Gate (`scope_gate.py`):** Immediately rejects queries that are not related to cryptocurrency, trading, or the LMView platform.
+- **Knowledge Boundary (`knowledge_boundary.py`):** Ensures the AI does not hallucinate answers for topics explicitly defined as out-of-bounds.
+- **Output Guard (`output_guard.py`):** Scans the synthesized LLM response to prevent financial advice, guarantee disclaimers, and catch unsafe content.
+
+---
+
+## 7. RAG & Knowledge Base (`rag/`)
+
+- **Embeddings:** Uses `sentence-transformers` stored in a PostgreSQL `pgvector` HNSW index.
+- **Knowledge Base:** Text chunks are ingested from `docs/ai/knowledge_base/approved/`.
+- **Fallback:** If vector dependencies are missing, the system gracefully degrades to mock retrieval.
+
+---
+
+## 8. Provider Routing (`providers/`)
+
+The `provider_router.py` dynamically routes requests based on the `AI_MODE` environment variable:
 
 | Mode | Description | Requirements |
 |---|---|---|
 | `none` | Stub — always returns "not available" | None (default) |
-| `mock` | Simulated AI responses | None |
+| `mock` | Simulated deterministic AI responses | None |
 | `local` | LiteLLM + local vLLM/Ollama | LiteLLM running, `AI_ENABLE_REAL_LLM=true` |
 | `api` | LiteLLM → OpenAI/Anthropic/etc | API keys, LiteLLM running |
 
-- Default: `mock` provider (works without litellm/sentence-transformers)
-- Real LLM requires: `AI_ENABLE_REAL_LLM=true` + provider config + API keys
-- `AI_MODE` env var selects provider: `mock`, `none`, `local`, `api`
+---
 
-## RAG System
+## 9. Key Data Flow (End-to-End Execution)
 
-- **Embeddings**: sentence-transformers (pgvector HNSW index)
-- **Knowledge base**: PostgreSQL `knowledge_chunks` table with vector embeddings
-- **Retrieval**: Cosine similarity search, top-K chunks
-- **Scope**: Approved-only knowledge docs in `docs/ai/knowledge_base/approved/`
-- **Fallback**: If sentence-transformers not installed → no embeddings, mock retrieval
-
-## Key Data Flow
-
-1. `POST /api/ai/chat` → backend → `orchestrator.process_query()`
-2. Scope gate validates query is crypto-related
-3. Intent router classifies as "ask" (info) or "interact" (action)
-4. Context builder gathers chart data, market data, news
-5. RAG retrieval searches knowledge base
-6. Prompt builder assembles context + query + instructions
-7. Provider router selects LLM or mock
-8. Output guard validates response safety
-9. Action validator checks for chart actions
-10. Response returned to user
-
-## Known Issues
-
-- `litellm` and `sentence-transformers` not in base FastAPI requirements (pip install at runtime)
-- Without these deps: providers degrade to mock, RAG returns no embeddings
-- `ai-service` in docker-compose.ai.yml is scaffolded (echo command only)
-- `docker-compose.ai.yml` starts LiteLLM/vLLM optional services
-- Multi-agent LangGraph DAG is scaffolded but not the primary path
-- Interact Mode (action execution) is Phase 2 — validation exists, execution is limited
+1. `POST /api/ai/chat` → backend router calls `orchestrator.run_chat_langgraph()` (or `run_chat_stream`).
+2. The user's query and current chart context are persisted in PostgreSQL via `chat_store.py`.
+3. **`scope_gate` node** validates that the query is crypto/platform-related.
+4. **`intent_router` node** classifies the query intent and activates the necessary domain experts.
+5. **`expert_execution` node** runs all activated experts (TA, Market Data, News, RAG, Chart, General) in parallel (`asyncio.gather`).
+6. **Ensemble Vote** cross-validates the expert signals, calculates confidence, and resolves conflicting data.
+7. **`synthesis` node** uses the dynamic `prompt_builder` to combine expert outputs into a coherent LLM response (supports streaming).
+8. **`reflection` node** validates the response safety and checks generated chart actions. If it fails validation, it loops back to the synthesis node for revision.
+9. **Tour Planner** (if in Interact Mode) appends an interactive visual tour if requested.
+10. The final response (with grounded context, sources, caveats, and action plans) is returned to the user and persisted.

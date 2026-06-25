@@ -1,0 +1,52 @@
+{
+  "meta": {
+    "name": "Interact Mode Tour Quality Assessment",
+    "version": "1.0.0",
+    "description": "30 queries designed to trigger Interact mode tours, measuring tour_plan accuracy, step relevance, action execution, and recap quality."
+  },
+  "tour_types": [
+    {
+      "id": "overview_tours",
+      "name": "Platform Overview Tours",
+      "queries": [
+        {"id": "OV-01", "query": "How do I use LMView?", "expected_tour_id": "lmview-overview", "min_steps": 3, "expected_actions": ["highlight_section", "add_indicator", "open_panel"]},
+        {"id": "OV-02", "query": "Show me around the platform", "expected_tour_id": "lmview-overview", "min_steps": 3, "expected_actions": ["highlight_section"]},
+        {"id": "OV-03", "query": "What can LMView do?", "expected_tour_id": null, "min_steps": 3, "expected_actions": ["highlight_section"]},
+        {"id": "OV-04", "query": "Give me a demo", "expected_tour_id": null, "min_steps": 4, "expected_actions": ["highlight_section", "add_indicator"]},
+        {"id": "OV-05", "query": "How do I analyze crypto here?", "expected_tour_id": null, "min_steps": 3, "expected_actions": ["set_timeframe", "add_indicator"]}
+      ]
+    },
+    {
+      "id": "analysis_tours",
+      "name": "Symbol Analysis Tours",
+      "queries": [
+        {"id": "AN-01", "query": "Analyze BTCUSDT on the 1h chart", "expected_symbol": "BTCUSDT", "expected_timeframe": "1h", "min_steps": 3},
+        {"id": "AN-02", "query": "What can you say about yesterday's BTC price action?", "expected_symbol": "BTCUSDT", "min_steps": 3},
+        {"id": "AN-03", "query": "What's happening with SOL price today?", "expected_symbol": "SOLUSDT", "min_steps": 3},
+        {"id": "AN-04", "query": "Analyze Ethereum on the 4h chart", "expected_symbol": "ETHUSDT", "expected_timeframe": "4h", "min_steps": 3},
+        {"id": "AN-05", "query": "How is the DOGE market looking?", "expected_symbol": "DOGEUSDT", "min_steps": 2},
+        {"id": "AN-06", "query": "Show me the support and resistance for Bitcoin", "expected_symbol": "BTCUSDT", "min_steps": 3, "expected_actions": ["draw_horizontal_line", "highlight_candles"]},
+        {"id": "AN-07", "query": "What is the trend for SOL based on moving averages?", "expected_symbol": "SOLUSDT", "min_steps": 3, "expected_actions": ["add_indicator"]},
+        {"id": "AN-08", "query": "Check BTC momentum with RSI", "expected_symbol": "BTCUSDT", "min_steps": 3, "expected_actions": ["add_indicator"]},
+        {"id": "AN-09", "query": "Is ETH overbought or oversold?", "expected_symbol": "ETHUSDT", "min_steps": 2, "expected_actions": ["add_indicator"]},
+        {"id": "AN-10", "query": "Compare the price action of BTC and ETH", "expected_symbols": ["BTCUSDT", "ETHUSDT"], "min_steps": 3}
+      ]
+    },
+    {
+      "id": "action_oriented",
+      "name": "Action-oriented Queries",
+      "queries": [
+        {"id": "AC-01", "query": "Add RSI indicator for BTC", "expected_actions": ["add_indicator"], "min_steps": 2},
+        {"id": "AC-02", "query": "Show me the order book depth for SOL", "expected_actions": ["open_panel"], "expected_panel": "orderBook", "min_steps": 2},
+        {"id": "AC-03", "query": "Change to 1h timeframe for ETH", "expected_actions": ["set_timeframe"], "expected_timeframe": "1h", "min_steps": 2},
+        {"id": "AC-04", "query": "Draw Fibonacci levels on BTC", "expected_actions": ["draw_fib", "highlight_candles"], "min_steps": 2},
+        {"id": "AC-05", "query": "Switch to Heikin-Ashi candles for SOL", "expected_actions": ["set_chart_type"], "expected_chart_type": "heikin_ashi", "min_steps": 2},
+        {"id": "AC-06", "query": "Open the recent trades panel for BTC", "expected_actions": ["open_panel"], "expected_panel": "recentTrades", "min_steps": 2},
+        {"id": "AC-07", "query": "Draw a horizontal line at the current price for ETH", "expected_actions": ["draw_horizontal_line"], "min_steps": 2},
+        {"id": "AC-08", "query": "Add MACD and RSI indicators for a complete analysis", "expected_actions": ["add_indicator"], "min_indicators": 2, "min_steps": 3},
+        {"id": "AC-09", "query": "What does the order book look like for BTC?", "expected_actions": ["open_panel"], "expected_panel": "orderBook", "min_steps": 2},
+        {"id": "AC-10", "query": "Highlight the last trading session on the chart", "expected_actions": ["highlight_candles"], "min_steps": 2}
+      ]
+    }
+  ]
+}

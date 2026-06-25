@@ -61,6 +61,50 @@ async def get_session_messages(
     return {"messages": messages}
 
 
+@router.post("/sessions/{session_id}/messages", status_code=status.HTTP_201_CREATED)
+async def post_message(
+    session_id: str,
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Persist a non-LLM message (e.g. tour recap) to an existing session.
+
+    Used by the frontend after a guided tour completes so the recap
+    bubble + Replay button survive a page reload. The body MUST include
+    ``role`` ("assistant") and ``content`` (recap text). Optional:
+    ``metadata`` (dict) for tour flags / tool_calls.
+    """
+    from ai_service.persistence import chat_store
+    role = body.get("role")
+    content = body.get("content")
+    if role not in ("assistant", "user", "system"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="role must be assistant|user|system",
+        )
+    if not content or not isinstance(content, str):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="content must be a non-empty string",
+        )
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    stored = await chat_store.store_message(
+        session_id=session_id,
+        user_id=current_user["id"],
+        role=role,
+        content=content,
+        model_provider="tour_recap",
+        model_name="tour_recap",
+        metadata=metadata,
+    )
+    if stored is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Could not persist message",
+        )
+    return {"message": stored}
+
+
 @router.delete("/sessions/{session_id}", status_code=status.HTTP_200_OK)
 async def delete_session(
     session_id: str,

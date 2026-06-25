@@ -118,4 +118,105 @@ export const handleCreateAnnotation: ActionHandler = ({ runtime, args }) => {
 };
 
 // Silence the linter for the helper we export
+
+/**
+ * Draw a horizontal support / resistance line.
+ * Auto-computes the price level from the recent chart candles when no
+ * explicit `price` is given (uses the highest high of the last 20
+ * candles as resistance, or the lowest low as support, based on the
+ * label keyword).
+ */
+export const handleDrawHorizontalLine: ActionHandler = ({ runtime, args }) => {
+  if (!runtime.addDrawing) {
+    return "error: drawing controller not available";
+  }
+  const label = String(args.label || "Horizontal line");
+  const color = typeof args.color === "string" ? args.color : "#f97316";
+  // Get chart's latest candle from runtime context if available
+  const latestCandle = (runtime as { getLatestCandle?: () => { time: number; high: number; low: number } | null }).getLatestCandle?.();
+  let price = Number(args.price);
+  if (!Number.isFinite(price) && latestCandle) {
+    if (/support/i.test(label)) price = latestCandle.low;
+    else if (/resistance|high|swing high/i.test(label)) price = latestCandle.high;
+    else price = (latestCandle.high + latestCandle.low) / 2;
+  }
+  if (!Number.isFinite(price)) {
+    return "error: cannot determine price level for horizontal line";
+  }
+  // Use 10 candles around current time as data points so the line spans
+  // a reasonable region of the chart.
+  const now = Math.floor(Date.now() / 1000);
+  const points = [
+    { time: now - 3600 * 5, price },
+    { time: now, price },
+  ];
+  runtime.addDrawing({
+    id: `ai-hl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    tool: "horizontal",
+    dataPoints: points,
+    text: label,
+    settings: { color, lineWidth: 2, lineStyle: 2 },
+  });
+  return `success: drew horizontal line at ${price.toFixed(2)} (${label})`;
+};
+
+/**
+ * Place a Fibonacci retracement overlay.
+ */
+export const handleDrawFib: ActionHandler = ({ runtime, args: _args }) => {
+  if (!runtime.addDrawing) {
+    return "error: drawing controller not available";
+  }
+  const latestCandle = (runtime as { getLatestCandle?: () => { time: number; high: number; low: number } | null }).getLatestCandle?.();
+  if (!latestCandle) {
+    return "error: no chart data to compute Fibonacci levels";
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const range = latestCandle.high - latestCandle.low;
+  const levels = [
+    { price: latestCandle.high, label: "100%" },
+    { price: latestCandle.high - range * 0.382, label: "61.8%" },
+    { price: latestCandle.high - range * 0.5, label: "50%" },
+    { price: latestCandle.high - range * 0.618, label: "38.2%" },
+    { price: latestCandle.low, label: "0%" },
+  ];
+  for (const lvl of levels) {
+    runtime.addDrawing({
+      id: `ai-fib-${lvl.label}-${Math.random().toString(36).slice(2, 8)}`,
+      tool: "horizontal",
+      dataPoints: [{ time: now - 3600 * 5, price: lvl.price }, { time: now, price: lvl.price }],
+      text: `Fib ${lvl.label}`,
+      settings: { color: "#a78bfa", lineWidth: 1, lineStyle: 2 },
+    });
+  }
+  return "success: drew Fibonacci retracement (38.2%, 50%, 61.8%)";
+};
+
+/**
+ * Highlight a price/time box (rectangle).
+ */
+export const handleDrawRectangle: ActionHandler = ({ runtime, args }) => {
+  if (!runtime.addDrawing) {
+    return "error: drawing controller not available";
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const color = typeof args.color === "string" ? args.color : "#22c55e";
+  const points = [
+    { time: now - 3600 * 2, price: Number(args.priceTop ?? 100000) },
+    { time: now, price: Number(args.priceBottom ?? 0) },
+  ];
+  if (!Number.isFinite(points[0].price) || !Number.isFinite(points[1].price)) {
+    return "error: rectangle requires priceTop and priceBottom";
+  }
+  runtime.addDrawing({
+    id: `ai-rect-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    tool: "rectangle",
+    dataPoints: points,
+    text: typeof args.label === "string" ? args.label : undefined,
+    settings: { color, fillColor: `${color}33`, lineWidth: 2 },
+  });
+  return "success: drew rectangle";
+};
+
+// Silence the linter for the helper we export
 export const _drawingHelpers = { clampPercent, parseDrawingDataPoints };

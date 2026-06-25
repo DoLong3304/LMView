@@ -38,7 +38,15 @@ class RAGKnowledgeExpert(BaseExpert):
         try:
             from ai_service.config import load_settings
             settings = load_settings()
-            if not settings.rag_enabled:
+            # Check state-level override first (ablation testing),
+            # then fall back to global config.
+            state_rag = state.get("rag_enabled")
+            if state_rag is not None:
+                rag_active = state_rag
+            else:
+                rag_active = settings.rag_enabled
+
+            if not rag_active:
                 return ExpertOutput(
                     expert_name=self.name,
                     content="RAG retrieval is disabled.",

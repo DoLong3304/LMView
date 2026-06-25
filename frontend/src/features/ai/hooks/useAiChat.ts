@@ -361,11 +361,13 @@ export function useAiChat(): UseAiChatReturn {
           // only for ask mode.
           if (mode === "interact") {
             try {
+              const detectedLang = (context as Record<string, unknown> | null)?.language as string | undefined;
               const response = await aiChat({
                 session_id: sessionId,
                 mode,
                 message: trimmed,
                 chart_context: context as Record<string, unknown> | null,
+                language: detectedLang ?? undefined,
               });
               nextSessionId = response.session_id || sessionId;
               assistantMsg = {
@@ -418,11 +420,13 @@ export function useAiChat(): UseAiChatReturn {
           } else {
             // Try streaming first, fall back to batch
             try {
+            const detectedLang = (context as Record<string, unknown> | null)?.language as string | undefined;
             const chatStream = aiChatStream({
               session_id: sessionId,
               mode,
               message: trimmed,
               chart_context: context as Record<string, unknown> | null,
+              language: detectedLang ?? undefined,
             });
             abortRef.current = chatStream.abort;
             const { stream } = chatStream;
@@ -486,11 +490,13 @@ export function useAiChat(): UseAiChatReturn {
               console.warn("[AI] Stream failed, falling back to batch:", sanitizeTechnicalDetails(streamErr));
             }
             try {
+              const detectedLang = (context as Record<string, unknown> | null)?.language as string | undefined;
               const response = await aiChat({
                 session_id: sessionId,
                 mode,
                 message: trimmed,
                 chart_context: context as Record<string, unknown> | null,
+                language: detectedLang ?? undefined,
               });
               nextSessionId = response.session_id || sessionId;
               assistantMsg = {

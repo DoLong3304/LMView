@@ -67,6 +67,13 @@ interface AiActionRuntime {
   selectedSymbol?: string;
   chartType?: ChartType;
   chartController?: AiChartActionController | null;
+  /**
+   * Read the latest candle from the chart. Used by drawing-tool
+   * handlers that need a price reference (horizontal support/resistance
+   * lines, Fibonacci retracements, etc.) and don't have an explicit
+   * `price` argument.
+   */
+  getLatestCandle?: () => { time: number; high: number; low: number } | null;
 }
 
 interface UiSnapshot {
@@ -792,12 +799,19 @@ function HighlightOverlay({
   const cells = useMemo(() => dimCells(rects), [rects]);
   const primary = rects[0];
 
+  // While a tour is running, the dim cells should absorb clicks so
+  // the user can't accidentally interact with the chart or any other
+  // UI under the highlight. The step overlay (z-[720]) sits above and
+  // remains interactive. Outside of a tour, the dim stays
+  // `pointer-events-none` so the highlighted area can still be clicked.
+  const absorbClicks = tourActive;
+
   return (
-    <div className="pointer-events-none fixed inset-0 z-[680]">
+    <div className={`fixed inset-0 z-[680] ${absorbClicks ? "pointer-events-auto" : "pointer-events-none"}`}>
       {cells.map((cell) => (
         <div
           key={cell.key}
-          className="absolute bg-black/65 backdrop-blur-[1px]"
+          className={`absolute bg-black/65 backdrop-blur-[1px] ${absorbClicks ? "cursor-not-allowed" : ""}`}
           style={{ left: cell.left, top: cell.top, width: cell.width, height: cell.height }}
         />
       ))}

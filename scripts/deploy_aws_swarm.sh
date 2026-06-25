@@ -58,6 +58,8 @@ for arg in "$@"; do
     --build)             DO_BUILD=true ;;
     --registry-only)     REGISTRY_ONLY=true; DO_BUILD=true ;;
     --registry-port=*)   REGISTRY_PORT="${arg#*=}" ;;
+    --registry-addr=*)   REGISTRY_ADDR="${arg#*=}" ;;
+    --stack-name=*)      STACK_NAME="${arg#*=}" ;;
     --no-color)          RED=''; GREEN=''; YELLOW=''; CYAN=''; NC='' ;;
     -h|--help)
       sed -n '2,20p' "$0"
@@ -92,7 +94,9 @@ if [ -z "$MANAGER_IP" ]; then
   MANAGER_IP="127.0.0.1"
   warn "Could not detect Swarm advertise address; using 127.0.0.1 for registry."
 fi
-REGISTRY_ADDR="${MANAGER_IP}:${REGISTRY_PORT}"
+# Allow override via env var for multi-node setups where the registry
+# is on a known-accessible IP/hostname.
+REGISTRY_ADDR="${REGISTRY_ADDR:-${MANAGER_IP}:${REGISTRY_PORT}}"
 
 # Verify node labels
 CORE_NODES=$(docker node ls -q 2>/dev/null | xargs -r docker node inspect --format '{{ index .Spec.Labels "role" }}' 2>/dev/null | grep -c '^core$' || true)
@@ -155,27 +159,25 @@ else
   log "Skipping image build (--skip-build)."
 fi
 
+# ── Get the latest image versions from compose ────────────────────────────────
+# Instead of hardcoded tag lists, pull actual image tags from docker-compose config.
+# This keeps deploy in sync with compose changes automatically.
+log "Resolving custom image tags from compose config..."
+RESOLVED_IMAGES=()
+while IFS= read -r img; do
+  if [ -n "$img" ]; then
+    RESOLVED_IMAGES+=("$img")
+  fi
+done < <(docker compose --profile prod config 2>/dev/null | grep 'image: cryptoprice/' | awk '{print $2}' | sort -u)
+
 # ── Push custom images to the local registry ─────────────────────────────────
 # Only custom-built images need to be pushed; public images (redis, postgres,
 # etc.) are pulled directly by each node from Docker Hub.
-CUSTOM_IMAGES=(
-  "cryptoprice/flink:1.18.1"
-  "cryptoprice/spark:3.5.5"
-  "cryptoprice/spark-submit:local"
-  "cryptoprice/fastapi:0.25.0"
-  "cryptoprice/nginx:1.31.0"
-  "cryptoprice/producer:0.25.0"
-  "cryptoprice/binance-ticker-ws:0.1.0"
-  "cryptoprice/binance-kline-rest:0.1.0"
-  "cryptoprice/binance-depth-trades-rest:0.1.0"
-  "cryptoprice/influx-backfill:0.25.0"
-  "cryptoprice/trino:442"
-  "cryptoprice/dagster:1.8.10"
-  "cryptoprice/ai-service:latest"
-)
+# Image tags are resolved dynamically from compose config so they stay in
+# sync automatically.
 
-log "Pushing ${#CUSTOM_IMAGES[@]} custom images to local registry (${REGISTRY_ADDR})..."
-for img in "${CUSTOM_IMAGES[@]}"; do
+log "Pushing ${#RESOLVED_IMAGES[@]} custom images to local registry (${REGISTRY_ADDR})..."
+for img in "${RESOLVED_IMAGES[@]}"; do
   if docker image inspect "$img" >/dev/null 2>&1; then
     registry_tag="${REGISTRY_ADDR}/${img}"
     docker tag "$img" "$registry_tag"

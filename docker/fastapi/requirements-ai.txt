@@ -12,15 +12,19 @@
 # ``requirements.txt`` in the backend image.
 
 # LLM proxy / router
-litellm==1.52.0
+litellm>=1.52.0
 
 # RAG embeddings (sentence-transformers pulls torch ~2GB)
-sentence-transformers==5.6.0
-numpy==2.4.6
+sentence-transformers>=2.2.0
+numpy>=1.24.0
 
 # LangGraph orchestration framework
-langgraph==1.2.6
-langchain-core==1.4.8
+langgraph>=1.2.0
+langchain-core>=1.0.0
 
 # DashScope (Qwen / Alibaba Cloud) provider
-dashscope==1.25.23
+dashscope>=1.25.0
+
+# Additional AI service deps
+anthropic>=0.49.0
+openai>=1.55.0

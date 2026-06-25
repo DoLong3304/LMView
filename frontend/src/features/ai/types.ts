@@ -93,6 +93,8 @@ export interface ChartContextForAi {
   timeframe: string;
   chart_type?: string;
   selected_indicators: string[];
+  /** User locale for bi-lingual AI responses */
+  language?: string;
   latest_candle?: {
     open_time?: number;
     open?: number;

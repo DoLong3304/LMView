@@ -1997,7 +1997,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       data-testid="candlestick-chart"
       className={`flex min-h-0 w-full flex-col overflow-hidden bg-[var(--lm-bg-primary)] ${
         isFullscreen ? "h-dvh rounded-none" : "h-full rounded-lg"
-      }`}
+      } ${frozen ? "pointer-events-none select-none" : ""}`}
     >
       <div data-ai-section="chart-toolbar" className="lm-toolbar-surface flex-none border-b">
         <div className="overflow-x-auto overflow-y-visible">

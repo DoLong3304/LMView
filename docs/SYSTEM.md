@@ -1,7 +1,25 @@
 <!-- ====================================================================== -->
 <!-- LMView — SYSTEM.md (Phiên bản Tiếng Việt)                             -->
-<!-- Tài liệu kiến trúc hệ thống toàn diện. Phiên bản 0.25.60.            -->
+<!--                                                                        -->
+<!-- ⚠️  LEGACY DOCUMENT — Kept for historical reference.                   -->
+<!--                                                                        -->
+<!-- For current system documentation, see:                                  -->
+<!--   - docs/system/README.md  (per-module index, authoritative)           -->
+<!--   - docs/3NODE-MIGRATION-PLAN.md  (future setup guide)                 -->
+<!--   - docs/CHANGELOG.md  (recent changes)                                -->
+<!--   - AGENTS.md  (development rules)                                     -->
+<!--                                                                        -->
+<!-- Phiên bản cuối: 0.25.60.                                               -->
+<!-- Ngày đóng băng: 2026-06-24.                                            -->
+<!-- ====================================================================== -->
+
+<!-- ====================================================================== -->
+<!-- LMView — SYSTEM.md (Phiên bản Tiếng Việt)                             -->
+<!-- Tài liệu kiến trúc hệ thống toàn diện. Phiên bản cuối 0.25.60.       -->
 <!-- Được viết lại với giải thích chi tiết cho sinh viên năm 1.            -->
+<!--                                                                        -->
+<!-- ⚠️  TÀI LIỆU CŨ — Chỉ để tham khảo. Không cập nhật thông tin mới.    -->
+<!--     Xem docs/system/README.md để biết thông tin hiện tại.              -->
 <!--                                                                        -->
 <!-- Cách đọc tài liệu này:                                                -->
 <!-- 1. Đọc Phần 1 (Nền tảng) trước — hiểu LMView là gì                    -->
@@ -13,9 +31,6 @@
 <!-- 7. Đọc Phần 7 (Vận hành) — hiểu cách sửa lỗi                          -->
 <!-- 8. Đọc Phần 8 (Deep dive) — hiểu sâu luồng ticker 8 shards            -->
 <!--                                                                        -->
-<!-- Tác giả: AI agents + con người đóng góp                                -->
-<!-- Ngày cập nhật: 2026-06-20                                             -->
-<!-- ====================================================================== -->
 
 # LMView — Tài Liệu Kiến Trúc Hệ Thống
 

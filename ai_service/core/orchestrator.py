@@ -90,6 +90,7 @@ async def run_chat_langgraph(body: AIChatRequest, user_id: str) -> AIChatRespons
         language=body.language,
         chart_context=body.chart_context,
         chat_history=history,
+        rag_enabled=body.rag_enabled,
     )
 
     # Execute the graph

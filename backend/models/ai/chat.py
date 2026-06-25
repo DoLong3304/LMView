@@ -37,6 +37,7 @@ class AIChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=4000)
     language: Optional[str] = None
     chart_context: Optional[Dict[str, Any]] = None
+    rag_enabled: Optional[bool] = Field(None, description="Override RAG on/off for ablation testing. None = use config default.")
 
 
 class AISessionCreateRequest(BaseModel):

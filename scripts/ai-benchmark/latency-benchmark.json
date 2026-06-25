@@ -1,0 +1,27 @@
+{
+  "meta": {
+    "name": "AI Latency & Reliability Benchmark",
+    "version": "1.0.0",
+    "description": "Measures response time distribution, error rate, model fallback chain effectiveness, and streaming reliability."
+  },
+  "repeat": 5,
+  "cooldown_ms": 2000,
+  "queries": [
+    {"id": "LT-01", "query": "What is the price of Bitcoin?", "type": "ask"},
+    {"id": "LT-02", "query": "What is the RSI for ETH?", "type": "ask"},
+    {"id": "LT-03", "query": "How do I use LMView?", "type": "interact"},
+    {"id": "LT-04", "query": "Analyze BTC on the 1h chart", "type": "interact"},
+    {"id": "LT-05", "query": "What is the support and resistance for SOL?", "type": "ask"},
+    {"id": "LT-06", "query": "Show me the order book for ETH", "type": "interact"},
+    {"id": "LT-07", "query": "Tại sao BTC giảm hôm nay?", "type": "ask"},
+    {"id": "LT-08", "query": "What is the MACD for BTCUSDT?", "type": "ask"},
+    {"id": "LT-09", "query": "Compare BTC and ETH price trends", "type": "ask"},
+    {"id": "LT-10", "query": "Is SOL overbought?", "type": "ask"}
+  ],
+  "thresholds": {
+    "p50_latency_ms": 30000,
+    "p95_latency_ms": 60000,
+    "error_rate_pct": 10.0,
+    "streaming_success_rate": 90.0
+  }
+}

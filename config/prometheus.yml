@@ -95,7 +95,7 @@ scrape_configs:
     metrics_path: '/prometheus/metrics'
     scrape_interval: 30s
 
-  ─── MinIO: native Prometheus endpoint (auth: MINIO_PROMETHEUS_AUTH_TYPE=public)
+  # ─── MinIO: native Prometheus endpoint (auth: MINIO_PROMETHEUS_AUTH_TYPE=public)
   - job_name: 'minio'
     static_configs:
       - targets: ['minio:9000']

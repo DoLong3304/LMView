@@ -1,4 +1,6 @@
+# ────────────────────────────────────────────────────────────────────────────
 # Python
+# ────────────────────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
@@ -11,9 +13,10 @@ build/
 .venv/
 venv/
 env/
-my_project_env/
 
+# ────────────────────────────────────────────────────────────────────────────
 # Secrets — NEVER commit
+# ────────────────────────────────────────────────────────────────────────────
 .env
 .env.*
 !.env.example
@@ -22,23 +25,49 @@ my_project_env/
 *-pk
 lmview-pk
 
-# Dagster runtime
+# ────────────────────────────────────────────────────────────────────────────
+# Runtime / Cache
+# ────────────────────────────────────────────────────────────────────────────
 .tmp_dagster_home_*/
 dagster-home/
-
-# SQLite (Dagster local dev DB)
 *.db
 *.db-wal
 *.db-shm
-
-# Spark event logs (large, local only)
 spark-events/
 
+# ────────────────────────────────────────────────────────────────────────────
 # OS
+# ────────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Temp/debug files
+# ────────────────────────────────────────────────────────────────────────────
+# IDE & Editor
+# ────────────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.claude/
+.agents/
+.cache/
+.work/
+.codex/
+.understand-anything/
+.vite/
+.pi/
+
+# ────────────────────────────────────────────────────────────────────────────
+# Node / frontend
+# ────────────────────────────────────────────────────────────────────────────
+node_modules/
+frontend/node_modules/
+frontend/dist/
+frontend/test-results/
+frontend/playwright-report/
+
+# ────────────────────────────────────────────────────────────────────────────
+# Temp / Debug / Build artifacts
+# ────────────────────────────────────────────────────────────────────────────
+trash/
 docker-compose-rendered.yml
 deps.zip
 *_LOG.MD
@@ -49,21 +78,22 @@ test_llm.py
 test_router.py
 add_aliases.py
 update_swarm.py
+*.swp
+*.swo
+*.nfs*
+metastore_db/
+derby.log
 
-# Personal / academic drafts (NOT part of the deployment story)
+# ────────────────────────────────────────────────────────────────────────────
+# Engram persistent memory (shared across machines via git)
+# ────────────────────────────────────────────────────────────────────────────
+# Uncomment to track engram memories across nodes:
+#!.engram
+
+# ────────────────────────────────────────────────────────────────────────────
+# Personal / Academic drafts
+# ────────────────────────────────────────────────────────────────────────────
 docs/Khóa luận*.md
 docs/KẾ HOẠCH*.md
 docs/NOTE*
 docs/temp-fact-sheet.md
-
-.vscode
-.idea
-.claude
-.agents
-.cache
-.work
-.codex
-.understand-anything
-.vite
-.pi
-trash/

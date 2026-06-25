@@ -61,6 +61,9 @@ class AgentState(TypedDict, total=False):
 
     # ── Synthesis ─────────────────────────────────────────────────────────
     synthesized_response: Optional[str]
+
+    # ── RAG override for ablation testing ─────────────────────────────────
+    rag_enabled: Optional[bool]
     tool_calls: Optional[List[Dict[str, Any]]]
     chart_actions: Optional[List[Dict[str, Any]]]
 
@@ -112,6 +115,7 @@ def initial_state(
     language: Optional[str] = None,
     chart_context: Optional[Dict[str, Any]] = None,
     chat_history: Optional[List[Dict[str, str]]] = None,
+    rag_enabled: Optional[bool] = None,
 ) -> AgentState:
     """Build the initial graph state from a chat request.
 
@@ -173,4 +177,5 @@ def initial_state(
         timing={},
         estimated_cost_usd=None,
         execution_id=None,
+        rag_enabled=rag_enabled,
     )

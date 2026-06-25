@@ -10,9 +10,9 @@ Project rules for AI coding agents.
 - **Purpose:** Real-time cryptocurrency technical-analysis platform
 - **Architecture:** Lambda Architecture: speed, batch/lakehouse, serving, frontend
 - **Core stack:** Kafka, Flink, Spark, Redis Sentinel, InfluxDB, PostgreSQL, Iceberg/MinIO, Trino, FastAPI, React 19
-- **Current release:** `0.25.60` in `docs/CHANGELOG.md`
-- **Deployment:** 2-node Docker Swarm on AWS EC2 (core: 4/32, worker: 4/16, EFS shared)
-- **Current focus:** Production stability, Docker Swarm migration;
+- **Current release:** `0.27.0` in `docs/CHANGELOG.md`
+- **Deployment:** Docker Swarm on AWS EC2 (2-node or 3-node, EFS or local storage)
+- **Current focus:** Production stability, 3-node migration preparation, AI/backend separation
 
 ---
 
@@ -21,7 +21,9 @@ Project rules for AI coding agents.
 Every session starts with:
 
 1. Use `caveman` skill/plugin for agents to cut down output token usage if available.
-2. Read `docs/SYSTEM.md` (high-level) and `docs/system/README.md` (per-module index).
+2. Read `docs/system/README.md` (per-module index) for current system state.
+   - `docs/3NODE-MIGRATION-PLAN.md` for 3-node migration details.
+   - `docs/SYSTEM.md` is **legacy** — kept for historical reference, NOT authoritative for current state.
 3. Read latest `docs/CHANGELOG.md` entries, at least 3.
 4. Check `git status --short --branch`.
 5. Identify affected modules from `docs/system/*.md` and planned files.
@@ -50,12 +52,21 @@ Only touch these when explicitly requested:
 
 - `.env`
 - `docker-compose.yml`
+- `docker-compose.swarm.yml`
 - `schemas/*.avsc`
 - `backend/migrations/*.sql`
 - Flink checkpoints
 - Kafka/Redis/InfluxDB/MinIO/PostgreSQL persisted data
 
 Schema changes require producer, Flink, Spark, backend, frontend types where relevant, and tests to change together.
+
+### AI Service Restriction
+
+- `ai_service/` is a **standalone service** (`docker/ai-service/`), not part of the backend.
+- Backend proxies AI requests via HTTP (`AI_SERVICE_EMBEDDED=false`, default since v0.27.0).
+- Do NOT add new `from ai_service` imports to `backend/` code — use HTTP proxy instead.
+- Heavy ML libs (torch, sentence-transformers, etc.) stay in `docker/fastapi/requirements-ai.txt`
+  and are only installed in the `docker/ai-service` image, NOT the backend.
 
 ---
 
@@ -132,17 +143,20 @@ npm run build
 
 ## Docker and Infrastructure Rules
 
-- `docker-compose.yml` is the runtime source of truth, combined with `docker-compose.swarm.yml` for Swarm deployments.
+- `docker-compose.yml` is the runtime source of truth.
+- `docker-compose.swarm.yml` overlays Swarm-specific config (placement, network driver).
+- `docker-compose.3node.yml` (see `docs/3NODE-MIGRATION-PLAN.md`) for future 3-node deployments.
 - Every concrete service needs a `profiles` key.
 - Template/extension services may use `profiles: ["dont-start"]`.
 - Core services use `dev` and/or `prod`.
 - Monitoring/logging services stay opt-in.
-- Services that accept connections need health checks (currently: producer, flink-jobmanager, flink-taskmanager, spark-worker, schema-registry are MISSING health checks).
-- Services need memory limits where Compose supports them.
+- All services that accept connections need `healthcheck` blocks.
+- All services need `deploy.resources.limits.memory`.
 - Service names use kebab-case.
 - Dev Nginx serves plain HTTP on port 80. Production Nginx uses ports 80 and 443 with certbot automation.
 - Images are pushed to local registry (`registry:2`, port 5000) and deployed with `--resolve-image never`.
-- **Deploy command**: `docker stack deploy -c docker-compose.yml -c docker-compose.swarm.yml cryptoprice`
+- Registry address is configurable via `REGISTRY_ADDR` env var.
+- **Deploy command**: `bash scripts/deploy_aws_swarm.sh`
 
 Validate Compose changes with:
 
@@ -150,6 +164,17 @@ Validate Compose changes with:
 docker compose --profile dev config
 docker compose --profile prod --profile monitoring --profile logging config
 ```
+
+### Node Placement (Swarm)
+
+| Label | Role | Services |
+|---|---|---|
+| `role=core` | Manager | Nginx, FastAPI, React, ai-service, certbot, registry |
+| `role=worker` | Worker (2-node) | Flink, Spark, Trino, Dagster, monitoring |
+| `role=data` | Worker (3-node) | PostgreSQL, Redis, Kafka, InfluxDB, MinIO |
+| `role=compute` | Worker (3-node) | Flink, Spark, Trino, Dagster, monitoring |
+
+See `docs/3NODE-MIGRATION-PLAN.md` for full placement strategy.
 
 ---
 
@@ -216,11 +241,12 @@ Read `docs/system/13-caveats.md` for full bug inventory before changing these:
 - `orchestration/assets.py` (catalog mismatch)
 
 ### Scripts hot spots
-- `scripts/deploy_aws_swarm.sh` (CUSTOM_IMAGES, port sed, no rollback)
+- `scripts/deploy_aws_swarm.sh` (registry IP, rollback logic)
 - `scripts/auto_submit_jobs.sh` (deps.zip duplicate, Spark URL)
 - `scripts/job_watchdog.py` (0/1 replicas)
 - `scripts/submit_flink.sh` (duplicate of auto_submit_jobs.sh)
 - `scripts/audit_data_coverage.py` (useful but not integrated)
+- `scripts/setup_node.sh` (EFS config, node setup)
 - `scripts/docker-reclaim.sh` (WSL-only, stale)
 
 ### Frontend hot spots
@@ -238,28 +264,29 @@ Current caveats (detailed bug inventory: `docs/system/13-caveats.md`):
 - Ticker API is exchange-aware and can aggregate exchanges, but uses simple mid-price average (not volume-weighted).
 - Order book API reads exchange-qualified Redis keys and has ticker/REST fallback metadata.
 - Trades API reads true `trade:latest:{exchange}:{symbol}` cache first, then ticker-derived fallback; summary route still reports ticker-derived metadata.
-- OKX producer path exists and has unit coverage, disabled by default (`ENABLE_OKX=false`). Kline interval mapping **fixed** in v0.25.41.
+- OKX producer path exists and has unit coverage, disabled by default (`ENABLE_OKX=false`).
 - Flink kline aggregation preserves `exchange`; depth processing still drops/defaults `exchange` (keydb_depth.py).
 - Spark streaming `coin_*` Iceberg DDLs include `exchange`; ticker streaming dedup still omits `exchange` (lakehouse/pipeline.py).
 - `/api/market/overview` tries Trino gold tables, then derives from Redis ticker cache; heatmap helper has stale `iceberg_catalog.gold` join.
-- Dagster exposes `defs = Definitions(...)`, but its Spark catalog (`s3a://lakehouse/warehouse`) differs from pipeline's JDBC catalog (`s3://cryptoprice/iceberg`).
-- Frontend hook specs exist but no test runner configured.
-- **scripts/**: `auto_submit_jobs.sh` and `submit_flink.sh` have duplicated deps.zip build logic. `job_watchdog.py` at 0/1 replicas — Flink job failures require manual re-submit.
-- **Deploy**: `deploy_aws_swarm.sh` CUSTOM_IMAGES includes kafka (not built by compose). No rollback on deploy failure.
-- **Migration**: `004_agents_metadata.sql` and `004_phaseC_news_enhancements.sql` both use 004 prefix — potential ordering issue.
+- Dagster catalog uses `s3a://lakehouse/warehouse` vs pipeline's `s3://cryptoprice/iceberg` — mismatch.
+- **scripts/**: `auto_submit_jobs.sh` duplicates deps.zip build. `job_watchdog.py` 0/1 replicas — Flink failures need manual resubmit.
+- **Backend-ai coupling**: 19+ files in `backend/` still import `ai_service` at module level (lazy-import refactor pending for v0.28).
+- **Migration**: `004_agents_metadata.sql` and `004_phaseC_news_enhancements.sql` both use `004` prefix.
 
 ---
 
-## AI Feature Guidance
+## AI Feature Guidance (v0.27.0+)
+---
 
-Current Phase 1 exists:
+Current Phase 1 (stable):
 
 - Authenticated AI API routes are modular under `backend/api/ai/`.
+- Backend proxies AI requests to standalone `ai-service` container via HTTP (`AI_SERVICE_EMBEDDED=false`, default).
+- AI service runs as `cryptoprice_ai-service` container (port 8100).
 - Chat sessions, messages, chart snapshots, action metadata, knowledge chunks/embeddings, and retrieval logs persist in PostgreSQL.
 - Scope gate, prompt builder, provider router, RAG retrieval, output guard, and chart-action validator are wired.
-- Mock provider remains default/fallback; real provider path needs `AI_ENABLE_REAL_LLM=true`, non-mock `AI_MODE`, provider keys/config, and runtime dependencies.
-- `litellm` and `sentence-transformers` are in `docker/fastapi/requirements.txt` and installed in the image. At runtime, they may be pip-installed again if the container uses a different code version (see `backend/app.py` lifespan).
-- `docker-compose.ai.yml` starts optional LiteLLM/vLLM support, but `ai-service` is scaffolded and exits after an echo command.
+- Mock provider remains default/fallback; real provider path needs `AI_ENABLE_REAL_LLM=true` + provider keys.
+- `docker-compose.ai.yml` starts optional LiteLLM/vLLM support.
 - Frontend AI Helper calls backend Ask Mode in API mode and uses local/mock fallback when needed.
 
 For future AI/ML work:
@@ -279,14 +306,16 @@ For future AI/ML work:
 
 | File | Purpose |
 |---|---|
-| `docs/SYSTEM.md` | Full current system map and caveats |
+| `docs/system/README.md` | **Current** module index (start here) |
 | `docs/system/*.md` | Per-module detailed documentation |
+| `docs/3NODE-MIGRATION-PLAN.md` | 3-node Docker Swarm migration proposal |
 | `docs/CHANGELOG.md` | Project history |
+| `docs/SYSTEM.md` | **Legacy** system map (kept for reference) |
 | `AGENTS.md` | This file |
 | `README.md` | User-facing overview |
 | `VERSION` | Single source of truth for version number |
 | `docker-compose.yml` | Runtime service graph |
 | `docker-compose.swarm.yml` | Docker Swarm overlay config |
-| `.env.example` | Env template |
+| `.env.example` | Env template (fill values, copy to .env) |
 | `Makefile` | Common commands |
 | `schemas/*.avsc` | Kafka contracts |

@@ -622,7 +622,7 @@ services:
         max_attempts: 5
       resources:
         limits:
-          memory: 2G
+          memory: 4G
 
   kafka-exporter:
     command:
