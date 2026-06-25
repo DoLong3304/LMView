@@ -25,8 +25,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-FLINK_JM_URL="${FLINK_JM_URL:-http://172.31.37.193:8081}"
+FLINK_JM_URL="${FLINK_JM_URL:-http://localhost:8081}"
 FLINK_PARALLELISM="${FLINK_PARALLELISM:-12}"
+REGISTRY_ADDR="${REGISTRY_ADDR:-localhost:5000}"
+FLINK_IMAGE="${FLINK_IMAGE:-${REGISTRY_ADDR}/cryptoprice/flink:1.18.1}"
 
 RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'
 CYAN=$'\033[0;36m'; NC=$'\033[0m'
@@ -58,7 +60,7 @@ docker run --rm \
   --network host \
   -v "$PROJECT_ROOT/src:/app/src:ro" \
   -v "$PROJECT_ROOT/schemas:/app/schemas:ro" \
-  172.31.37.193:5000/cryptoprice/flink:1.18.1 \
+  ${FLINK_IMAGE} \
   bash /app/scripts/build_deps_zip.sh 2>&1 | tail -3
 
 # 3. Submit job via REST API
@@ -67,10 +69,10 @@ RESP=$(docker run --rm \
   --network host \
   -v "$PROJECT_ROOT/src:/app/src:ro" \
   -v "$PROJECT_ROOT/schemas:/app/schemas:ro" \
-  172.31.37.193:5000/cryptoprice/flink:1.18.1 \
+  ${FLINK_IMAGE} \
   bash -c "
     cd /tmp && flink run \
-      -m 172.31.37.193:8081 \
+      -m ${FLINK_JM_URL#http://} \
       -d \
       -py /app/src/processing/pipeline.py \
       --pyFiles /tmp/deps.zip

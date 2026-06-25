@@ -1,6 +1,18 @@
 # Caveats & Known Issues — Complete Bug Inventory
 
-All known bugs, design weaknesses, and technical debt as of 2026-06-20 (v0.25.51).
+All known bugs, design weaknesses, and technical debt as of 2026-06-25 (v0.28.0).
+
+> **Note:** This doc is updated at each major release. For the current release
+> changes, see `docs/CHANGELOG.md`. For 3-node migration planning, see
+> `docs/3NODE-MIGRATION-PLAN.md`.
+
+**Recent progress (v0.28.0, 2026-06-25):**
+- ✅ **Scripts/Configs**: All 7 scripts with hardcoded IPs → env-var driven
+- ✅ **Backend/AI separation**: `AI_SERVICE_EMBEDDED=false` default, lazy imports
+- ✅ **Deploy script**: CUSTOM_IMAGES array → dynamic compose resolution
+- ✅ **.env.example**: Fully parameterized with `${VAR:-default}`
+- ✅ **Docker cleanup**: ~7GB reclaimed, thesis/backup docs → trash/
+- 🟡 **CI-1 / CI-2**: `exchange` drop in depth/ticker dedup — still open
 
 > **Status legend** (each entry below carries one):
 > - **✅ FIXED** — verified resolved in code (may still need deploy/rebuild to take effect in prod)

@@ -1,6 +1,21 @@
 # AI Service — ai_service/
 
-The `ai_service` module powers LMView's AI Ask & Interact Modes. It operates as a modular, multi-agent AI assistant driven by a **LangGraph DAG**, running inside the FastAPI container. This system is designed to provide contextual market analysis, execute chart interactions, retrieve real-time data, and offer guided platform tours.
+The `ai_service` module powers LMView's AI Ask & Interact Modes. It operates
+as a modular, multi-agent AI assistant driven by a **LangGraph DAG**.
+
+**Architecture (v0.28.0+):**
+- **Standalone container**: `ai_service` runs in its own container
+  (`cryptoprice_ai-service`, port 8100), NOT inside the FastAPI container.
+- **HTTP proxy mode**: Backend FastAPI proxies AI requests to `ai-service`
+  via HTTP (`AI_SERVICE_EMBEDDED=false`, default since v0.28.0).
+- **Embedded fallback**: For legacy/local setups, flip
+  `AI_SERVICE_EMBEDDED=true` to import `ai_service` directly in the backend
+  process.
+- **Heavy ML isolation**: `sentence-transformers` (torch), `langgraph`, and
+  `litellm` are only installed in the `docker/ai-service` image, keeping
+  the backend image slim (~500 MB vs ~3 GB).
+
+See `docker/ai-service/Dockerfile` and `backend/services/ai/ai_proxy.py`.
 
 ---
 

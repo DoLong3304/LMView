@@ -1,5 +1,8 @@
 # Docker Swarm Deployment
 
+> **Note:** This doc describes the current 2-node AWS EC2 deployment.
+> For the planned 3-node migration, see [`docs/3NODE-MIGRATION-PLAN.md`](../3NODE-MIGRATION-PLAN.md).
+
 2-node AWS EC2 deployment with EFS shared storage.
 
 ## Infrastructure
@@ -8,8 +11,12 @@
 
 | Node | Role | Spec | Services |
 |---|---|---|---|
-| ip-172-31-21-135 | Manager (Leader) | 4 vCPU, 32 GB RAM | Core: storage, brokers, API, frontend, AI, registry |
-| ip-172-31-9-171 | Worker | 4 vCPU, 16 GB RAM | Compute: Flink, Spark, Trino, monitoring |
+| Manager (Leader) | Core | 8 vCPU, 32 GB RAM | Nginx, FastAPI, Redis, Kafka, PostgreSQL, InfluxDB, MinIO, AI service, certbot |
+| Worker | Compute | 4 vCPU, 16 GB RAM | Flink, Spark, Trino, Dagster, monitoring |
+
+⚠️ Worker node `ip-172-31-9-171` terminated 2026-06-25. Node labels and IPs are
+**not** hardcoded — configure via `REGISTRY_ADDR`, `FLINK_JM_URL`, etc. See
+`.env.example` for all configurable vars.
 
 ### Node Labels
 

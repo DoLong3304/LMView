@@ -247,7 +247,8 @@ async def test_e3():
     import subprocess
     r = subprocess.run([
         "ssh", "-i", "/mnt/efs/LMView/lmview-pk", "-o", "StrictHostKeyChecking=accept-new",
-        "ubuntu@172.31.37.193",
+        # AWS EC2 test host — override via env var EVAL_SSH_HOST
+        host = os.environ.get("EVAL_SSH_HOST", "ubuntu@localhost")
         f"docker cp /mnt/efs/LMView/evaluation/e3_check.py $(docker ps --format '{{{{.Names}}}}' | grep fastapi | head -1):/tmp/e3_check.py && "
         f"docker exec $(docker ps --format '{{{{.Names}}}}' | grep fastapi | head -1) python3 /tmp/e3_check.py"
     ], capture_output=True, text=True, timeout=90)

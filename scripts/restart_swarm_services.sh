@@ -72,7 +72,7 @@ SERVICES=(
 # ── Pre-flight ──────────────────────────────────────────────────────────────
 log "Pre-flight: are we on a Swarm manager?"
 if ! docker info 2>/dev/null | grep -q "Swarm: active"; then
-  err "Docker Swarm not active on this node. Run on manager 172.31.37.193."
+  err "Docker Swarm not active on this node. Run on a manager node."
 fi
 if ! docker node ls >/dev/null 2>&1; then
   err "Cannot query Swarm nodes — manager role required."
@@ -115,10 +115,14 @@ probe() {
     warn "${label} NOT healthy at ${url} (HTTP ${code})"
   fi
 }
+FLINK_JM_URL="${FLINK_JM_URL:-http://localhost:8081}"
+SPARK_URL="${SPARK_URL:-http://localhost:8082}"
+TRINO_URL="${TRINO_URL:-http://localhost:8083}"
+
 log "Probing UIs…"
-probe "http://172.31.37.193:8081/overview" "Flink"
-probe "http://172.31.37.193:8082/"          "Spark master"
-probe "http://172.31.37.193:8083/"          "Trino"
+probe "${FLINK_JM_URL}/overview" "Flink"
+probe "${SPARK_URL}/" "Spark master"
+probe "${TRINO_URL}/" "Trino"
 
 # ── Step 6: Indicator freshness (only meaningful after Flink jobs land) ─────
 log "Checking Redis indicator freshness (may be empty until jobs land)…"

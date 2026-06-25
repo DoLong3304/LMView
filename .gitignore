@@ -87,13 +87,5 @@ derby.log
 # ────────────────────────────────────────────────────────────────────────────
 # Engram persistent memory (shared across machines via git)
 # ────────────────────────────────────────────────────────────────────────────
-# Uncomment to track engram memories across nodes:
-#!.engram
-
-# ────────────────────────────────────────────────────────────────────────────
-# Personal / Academic drafts
-# ────────────────────────────────────────────────────────────────────────────
-docs/Khóa luận*.md
-docs/KẾ HOẠCH*.md
-docs/NOTE*
-docs/temp-fact-sheet.md
+# .engram/ is tracked for cross-machine memory sync. Run `engram sync`
+# to export project memories, then commit .engram/.

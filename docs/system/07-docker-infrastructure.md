@@ -10,9 +10,26 @@ Docker Compose + Swarm setup for LMView.
 | `docker-compose.swarm.yml` | Swarm overlay — placement, resources, configs (extends main) |
 | `docker-compose.ai.yml` | AI service extension — LiteLLM, vLLM |
 
-Deployment: `docker stack deploy -c docker-compose.yml -c docker-compose.swarm.yml cryptoprice`
+Deployment: `bash scripts/deploy_aws_swarm.sh`
 
-## Profiles
+## Dockerfiles (per service)
+
+Each service has its own Dockerfile under `docker/<service>/`:
+
+| Service | Dockerfile | Base Image | Purpose |
+|---|---|---|---|
+| fastapi | `docker/fastapi/Dockerfile` | python:3.11-slim | Backend API gateway (NO heavy AI deps) |
+| ai-service | `docker/ai-service/Dockerfile` | python:3.11-slim | Standalone AI service (has torch, transformers) |
+| nginx | `docker/nginx/Dockerfile` | nginx:alpine | Reverse proxy + SSL |
+| flink | `docker/flink/Dockerfile` | flink:1.18.1 | Flink jobmanager + taskmanager |
+| spark | `docker/spark/Dockerfile` | spark:3.5.5 | Spark master + worker |
+| ticker-ws | `docker/ticker-ws/Dockerfile` | python:3.11-slim | Binance WS ticker feed (8 shards) |
+| combined-stream | `docker/combined-stream/Dockerfile` | python:3.11-slim | Combined-stream Kafka producer |
+| kline-rest | `docker/kline-rest/Dockerfile` | python:3.11-slim | REST kline feed |
+| depth-trades-rest | `docker/depth-trades-rest/Dockerfile` | python:3.11-slim | REST depth + trades feed |
+| producer | `docker/producer/Dockerfile` | python:3.11-slim | Legacy producer (all WS paths disabled) |
+| backfill | `docker/backfill/Dockerfile` | python:3.11-slim | InfluxDB backfill job |
+| dagster | `docker/dagster/Dockerfile` | python:3.11-slim | Dagster orchestration |
 
 | Profile | Services |
 |---|---|
