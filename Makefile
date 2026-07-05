@@ -90,6 +90,11 @@ swarm-deploy: ## Build images, push to local registry, and deploy Swarm stack
 swarm-deploy-quick: ## Deploy Swarm stack (skip image build, push existing)
 	bash scripts/deploy_aws_swarm.sh --skip-build
 
+.PHONY: swarm-deploy-services
+swarm-deploy-services: ## Targeted deploy specific services. Usage: make swarm-deploy-services SVCS="fastapi-prod,ai-service"
+	@if [ -z "$(SVCS)" ]; then echo "Usage: make swarm-deploy-services SVCS=\"svc1,svc2\""; exit 1; fi
+	bash scripts/deploy_aws_swarm.sh --services="$(SVCS)"
+
 .PHONY: swarm-push
 swarm-push: ## Build and push images to local registry only (no deploy)
 	bash scripts/deploy_aws_swarm.sh --registry-only

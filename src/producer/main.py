@@ -318,30 +318,48 @@ def _handle_combined_message(
 
     mapped = mapper(payload)
 
-    # Direct Redis write first (fast path, <1ms)
-    if health_monitor.is_direct_redis_active():
-        try:
-            direct_writer = get_direct_writer()
-            if event_type == "aggTrade":
-                direct_writer.write_trade("binance", symbol, mapped)
-            elif event_type == "kline":
-                interval = KLINE_INTERVAL_WS
-                mapped["kline_start"] = payload.get("k", {}).get("t", 0) if isinstance(payload.get("k"), dict) else 0
-                mapped["open"] = float(mapped.get("open", 0))
-                mapped["high"] = float(mapped.get("high", 0))
-                mapped["low"] = float(mapped.get("low", 0))
-                mapped["close"] = float(mapped.get("close", 0))
-                mapped["volume"] = float(mapped.get("volume", 0))
-                mapped["quote_volume"] = float(mapped.get("quote_volume", 0))
-                mapped["trade_count"] = int(mapped.get("trade_count", 0))
-                mapped["is_closed"] = bool(mapped.get("is_closed", False))
+    # ── Direct Redis write ────────────────────────────────────────────────
+    #
+    # Two modes:
+    # 1. 1s klines — ALWAYS written directly to Redis (fast path).
+    #    Kafka/Flink add ~500ms latency via BATCH flush bottleneck.
+    #    DirectRedisWriter cuts 1s candle latency to <100ms.
+    # 2. All other event types — written to DirectRedis only during
+    #    Kafka/Flink failover (health_monitor.is_direct_redis_active()).
+    #
+    # This separates the 1s real-time path from the batch pipeline,
+    # matching Mode 2 of the Lambda architecture for 1s data.
+    #
+    try:
+        direct_writer = get_direct_writer()
+        if event_type == "kline":
+            interval = KLINE_INTERVAL_WS
+            mapped["kline_start"] = payload.get("k", {}).get("t", 0) if isinstance(payload.get("k"), dict) else 0
+            mapped["open"] = float(mapped.get("open", 0))
+            mapped["high"] = float(mapped.get("high", 0))
+            mapped["low"] = float(mapped.get("low", 0))
+            mapped["close"] = float(mapped.get("close", 0))
+            mapped["volume"] = float(mapped.get("volume", 0))
+            mapped["quote_volume"] = float(mapped.get("quote_volume", 0))
+            mapped["trade_count"] = int(mapped.get("trade_count", 0))
+            mapped["is_closed"] = bool(mapped.get("is_closed", False))
+            # 1s klines: always direct (bypass Kafka/Flink latency)
+            if interval == "1s":
                 direct_writer.write_kline("binance", symbol, interval, mapped)
-            elif event_type == "depth":
+            elif health_monitor.is_direct_redis_active():
+                # 1m+ klines: direct only during failover
+                direct_writer.write_kline("binance", symbol, interval, mapped)
+        elif event_type == "aggTrade":
+            if health_monitor.is_direct_redis_active():
+                direct_writer.write_trade("binance", symbol, mapped)
+        elif event_type == "depth":
+            if health_monitor.is_direct_redis_active():
                 direct_writer.write_depth("binance", symbol, payload)
-            elif event_type == "24hrTicker":
+        elif event_type == "24hrTicker":
+            if health_monitor.is_direct_redis_active():
                 direct_writer.write_ticker("binance", symbol, mapped)
-        except Exception as e:
-            log.error("[DirectRedis/%s] write error: %s", tag, e)
+    except Exception as e:
+        log.error("[DirectRedis/%s] write error: %s", tag, e)
 
     # Kafka send (async, may block if broker down)
     if topic:
@@ -908,16 +926,13 @@ def run_change24h_poller(client: ExchangeClient) -> None:
     Supplements miniTicker (which lacks change24h field) with accurate 24h stats.
     """
     import requests
-    import redis
+    from common.flink_redis_sentinel import get_flink_redis
 
     worker_name = threading.current_thread().name
     exchange_name = getattr(client, "name", "binance")
 
-    # Connect to Redis
-    redis_host = os.getenv("REDIS_HOST", "redis-master")
-    redis_port = int(os.getenv("REDIS_PORT", "6379"))
-    redis_db = int(os.getenv("REDIS_DB", "0"))
-    redis_client = redis.Redis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
+    # Connect to Redis via Sentinel (finds the true master, avoids replica writes)
+    redis_client = get_flink_redis()
 
     log.info("[CHANGE24H] Starting REST API poller (60s interval)")
 

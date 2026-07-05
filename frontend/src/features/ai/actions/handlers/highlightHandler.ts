@@ -57,6 +57,61 @@ export const handleHighlightCandles: ActionHandler = ({ showSection, setHighligh
 };
 
 /**
+ * Highlight a chart zone based on analysis context (breakout, divergence, etc.).
+ * Uses zone_type + candle_count to estimate the chart region from the latest
+ * candles. The frontend maps this to actual coordinates — the AI doesn't need
+ * exact candle indices.
+ */
+export const handleHighlightContextualZone: ActionHandler = ({ showSection, setHighlight, args }) => {
+  showSection("chart");
+  const zoneType = String(args.zone_type || "recent_action");
+  const candleCount = Number(args.candle_count) || 5;
+  const direction = String(args.direction || "neutral");
+
+  // Map zone_type + direction to label/color hints
+  const zoneMeta: Record<string, { label: string; color: string }> = {
+    breakout: { label: "🚀 Breakout zone", color: "#22c55e" },
+    breakdown: { label: "⬇ Breakdown zone", color: "#ef4444" },
+    support_test: { label: "🛡 Support test", color: "#22c55e" },
+    resistance_test: { label: "🧱 Resistance test", color: "#ef4444" },
+    bullish_divergence: { label: "📈 Bullish divergence", color: "#22c55e" },
+    bearish_divergence: { label: "📉 Bearish divergence", color: "#ef4444" },
+    consolidation: { label: "🔲 Consolidation", color: "#facc15" },
+    reversal_candles: { label: "🔄 Reversal setup", color: "#a78bfa" },
+    volume_spike: { label: "📊 Volume spike", color: "#60a5fa" },
+    trend_push: { label: "📈 Trend push", color: "#34d399" },
+    accumulation: { label: "📥 Accumulation", color: "#22c55e" },
+    distribution: { label: "📤 Distribution", color: "#ef4444" },
+    recent_action: { label: "📌 Recent action", color: "#60a5fa" },
+  };
+  const meta = zoneMeta[zoneType] || { label: "📍 Analysis zone", color: "#60a5fa" };
+
+  // Estimate region from candle_count relative to latest candles
+  // The chart has ~30-50 visible candles; candle_count maps to a percentage width
+  const visibleCandleEstimate = 40;
+  const estimatedWidthPct = Math.min(90, Math.max(10, (candleCount / visibleCandleEstimate) * 100));
+  const estimatedLeftPct = Math.max(0, 95 - estimatedWidthPct);  // anchor to right side (latest candles)
+
+  const label = typeof args.label === "string" ? args.label : meta.label;
+  const message = typeof args.message === "string"
+    ? args.message
+    : `Analyzing ${zoneType.replace(/_/g, " ")} zone — ${direction} bias`;
+
+  setHighlight({
+    target: "chartCanvas",
+    label,
+    message,
+    region: {
+      leftPct: estimatedLeftPct,
+      topPct: 15,
+      widthPct: estimatedWidthPct,
+      heightPct: 65,
+    },
+  });
+  return `success: highlighted contextual zone "${zoneType}" (${candleCount} candles, ${direction})`;
+};
+
+/**
  * Generic highlight dispatcher. Accepts any of:
  *  - { type: "section", target, label, message, include_chat }
  *  - { type: "chart_area", left_pct, top_pct, width_pct, height_pct, ... }

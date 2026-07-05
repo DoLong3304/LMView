@@ -21,6 +21,13 @@ class EvalCategory(str, Enum):
     STALE_DATA_WARNING = "stale_data_warning"
     BILINGUAL_RESPONSE = "bilingual_response"
     RISK_DISCLAIMER = "risk_disclaimer"
+    MULTI_INTENT = "multi_intent"
+    HALLUCINATION_BOUNDARY = "hallucination_boundary"
+    CONSISTENCY = "consistency"
+    WALKTHROUGH = "walkthrough"
+    EDGE_CASE = "edge_case"
+    CONFIGURATION = "configuration"
+    CROSS_TURN_MEMORY = "cross_turn_memory"
 
 
 class GoldenQuestion(BaseModel):

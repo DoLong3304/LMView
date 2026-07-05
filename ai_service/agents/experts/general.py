@@ -58,6 +58,8 @@ class GeneralExpert(BaseExpert):
             expert_name=self.name,
             content=content,
             structured_data=structured,
-            confidence=0.4,
+            # General expert is a fallback — low base confidence.
+            # Slightly higher if we have actual context data.
+            confidence=0.25 if not parts else 0.35,
             data_sources=data_sources,
         )

@@ -135,7 +135,7 @@ async def get_merged_klines(
                 "trade_count": int(item.get("n", item.get("trade_count", 0))),
                 "isClosed": item.get("x", item.get("isClosed", True)),
             })
-    elif interval != "1m":
+    elif interval not in ("1m", "1s"):
         # Fallback: fetch 1m candles from Redis/InfluxDB/Trino, then aggregate
         now_ms = int(time.time() * 1000)
         influx_cutoff_ms = now_ms - (INFLUX_1M_RETENTION_DAYS * 24 * 3600 * 1000)
@@ -221,7 +221,7 @@ async def get_merged_klines(
 
 
 def _interval_to_seconds(interval: str) -> int:
-    """Convert interval string like '5m', '1h', '1d' to seconds."""
+    """Convert interval string like '1s', '5m', '1h', '1d' to seconds."""
     unit = interval[-1]
     val = int(interval[:-1])
     if unit == "s":

@@ -1,7 +1,7 @@
 # LMView Data Caveats & Limitations
 
 > **Metadata**: `review_status: approved` | `allowed_for_rag: true` | `internal_only: false`
-> **Version scope**: 0.25.x | **Last reviewed**: 2026-06-16
+> **Version scope**: 0.32.0+ | **Last reviewed**: 2026-07-01
 
 ---
 
@@ -28,7 +28,8 @@ This document helps the AI assistant provide honest, accurate analysis by docume
 ### Market Overview
 
 - **Placeholder data**: When Trino gold tables are not populated, market overview falls back to Redis ticker cache. Placeholder data is flagged with `is_placeholder: true` in response metadata.
-- **Gold table dependency**: Market dominance, sector performance, volatility rankings, and movers data require populated Iceberg gold tables.
+- **Gold table dependency**: Market dominance, sector performance, volatility rankings, and movers data require populated Iceberg gold tables via Trino queries.
+- **Trino catalog**: Iceberg tables live under `iceberg_catalog.crypto_lakehouse.*` catalog namespace. The catalog name must match Spark's catalog name for cross-engine queries.
 
 ### Indicator Values
 
@@ -80,6 +81,16 @@ This document helps the AI assistant provide honest, accurate analysis by docume
 - Reference the current chart context and knowledge base
 - Propose safe UI actions in Interact mode (with user approval)
 - Provide bilingual responses (English/Vietnamese)
+- Retain analytical context across conversation turns (session memory)
+- Produce multi-step walkthroughs with auto-executed chart actions
+
+### AI Knowledge Base
+- RAG retrieval uses BAAI/bge-small-en-v1.5 embedding model (384-dim, ~33MB)
+- Knowledge base: 23+ sources, 28+ documents, 1550+ chunks with embeddings
+- Cross-encoder reranker (ms-marco-MiniLM-L-6-v2) re-ranks hybrid search results
+- Hybrid search combines vector cosine similarity (60%) + BM25 keyword ranking (40%)
+- Documents have credibility levels (verified, high, medium, draft) — AI prefers verified sources
+- Embeddings are recomputed when the model is upgraded via the reindex API
 
 ### What the AI Cannot Do
 - Execute trades or manage positions

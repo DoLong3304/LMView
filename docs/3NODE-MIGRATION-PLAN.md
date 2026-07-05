@@ -30,13 +30,16 @@
 │  │  8vCPU 32GB   │  │  8vCPU 32GB   │  │  8vCPU 32GB   │ │
 │  │               │  │               │  │               │ │
 │  │ - Nginx       │  │ - PostgreSQL  │  │ - Flink TM×2  │ │
-│  │ - FastAPI     │  │ - Redis       │  │ - Spark Worker│ │
-│  │ - React SPA   │  │   Sentinel    │  │ - Trino       │ │
-│  │ - ai-service  │  │ - Kafka ×3   │  │ - Dagster     │ │
-│  │ - Certbot     │  │ - InfluxDB   │  │ - Prometheus  │ │
-│  │ - DuckDNS     │  │ - MinIO      │  │ - Grafana     │ │
-│  │ - LiteLLM     │  │ - Zookeeper  │  │ - Loki        │ │
-│  │ - Registry    │  │ - Schema Reg │  │ - Node Exp.   │ │
+│  │ - FastAPI     │  │ - Redis Master │  │ - Spark Worker│ │
+│  │ - React SPA   │  │   + Sentinel-2 │  │ - Redis       │ │
+│  │ - ai-service  │  │ - Kafka ×3    │  │   Replica     │ │
+│  │ - Certbot     │  │ - InfluxDB   │  │   + Sentinel-3│ │
+│  │ - DuckDNS     │  │ - MinIO      │  │ - Trino       │ │
+│  │ - LiteLLM     │  │ - Zookeeper  │  │ - Dagster     │ │
+│  │ - Registry    │  │ - Schema Reg │  │ - Prometheus  │ │
+│  │ - Redis       │  │               │  │ - Grafana     │ │
+│  │   Sentinel-1  │  │               │  │ - Loki        │ │
+│  │               │  │               │  │ - Node Exp.   │ │
 │  └──────────────┘  └──────────────┘  └──────────────┘ │
 │                                                         │
 │  Shared: EFS (/mnt/efs/LMView) — code + config only     │
@@ -50,7 +53,7 @@
 | Role | Label | Services | Min Spec | Ideal Spec |
 |---|---|---|---|---|
 | **core** | `role=core` | Nginx, FastAPI, React, ai-service, registry, certbot | 4vCPU/16GB | 8vCPU/32GB |
-| **data** | `role=data` | PostgreSQL, Redis cluster, Kafka, InfluxDB, MinIO, Zookeeper | 4vCPU/16GB | 8vCPU/32GB |
+| **data** | `role=data` | PostgreSQL, Redis Master + Sentinel-2, Kafka, InfluxDB, MinIO, Zookeeper, Schema Registry | 4vCPU/16GB | 8vCPU/32GB |
 | **compute** | `role=compute` | Flink, Spark, Trino, Dagster, Prometheus, Grafana, Loki | 4vCPU/16GB | 8vCPU/32GB |
 
 ---
@@ -206,17 +209,7 @@ redis-master:
     placement:
       constraints: [node.labels.role == data]
 
-redis-replica-1:
-  deploy:
-    placement:
-      constraints: [node.labels.role == data]
-
-redis-replica-2:
-  deploy:
-    placement:
-      constraints: [node.labels.role == compute]  # cross-node replica
-      
-redis-sentinel-1,2,3:
+redis-sentinel-2:
   deploy:
     placement:
       constraints: [node.labels.role == data]
@@ -224,7 +217,10 @@ redis-sentinel-1,2,3:
 kafka-1,2,3:
   deploy:
     placement:
-      constraints: [node.labels.role == data]
+      constraints:
+        - node.labels.role == core   # kafka-1
+        - node.labels.role == data   # kafka-2
+        - node.labels.role == compute  # kafka-3
 
 zookeeper:
   deploy:
@@ -246,6 +242,19 @@ schema-registry:
     placement:
       constraints: [node.labels.role == data]
 ```
+
+### 3.2b Redis HA Across 3 Nodes
+
+| Service | Role | Node |
+|---|---|---|
+| `redis-master` | Read/write | data |
+| `redis-replica-1` | Read-only replica | compute |
+| `redis-replica-2` | Removed (design: 1 replica) | — |
+| `redis-sentinel-1` | Sentinel (quorum) | core |
+| `redis-sentinel-2` | Sentinel (quorum) | data |
+| `redis-sentinel-3` | Sentinel (quorum) | compute |
+
+Quorum = 2/3 sentinels → nếu data node die, master mới được bầu trên compute node.
 
 ### 3.3 Compute Node (`role=compute`)
 

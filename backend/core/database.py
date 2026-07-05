@@ -44,7 +44,7 @@ def get_trino_connection():
         host=TRINO_HOST,
         port=TRINO_PORT,
         user="fastapi",
-        catalog="iceberg",
+        catalog="iceberg_catalog",
         schema="crypto_lakehouse",
     )
 

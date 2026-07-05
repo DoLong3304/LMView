@@ -28,11 +28,10 @@ rest.port: 8081
 state.backend: hashmap
 state.checkpoints.dir: file:///tmp/flink-checkpoints
 
-# ─── S3 / MinIO ───────────────────────────────────────────────────────────────
-s3.endpoint: http://minio:9000
-s3.access-key: minioadmin
-s3.secret-key: minioadmin
-s3.path.style.access: true
+# ─── S3 / AWS ──────────────────────────────────────────────────────────────
+s3.endpoint: https://s3.ap-southeast-1.amazonaws.com
+# s3.access-key and s3.secret-key injected via env vars (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)
+s3.path.style.access: false
 
 # ─── Java opts (required for Flink 1.18 on Java 11) ──────────────────────────
 env.java.opts.all: --add-exports=java.base/sun.net.util=ALL-UNNAMED --add-exports=java.rmi/sun.rmi.registry=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED --add-exports=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED --add-exports=java.security.jgss/sun.security.krb5=ALL-UNNAMED --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.net=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.text=ALL-UNNAMED --add-opens=java.base/java.time=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.util.concurrent=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED --add-opens=java.base/java.util.concurrent.locks=ALL-UNNAMED
@@ -1096,3 +1095,210 @@ taskmanager.memory.network.min: 192m
 taskmanager.memory.network.max: 384m
 
 taskmanager.numberOfTaskSlots: 12
+taskmanager.numberOfTaskSlots: 12
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.numberOfTaskSlots: 12
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.numberOfTaskSlots: 12
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.numberOfTaskSlots: 12
+taskmanager.numberOfTaskSlots: 12
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.numberOfTaskSlots: 12
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.numberOfTaskSlots: 12
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.numberOfTaskSlots: 12
+taskmanager.numberOfTaskSlots: 12
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.numberOfTaskSlots: 12
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.numberOfTaskSlots: 12
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.numberOfTaskSlots: 12
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m
+
+taskmanager.memory.process.size: 1536m
+taskmanager.memory.framework.off-heap.size: 96m
+taskmanager.memory.task.off-heap.size: 256m
+taskmanager.memory.managed.size: 192m
+taskmanager.memory.network.min: 192m
+taskmanager.memory.network.max: 384m

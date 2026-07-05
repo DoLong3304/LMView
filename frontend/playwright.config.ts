@@ -8,13 +8,11 @@ export default defineConfig({
   reporter: [['html', { outputFolder: 'playwright-report' }], ['list']],
 
   use: {
-    // Production URL (Nginx on port 8080)
-    baseURL: process.env.E2E_BASE_URL || 'https://127.0.0.1',
+    baseURL: process.env.E2E_BASE_URL || 'https://lmview.duckdns.org',
     ignoreHTTPSErrors: true,
-    // Increase timeouts for slow chart rendering
-    timeout: 30_000,
-    navigationTimeout: 15_000,
-    // Capture screenshot + trace on failure
+    // AI-heavy tests need up to 3 minutes for cold-start LLM queries
+    timeout: 180_000,
+    navigationTimeout: 30_000,
     screenshot: 'only-on-failure',
     trace: 'on-first-retry',
   },

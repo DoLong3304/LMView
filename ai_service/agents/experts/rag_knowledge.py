@@ -27,6 +27,21 @@ class RAGKnowledgeExpert(BaseExpert):
         session_id = state.get("session_id", "")
         language = state.get("language")
 
+        # ── Context needs aware: skip RAG if not needed ────────────────
+        context_needs = state.get("context_needs")
+        if context_needs is not None and not context_needs.needs_rag:
+            logger.warning(
+                "RAG skipped by context needs analysis for: %s",
+                user_query[:60],
+            )
+            return ExpertOutput(
+                expert_name=self.name,
+                content="RAG retrieval skipped — simple price/technical query without KB requirement.",
+                structured_data={"chunks": [], "sources": [], "total_retrieved": 0},
+                confidence=0.1,
+                warnings=[],
+            )
+
         data_sources: List[str] = []
         warnings: List[str] = []
         structured: Dict[str, Any] = {
@@ -97,9 +112,12 @@ class RAGKnowledgeExpert(BaseExpert):
 
             structured["chunks"] = [
                 {
-                    "text": chunk.text[:800],
+                    "text": chunk.text,
                     "title": chunk.document_title,
                     "source": chunk.source_title,
+                    "source_type": chunk.source_type,
+                    "credibility_level": chunk.credibility_level,
+                    "review_status": chunk.review_status,
                     "score": chunk.score,
                     "heading": chunk.heading,
                 }
@@ -112,7 +130,16 @@ class RAGKnowledgeExpert(BaseExpert):
                 data_sources.append("pgvector_rag")
             warnings.extend(rag_warnings)
 
-            confidence = min(0.85, 0.2 + len(chunks) * 0.1)
+            # ── Retrieval-evidence confidence ─────────────────────────────
+            # Grounding: RAG confidence reflects:
+            #  1) Chunk count (more sources = broader evidence)
+            #  2) Relevance scores (high-scoring chunks are more reliable)
+            #  3) Source diversity (different docs vs same doc)
+            chunk_count = len(chunks)
+            avg_score = sum((c.score or 0) for c in chunks) / max(chunk_count, 1) if chunks else 0
+            evidence = min(0.65, 0.15 + chunk_count * 0.07)
+            relevance_bonus = min(0.2, avg_score * 0.25)
+            confidence = max(0.1, min(0.88, evidence + relevance_bonus))
             content = f"Retrieved {len(chunks)} knowledge base entries."
 
             return ExpertOutput(

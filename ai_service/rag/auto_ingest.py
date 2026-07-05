@@ -15,8 +15,9 @@ import hashlib
 import logging
 import time
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
+from backend.core.config import AI_EMBEDDING_MODEL
 from backend.core.postgres import get_pg_pool
 from ai_service.rag.registry import allowed_for_ingestion, entry_for_file
 
@@ -92,7 +93,93 @@ async def ingest_all_approved() -> Dict[str, int]:
     return counts
 
 
-async def auto_ingest_watch(interval_seconds: int = 300) -> None:
+async def reindex_all_embeddings() -> Dict[str, Any]:
+    """Recompute embeddings for ALL active chunks using current embedding model.
+
+    Called after model upgrade to refresh the vector index in-place.
+    Chunks retain same IDs/content — only the embedding vector changes.
+
+    Returns stats:
+        total: chunks processed
+        updated: embedding rows updated
+        failed: chunk count that errored
+    """
+    from ai_service.rag.knowledge_service import compute_embedding
+
+    pool = await get_pg_pool()
+    if pool is None:
+        return {"status": "error", "error": "Database unavailable"}
+
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT c.id, c.content
+            FROM ai_knowledge_chunks c
+            JOIN ai_knowledge_documents d ON d.id = c.document_id
+            WHERE d.status = 'active'
+            ORDER BY c.id
+            """
+        )
+
+    total = len(rows)
+    updated = 0
+    failed = 0
+    batch_size = 50
+
+    for batch_start in range(0, total, batch_size):
+        batch = rows[batch_start:batch_start + batch_size]
+        batch_embeddings = []
+
+        for row in batch:
+            chunk_id = row["id"]
+            content = row["content"]
+            emb = compute_embedding(content)
+            if emb is None:
+                failed += 1
+                continue
+            batch_embeddings.append((chunk_id, emb))
+
+        if not batch_embeddings:
+            continue
+
+        try:
+            async with pool.acquire() as conn:
+                # Bulk upsert via unnest for speed
+                chunk_ids = [str(cid) for cid, _emb in batch_embeddings]
+                embedding_strs = [str(emb) for _cid, emb in batch_embeddings]
+                await conn.execute(
+                    """
+                    INSERT INTO ai_knowledge_embeddings (chunk_id, document_id, embedding, model_name, created_at)
+                    SELECT
+                        c.id,
+                        c.document_id,
+                        u.emb::vector,
+                        $1,
+                        NOW()
+                    FROM unnest($2::uuid[], $3::text[]) AS u(id, emb)
+                    JOIN ai_knowledge_chunks c ON c.id = u.id
+                    ON CONFLICT (chunk_id)
+                    DO UPDATE SET embedding = EXCLUDED.embedding, model_name = $1, created_at = NOW()
+                    """,
+                    AI_EMBEDDING_MODEL,
+                    chunk_ids,
+                    embedding_strs,
+                )
+            updated += len(batch_embeddings)
+        except Exception as exc:
+            logger.error("Batch reindex failed for chunk batch %d: %s", batch_start, exc)
+            failed += len(batch_embeddings)
+
+        if batch_start % 200 == 0 and batch_start > 0:
+            logger.info("Reindex progress: %d/%d (updated=%d, failed=%d)", batch_start, total, updated, failed)
+
+    return {
+        "status": "completed",
+        "total": total,
+        "updated": updated,
+        "failed": failed,
+        "model": AI_EMBEDDING_MODEL,
+    }
     """Continuous loop: scan approved dir every *interval_seconds* and ingest changes."""
     logger.info("Starting auto-ingest watcher (every %ds)", interval_seconds)
     while True:

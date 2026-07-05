@@ -10,12 +10,12 @@ import {
   getActiveAiSessionId,
   setActiveAiSessionId,
 } from "@/features/ai/aiSessionSelection";
-import { generateLmviewHelpResponse } from "@/features/ai/localHelpResponder";
 import {
   aiChat,
   aiChatStream,
   aiGetSessionMessages,
   aiListSessions,
+  getSelectedModel,
   shouldUseMockAi,
   type AIMessageResponse,
   type AISessionResponse,
@@ -28,12 +28,54 @@ import type {
   ChartContextForAi,
   TourExecutionState,
 } from "@/features/ai/types";
+import { normalizeTourPlan } from "@/features/ai/types";
 import type { AiMode, LocalAiHelpSession } from "@/types";
 
 type AiToolCall = NonNullable<AiMessage["tool_calls"]>[number];
 type AiChartActionMessage = NonNullable<AiMessage["chart_actions"]>[number];
 
 const mockDataAdapter = getMockDataAdapter();
+
+// ── Format version migration ───────────────────────────────────────────
+// Sessions created before Phase B won't have response_sections/knowledge_chunks
+// in message metadata. They're flushed once on first load after update.
+const FORMAT_VERSION_KEY = "lmview_ai_format_v2_migrated";
+
+async function flushOldApiSessions(_userId: string): Promise<void> {
+  try {
+    const migrated = localStorage.getItem(FORMAT_VERSION_KEY);
+    if (migrated) return;
+    const payload = await aiListSessions();
+    for (const session of payload.sessions) {
+      try {
+        const msgPayload = await aiGetSessionMessages(session.id);
+        const latestAssistant = [...msgPayload.messages]
+          .reverse()
+          .find((m) => m.role === "assistant");
+        if (
+          latestAssistant &&
+          !(
+            Array.isArray(
+              (latestAssistant.metadata || {}).response_sections,
+            ) ||
+            Array.isArray(
+              (latestAssistant.metadata || {}).knowledge_chunks,
+            )
+          )
+        ) {
+          // Old format — delete
+          const { aiDeleteSession } = await import("@/services/aiService");
+          await aiDeleteSession(session.id);
+        }
+      } catch {
+        // Skip failures
+      }
+    }
+    localStorage.setItem(FORMAT_VERSION_KEY, "1");
+  } catch {
+    // Skip on error
+  }
+}
 
 interface UseAiChatReturn extends AiChatState {
   mode: AiMode;
@@ -86,25 +128,16 @@ function metadataNumber(metadata: Record<string, unknown>, key: string): number 
   return typeof value === "number" ? value : undefined;
 }
 
-function mapApiMessage(message: AIMessageResponse): AiMessage {
+function mapApiMessage(message: AIMessageResponse, sessionMode?: string): AiMessage {
   const metadata = message.metadata || {};
-  const tourPlan = message.tour_plan ? {
-    tour_id: message.tour_plan.tour_id,
-    title: message.tour_plan.title,
-    steps: message.tour_plan.steps.map((s: Record<string, unknown>) => ({
-      action_type: String(s.action_type || ""),
-      params: (s.params as Record<string, unknown>) || {},
-      explanation: String(s.explanation || ""),
-      target_selector: s.target_selector != null ? String(s.target_selector) : undefined,
-      requires_approval: Boolean(s.requires_approval),
-    })),
-    summary: message.tour_plan.summary,
-    chart_snapshot: message.tour_plan.chart_snapshot as Record<string, unknown> | null | undefined,
-  } : null;
+  const rawTourPlan = message.tour_plan as Record<string, unknown> | null | undefined;
+  // Normalize to WalkthroughStep[] format
+  const tourPlan = rawTourPlan ? normalizeTourPlan(rawTourPlan) : null;
   return {
     id: message.id,
     role: message.role === "user" || message.role === "system" ? message.role : "assistant",
     content: message.content,
+    mode: sessionMode === "interact" ? "interact" : "ask",
     provider: message.provider,
     model_name: message.model_name,
     is_mock: message.is_mock,
@@ -131,6 +164,23 @@ function mapApiMessage(message: AIMessageResponse): AiMessage {
     token_output: message.token_output ?? metadataNumber(metadata, "token_output"),
     estimated_cost_usd: metadataNumber(metadata, "estimated_cost_usd"),
     tour_plan: tourPlan,
+    response_sections: Array.isArray(metadata.response_sections)
+      ? metadata.response_sections.map((s: unknown) => ({
+          title: String((s as Record<string, unknown>).title || ""),
+          content: String((s as Record<string, unknown>).content || ""),
+        }))
+      : null,
+    knowledge_chunks: Array.isArray(metadata.knowledge_chunks)
+      ? metadata.knowledge_chunks.map((c: unknown) => ({
+          text: String((c as Record<string, unknown>).text || ""),
+          title: String((c as Record<string, unknown>).title || ""),
+          source: String((c as Record<string, unknown>).source || ""),
+          source_type: String((c as Record<string, unknown>).source_type || ""),
+          credibility_level: String((c as Record<string, unknown>).credibility_level || ""),
+          score: Number((c as Record<string, unknown>).score) || 0,
+          heading: String((c as Record<string, unknown>).heading || ""),
+        }))
+      : null,
   };
 }
 
@@ -139,6 +189,36 @@ interface LocalToolCallInput {
   mode: AiMode;
   /** Backend already returned a tour_plan — skip local interact tool calls for tours */
   alreadyHasTourPlan?: boolean;
+}
+
+function tourPlanFromDirectActions(response: import("@/services/aiService").AIChatResponse) {
+  const actions = [
+    ...(response.chart_actions || []).map((action) => ({
+      type: action.action_type,
+      params: action.params || {},
+      requires_approval: action.requires_approval,
+    })),
+    ...(response.tool_calls || []).map((call) => ({
+      type: call.name,
+      params: call.arguments || {},
+      requires_approval: call.requires_approval ?? false,
+    })),
+  ].filter((action) => action.type);
+
+  if (actions.length === 0) return null;
+  return {
+    tour_id: `direct-actions-${response.message_id || Date.now()}`,
+    title: "AI chart actions",
+    summary: response.content || "AI chart actions completed.",
+    steps: [
+      {
+        explanation: response.content || "Applying requested chart actions.",
+        actions,
+        keep_effects: true,
+        chart_freeze: true,
+      },
+    ],
+  };
 }
 
 function localInteractToolCalls(input: LocalToolCallInput): AiToolCall[] | undefined {
@@ -194,8 +274,9 @@ export function useAiChat(): UseAiChatReturn {
     async (targetSessionId: string) => {
       if (!user?.id) return;
       const payload = await aiGetSessionMessages(targetSessionId);
-      const nextMessages = payload.messages.map(mapApiMessage);
       const sessionMeta = sessions.find((s) => s.id === targetSessionId);
+      const sessionMode = sessionMeta?.mode;
+      const nextMessages = payload.messages.map((m) => mapApiMessage(m, sessionMode));
       setSessionId(targetSessionId);
       setMessages(nextMessages);
       setMode(sessionMeta?.mode === "interact" ? "interact" : "ask");
@@ -237,18 +318,12 @@ export function useAiChat(): UseAiChatReturn {
     }
 
     if (isApiAi(isAuthenticated)) {
-      // Initial load: refresh + auto-load last session. loadApiSession
-      // clears liveMessageIdsRef so persisted tour_plan does NOT
-      // auto-fire.
-      //
-      // NB: only run once. `refreshApiSessions` is a new ref each
-      // render because its `loadApiSession` dep changes whenever
-      // `sessions` changes, which would re-fire this effect in an
-      // infinite loop and reset activeTour to null on every
-      // iteration. Guard with an "already initialised" ref.
+      // Initial load: flush old session formats, then refresh + auto-load
       if (!initialisedRef.current) {
         initialisedRef.current = true;
-        void refreshApiSessions(true);
+        void flushOldApiSessions(user.id).finally(() =>
+          refreshApiSessions(true),
+        );
       }
       return;
     }
@@ -326,6 +401,7 @@ export function useAiChat(): UseAiChatReturn {
         id: `user-${Date.now()}`,
         role: "user",
         content: trimmed,
+        mode,
         created_at: new Date().toISOString(),
       };
       const baseMessages = [...messages, userMsg];
@@ -345,6 +421,7 @@ export function useAiChat(): UseAiChatReturn {
             id: `auth-required-${Date.now()}`,
             role: "assistant",
             content: "You must log in to use AI Helper.",
+            mode,
             provider: "auth_gate",
             is_mock: false,
             created_at: new Date().toISOString(),
@@ -353,26 +430,35 @@ export function useAiChat(): UseAiChatReturn {
           setError("You must log in to use AI Helper.");
         } else if (shouldUseMockAi()) {
           assistantMsg = mockDataAdapter.generateAiResponse(trimmed, context);
+          assistantMsg.mode = mode;
           assistantMsg.tool_calls = localInteractToolCalls({ text: trimmed, mode });
         } else {
-          // Interact mode needs full structured batch response (tour_plan,
-          // chart_actions, tool_calls, persistence). Streaming path currently
-          // emits text-only tokens, so use batch for interact and streaming
-          // only for ask mode.
-          if (mode === "interact") {
+          // Use batch responses for both Ask and Interact so formatted
+          // metadata (response_sections, knowledge_chunks, tour_plan,
+          // chart_actions, tool_calls) renders consistently. The streaming
+          // endpoint is text-only and drops structured UI data.
+          const useStructuredBatch = true;
+          if (mode === "interact" || useStructuredBatch) {
             try {
               const detectedLang = (context as Record<string, unknown> | null)?.language as string | undefined;
+              const { modelName, modelTier } = getSelectedModel();
               const response = await aiChat({
                 session_id: sessionId,
                 mode,
                 message: trimmed,
                 chart_context: context as Record<string, unknown> | null,
                 language: detectedLang ?? undefined,
+                model_name: modelName,
+                model_tier: modelTier,
               });
               nextSessionId = response.session_id || sessionId;
+              const tourPlan =
+                normalizeTourPlan(response.tour_plan as Record<string, unknown> | null | undefined) ||
+                (mode === "interact" ? normalizeTourPlan(tourPlanFromDirectActions(response)) : null);
               assistantMsg = {
                 id: response.message_id || `api-${Date.now()}`,
                 role: "assistant",
+                mode,
                 content: response.content,
                 is_mock: response.is_mock,
                 provider: response.provider,
@@ -390,43 +476,27 @@ export function useAiChat(): UseAiChatReturn {
                 token_output: response.token_output ?? undefined,
                 estimated_cost_usd: response.estimated_cost_usd ?? undefined,
                 news_context: response.news_context ?? undefined,
-                tour_plan: response.tour_plan ? {
-                  tour_id: response.tour_plan.tour_id,
-                  title: response.tour_plan.title,
-                  steps: response.tour_plan.steps.map((s: Record<string, unknown>) => ({
-                    action_type: String(s.action_type || ""),
-                    params: (s.params as Record<string, unknown>) || {},
-                    explanation: String(s.explanation || ""),
-                    target_selector: s.target_selector != null ? String(s.target_selector) : undefined,
-                    requires_approval: Boolean(s.requires_approval),
-                  })),
-                  summary: response.tour_plan.summary,
-                  chart_snapshot: response.tour_plan.chart_snapshot as Record<string, unknown> | null | undefined,
-                } : null,
+                tour_plan: tourPlan,
+                response_sections: response.response_sections ?? null,
+                knowledge_chunks: response.knowledge_chunks ?? null,
               };
             } catch (apiErr) {
-              if (isAdmin || import.meta.env.DEV) {
-                console.warn("[AI] Interact batch failed, using local help:", sanitizeTechnicalDetails(apiErr));
-              }
-              assistantMsg = generateLmviewHelpResponse(trimmed, context);
-              assistantMsg.tool_calls = localInteractToolCalls({ text: trimmed, mode, alreadyHasTourPlan: false });
-              assistantMsg.warnings = [
-                ...(assistantMsg.warnings || []),
-                isAdmin
-                  ? `API unavailable - using local help mode: ${getRoleAwareErrorMessage(apiErr, { isAdmin: true, area: "ai" })}`
-                  : "AI service is unavailable, so local help mode answered instead.",
-              ];
+              // API failed — surface real error instead of fake local help
+              throw apiErr;
             }
           } else {
             // Try streaming first, fall back to batch
             try {
             const detectedLang = (context as Record<string, unknown> | null)?.language as string | undefined;
+            const { modelName, modelTier } = getSelectedModel();
             const chatStream = aiChatStream({
               session_id: sessionId,
               mode,
               message: trimmed,
               chart_context: context as Record<string, unknown> | null,
               language: detectedLang ?? undefined,
+              model_name: modelName,
+              model_tier: modelTier,
             });
             abortRef.current = chatStream.abort;
             const { stream } = chatStream;
@@ -436,6 +506,7 @@ export function useAiChat(): UseAiChatReturn {
             const streamAssistantMsg: AiMessage = {
               id: streamMsgId,
               role: "assistant",
+              mode,
               content: "",
               is_mock: false,
               provider: "streaming",
@@ -491,17 +562,21 @@ export function useAiChat(): UseAiChatReturn {
             }
             try {
               const detectedLang = (context as Record<string, unknown> | null)?.language as string | undefined;
+              const { modelName, modelTier } = getSelectedModel();
               const response = await aiChat({
                 session_id: sessionId,
                 mode,
                 message: trimmed,
                 chart_context: context as Record<string, unknown> | null,
                 language: detectedLang ?? undefined,
+                model_name: modelName,
+                model_tier: modelTier,
               });
               nextSessionId = response.session_id || sessionId;
               assistantMsg = {
                 id: response.message_id || `api-${Date.now()}`,
                 role: "assistant",
+                mode,
                 content: response.content,
                 is_mock: response.is_mock,
                 provider: response.provider,
@@ -519,33 +594,13 @@ export function useAiChat(): UseAiChatReturn {
                 token_output: response.token_output ?? undefined,
                 estimated_cost_usd: response.estimated_cost_usd ?? undefined,
                 news_context: response.news_context ?? undefined,
-                tour_plan: response.tour_plan ? {
-                  tour_id: response.tour_plan.tour_id,
-                  title: response.tour_plan.title,
-                  steps: response.tour_plan.steps.map((s: Record<string, unknown>) => ({
-                    action_type: String(s.action_type || ""),
-                    params: (s.params as Record<string, unknown>) || {},
-                    explanation: String(s.explanation || ""),
-                    target_selector: s.target_selector != null ? String(s.target_selector) : undefined,
-                    requires_approval: Boolean(s.requires_approval),
-                  })),
-                  summary: response.tour_plan.summary,
-                  chart_snapshot: response.tour_plan.chart_snapshot as Record<string, unknown> | null | undefined,
-                } : null,
+                tour_plan: normalizeTourPlan(response.tour_plan as Record<string, unknown> | null | undefined),
+                response_sections: response.response_sections ?? null,
+                knowledge_chunks: response.knowledge_chunks ?? null,
               };
             } catch (apiErr) {
-              if (isAdmin || import.meta.env.DEV) {
-                console.warn("[AI] API failed, using local help:", sanitizeTechnicalDetails(apiErr));
-              }
-              assistantMsg = generateLmviewHelpResponse(trimmed, context);
-              assistantMsg.tool_calls = localInteractToolCalls({ text: trimmed, mode, alreadyHasTourPlan: false });
-              assistantMsg.warnings = [
-                ...(assistantMsg.warnings || []),
-                isAdmin
-                  ? `API unavailable - using local help mode: ${getRoleAwareErrorMessage(apiErr, { isAdmin: true, area: "ai" })}`
-                  : "AI service is unavailable, so local help mode answered instead.",
-              ];
-            }
+              // API failed — surface real error instead of fake local help
+              throw apiErr;            }
           }
         }
       }
@@ -561,18 +616,6 @@ export function useAiChat(): UseAiChatReturn {
           fallback: "AI Helper could not complete that request. Please try again.",
         });
         setError(errMsg);
-
-        const errorMsg: AiMessage = {
-          id: `error-${Date.now()}`,
-          role: "assistant",
-          content: `Error: ${errMsg}.`,
-          provider: "error",
-          warnings: [errMsg],
-          created_at: new Date().toISOString(),
-        };
-        const nextMessages = [...baseMessages, errorMsg];
-        setMessages(nextMessages);
-        persistSession(nextMessages, trimmed, sessionId);
       } finally {
         abortRef.current = null;
         setLoading(false);

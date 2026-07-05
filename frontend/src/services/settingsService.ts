@@ -66,6 +66,8 @@ export interface AiHelperSettings {
   require_action_confirmation: boolean;
   max_context_candles: number;
   memory_retention_days: number;
+  selected_model?: string | null;
+  model_tier?: string | null;
 }
 
 export interface AlertSettings {
@@ -170,6 +172,8 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
     require_action_confirmation: true,
     max_context_candles: 300,
     memory_retention_days: 30,
+    selected_model: null,
+    model_tier: null,
   },
   alert_settings: {
     price_alerts: true,

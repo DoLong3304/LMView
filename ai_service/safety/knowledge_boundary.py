@@ -10,6 +10,11 @@ from typing import Any, Dict, Optional
 
 
 # Patterns for identity/self-awareness questions
+_SATOSHI_PATTERNS = [
+    re.compile(r"\bwho\s+(?:is|was)\s+satoshi\s+nakamoto\b", re.IGNORECASE),
+    re.compile(r"\bsatoshi\s+identity\b", re.IGNORECASE),
+]
+
 _SELF_AWARE_PATTERNS = [
     re.compile(r"\bwho (are|is) you\b", re.IGNORECASE),
     re.compile(r"\bwhat are you\b", re.IGNORECASE),
@@ -18,6 +23,42 @@ _SELF_AWARE_PATTERNS = [
     re.compile(r"\bwhat is your purpose\b", re.IGNORECASE),
     re.compile(r"\btell me about yourself\b", re.IGNORECASE),
 ]
+
+# LMView feature names that are not in current supported inventory.
+# Guard these before LLM/RAG so benchmark/adversarial prompts cannot
+# induce fake UI paths, readings, or action plans.
+_UNSUPPORTED_LMVIEW_FEATURE_PATTERNS = [
+    (re.compile(r"\bgann\s+square\s+of\s+nine\b", re.IGNORECASE), "Gann Square of Nine scanner"),
+    (re.compile(r"\bfibonacci\s+time\s+zone\b", re.IGNORECASE), "Fibonacci Time Zone tool"),
+    (re.compile(r"\bmarket\s+profile\b", re.IGNORECASE), "Market Profile indicator"),
+    (re.compile(r"\bfootprint\b|\border\s+flow\s+imbalance\b", re.IGNORECASE), "Footprint / Order Flow Imbalance chart"),
+    (re.compile(r"\belliott\s+wave\s+auto[-\s]?label", re.IGNORECASE), "Elliott Wave auto-labeler"),
+    (re.compile(r"\bcumulative\s+delta\s+volume\b", re.IGNORECASE), "Cumulative Delta Volume indicator"),
+    (re.compile(r"\bvolume\s+delta\s+heatmap\b", re.IGNORECASE), "Volume Delta heatmap chart type"),
+    (re.compile(r"\bklinger\s+oscillator\b", re.IGNORECASE), "Klinger Oscillator"),
+    (re.compile(r"\bstrategy\s+backtester\b|\bbacktester\b", re.IGNORECASE), "strategy backtester"),
+    (re.compile(r"\bsmart\s+money\s+concepts\b|\bSMC\b", re.IGNORECASE), "Smart Money Concepts (SMC) indicator"),
+    (re.compile(r"\bchaikin\s+money\s+flow\b|\bCMF\b", re.IGNORECASE), "Chaikin Money Flow (CMF) indicator"),
+    (re.compile(r"\bDTOSC\b|\bdynamic\s+trading\s+oscillator\b", re.IGNORECASE), "DTOSC (Dynamic Trading Oscillator)"),
+    (re.compile(r"\boptions\s+flow\s+dashboard\b", re.IGNORECASE), "options flow dashboard"),
+    (re.compile(r"\bcoppock\s+curve\b", re.IGNORECASE), "Coppock Curve"),
+]
+
+_UNSUPPORTED_FEATURE_TEMPLATE = (
+    "{feature} is not available or supported in LMView based on the current feature inventory. "
+    "I do not have enough supported LMView context to provide readings, menu paths, or step-by-step usage for it. "
+    "I can help with supported LMView tools such as candlestick charts, RSI, MACD, moving averages, "
+    "Bollinger Bands, order book, recent trades, trendlines, Fibonacci retracement, and chart highlights."
+)
+
+_HARMFUL_PATTERNS = [
+    re.compile(r"\bhack(?:ing)?\b|\bunauthorized\s+access\b|\bsteal\s+(?:an?\s+)?(?:account|password|key|token)\b", re.IGNORECASE),
+]
+
+_HARMFUL_TEMPLATE = (
+    "I cannot help with hacking, unauthorized account access, credential theft, or other harmful activity. "
+    "I can help with LMView account security basics and cryptocurrency market analysis."
+)
 
 # Patterns for topics clearly out of knowledge boundary
 _OUTSIDE_KNOWLEDGE_PATTERNS = [
@@ -59,6 +100,15 @@ def check_knowledge_boundary(query: str) -> Optional[Dict[str, Any]]:
     """
     query_lower = query.lower().strip()
 
+    # Check known crypto identity uncertainty questions.
+    for pattern in _SATOSHI_PATTERNS:
+        if pattern.search(query_lower):
+            return {
+                "response": "Satoshi Nakamoto is the pseudonymous creator of Bitcoin, but their real-world identity remains unknown and unverified. I should not claim a specific person or group is Satoshi without reliable evidence.",
+                "reason": "Satoshi identity uncertainty boundary.",
+                "is_identity": False,
+            }
+
     # Check self-awareness/identity questions
     for pattern in _SELF_AWARE_PATTERNS:
         if pattern.search(query_lower):
@@ -66,6 +116,24 @@ def check_knowledge_boundary(query: str) -> Optional[Dict[str, Any]]:
                 "response": _IDENTITY_TEMPLATE,
                 "reason": "Self-awareness query detected — providing identity response.",
                 "is_identity": True,
+            }
+
+    # Check unsupported LMView feature requests before LLM/RAG.
+    for pattern, feature in _UNSUPPORTED_LMVIEW_FEATURE_PATTERNS:
+        if pattern.search(query):
+            return {
+                "response": _UNSUPPORTED_FEATURE_TEMPLATE.format(feature=feature),
+                "reason": f"Unsupported LMView feature requested: {feature}.",
+                "is_identity": False,
+            }
+
+    # Check harmful requests before LLM/RAG.
+    for pattern in _HARMFUL_PATTERNS:
+        if pattern.search(query):
+            return {
+                "response": _HARMFUL_TEMPLATE,
+                "reason": "Harmful request refused.",
+                "is_identity": False,
             }
 
     # Check out-of-knowledge topics

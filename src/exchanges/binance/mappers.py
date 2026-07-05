@@ -29,6 +29,31 @@ def map_ticker(raw: dict) -> dict:
     }
 
 
+def map_ticker_rest(raw: dict) -> dict:
+    """Map a Binance REST ``/api/v3/ticker/24hr`` response to a canonical ticker record.
+
+    REST API uses full field names (``symbol``, ``lastPrice``, ``bidPrice``)
+    instead of the single-letter keys (``s``, ``c``, ``b``) used by the
+    WebSocket ``!ticker@arr`` stream. This mapper bridges the gap.
+    """
+    return {
+        "event_time":           int(raw.get("closeTime", 0)),
+        "symbol":               str(raw.get("symbol", "")),
+        "exchange":             "binance",
+        "close":                float(raw.get("lastPrice", 0)),
+        "bid":                  float(raw.get("bidPrice", raw.get("bid", 0))),
+        "ask":                  float(raw.get("askPrice", raw.get("ask", 0))),
+        "h24_open":             float(raw.get("openPrice", 0)),
+        "h24_high":             float(raw.get("highPrice", 0)),
+        "h24_low":              float(raw.get("lowPrice", 0)),
+        "h24_volume":           float(raw.get("volume", 0)),
+        "h24_quote_volume":     float(raw.get("quoteVolume", 0)),
+        "h24_price_change":     float(raw.get("priceChange", 0)),
+        "h24_price_change_pct": float(raw.get("priceChangePercent", 0)),
+        "h24_trade_count":      int(raw.get("count", 0)),
+    }
+
+
 def map_agg_trade(raw: dict) -> dict:
     """Map a raw ``@aggTrade`` event to a canonical trade record."""
     return {

@@ -26,6 +26,27 @@ class NewsSentimentExpert(BaseExpert):
         user_query = state.get("user_query", "")
         symbol = state.get("symbol")
 
+        # ── Context needs aware: skip news if not needed ───────────────
+        context_needs = state.get("context_needs")
+        if context_needs is not None and not context_needs.needs_news:
+            logger.warning(
+                "News context skipped by context needs analysis for: %s",
+                user_query[:60],
+            )
+            return ExpertOutput(
+                expert_name=self.name,
+                content="News context skipped — query does not require news/sentiment data.",
+                structured_data={
+                    "symbol": symbol,
+                    "articles": [],
+                    "sentiment_summary": {},
+                    "risk_events": [],
+                    "trending_symbols": [],
+                },
+                confidence=0.1,
+                warnings=["News skipped by context needs analysis."],
+            )
+
         data_sources: List[str] = []
         warnings: List[str] = []
         structured: Dict[str, Any] = {
@@ -103,9 +124,16 @@ class NewsSentimentExpert(BaseExpert):
         if structured["risk_events"]:
             content_parts.append(f"⚠️ Risk events detected: {len(structured['risk_events'])}")
 
-        confidence = min(0.8, 0.3 + news_ctx.article_count * 0.05)
-        if news_ctx.freshness and news_ctx.freshness.get("is_stale"):
-            confidence *= 0.7
+        # ── News-evidence confidence ─────────────────────────────────────
+        # Grounding: news sentiment confidence reflects:
+        #  1) Article count (more = broader evidence base)
+        #  2) Freshness penalty (stale news → lower reliability)
+        #  3) Polarity availability (neutral articles add less confidence)
+        article_confidence = min(0.7, 0.2 + news_ctx.article_count * 0.06)
+        freshness_penalty = 0.7 if (news_ctx.freshness and news_ctx.freshness.get("is_stale")) else 1.0
+        has_polarity = bool(structured.get("sentiment") or structured.get("polarity"))
+        polarity_bonus = 0.1 if has_polarity else 0.0
+        confidence = max(0.1, min(0.85, article_confidence * freshness_penalty + polarity_bonus))
 
         return ExpertOutput(
             expert_name=self.name,

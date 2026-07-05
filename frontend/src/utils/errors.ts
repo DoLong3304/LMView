@@ -338,7 +338,7 @@ function userMessageForCode(code: string, status: number | undefined, area: Erro
   if (area === "settings") return "Settings could not be loaded or saved. Please try again.";
   if (area === "network") return GENERIC_NETWORK_ERROR;
   if (area === "validation") return "Please check your input and try again.";
-  return userMessageForStatus(status, area);
+  return GENERIC_USER_ERROR;
 }
 
 function userMessageForStatus(status: number | undefined, area: ErrorArea = "general"): string {

@@ -6,18 +6,21 @@
 #   1. Docker Swarm initialized:  docker swarm init --advertise-addr <PRIVATE_IP>
 #   2. Worker joined:             docker swarm join --token <TOKEN> <MANAGER_IP>:2377
 #   3. Node labels applied:
-#        docker node update --label-add role=core  <manager-node-id>
-#        docker node update --label-add role=worker <worker-node-id>
+#        docker node update --label-add role=core    <manager-node-id>
+#        docker node update --label-add role=data    <data-node-id>
+#        docker node update --label-add role=compute <compute-node-id>
 #   4. Shared EFS mounted at same path on both nodes
 #   5. .env file populated with production secrets
 #
 # Usage:
 #   bash scripts/deploy_aws_swarm.sh [--build] [--skip-build] [--registry-only]
+#                                    [--services S1,S2,...]
 #                                    [--registry-port=5000] [--no-color]
 #
 # Options:
 #   --build                Force rebuild all images before deploy (default)
 #   --skip-build           Skip image build, deploy with existing images
+#   --services S1,S2,...   Rebuild only specified compose services (e.g. fastapi-prod,ai-service)
 #   --registry-only        Just push images to the local registry, don't deploy
 #   --registry-port=N      Override the local registry port (default 5000)
 #   --no-color             Disable ANSI colors (also via NO_COLOR env var)
@@ -50,12 +53,14 @@ DO_BUILD=true
 REGISTRY_ONLY=false
 REGISTRY_PORT=5000
 MANAGER_IP=""
+BUILD_SERVICES=()
 
 # ── Parse arguments ──────────────────────────────────────────────────────────
 for arg in "$@"; do
   case "$arg" in
     --skip-build)        DO_BUILD=false ;;
     --build)             DO_BUILD=true ;;
+    --services=*)        IFS=',' read -ra BUILD_SERVICES <<< "${arg#*=}" ;;
     --registry-only)     REGISTRY_ONLY=true; DO_BUILD=true ;;
     --registry-port=*)   REGISTRY_PORT="${arg#*=}" ;;
     --registry-addr=*)   REGISTRY_ADDR="${arg#*=}" ;;
@@ -100,16 +105,20 @@ REGISTRY_ADDR="${REGISTRY_ADDR:-${MANAGER_IP}:${REGISTRY_PORT}}"
 
 # Verify node labels
 CORE_NODES=$(docker node ls -q 2>/dev/null | xargs -r docker node inspect --format '{{ index .Spec.Labels "role" }}' 2>/dev/null | grep -c '^core$' || true)
-WORKER_NODES=$(docker node ls -q 2>/dev/null | xargs -r docker node inspect --format '{{ index .Spec.Labels "role" }}' 2>/dev/null | grep -c '^worker$' || true)
+DATA_NODES=$(docker node ls -q 2>/dev/null | xargs -r docker node inspect --format '{{ index .Spec.Labels "role" }}' 2>/dev/null | grep -c '^data$' || true)
+COMPUTE_NODES=$(docker node ls -q 2>/dev/null | xargs -r docker node inspect --format '{{ index .Spec.Labels "role" }}' 2>/dev/null | grep -c '^compute$' || true)
 
 if [ "$CORE_NODES" -eq 0 ]; then
   warn "No nodes with label role=core found. Run: docker node update --label-add role=core <node-id>"
 fi
-if [ "$WORKER_NODES" -eq 0 ]; then
-  warn "No nodes with label role=worker found. Run: docker node update --label-add role=worker <node-id>"
+if [ "$DATA_NODES" -eq 0 ]; then
+  warn "No nodes with label role=data found. Run: docker node update --label-add role=data <node-id>"
+fi
+if [ "$COMPUTE_NODES" -eq 0 ]; then
+  warn "No nodes with label role=compute found. Run: docker node update --label-add role=compute <node-id>"
 fi
 
-ok "Preflight checks passed (core=$CORE_NODES, worker=$WORKER_NODES nodes)"
+ok "Preflight checks passed (core=$CORE_NODES, data=$DATA_NODES, compute=$COMPUTE_NODES nodes)"
 
 # ── Ensure local registry is running ─────────────────────────────────────────
 log "Ensuring local Docker registry at ${REGISTRY_ADDR}..."
@@ -150,11 +159,24 @@ else
   ok "Registry already running at ${REGISTRY_ADDR}."
 fi
 
+# ── Pre-build cleanup: free disk before build ──────────────────────
+log "Pre-build cleanup: pruning dead containers and dangling images..."
+docker container prune -f >/dev/null 2>&1 || true
+docker image prune -af --filter "until=24h" >/dev/null 2>&1 || true
+docker builder prune -af >/dev/null 2>&1 || true
+ok "Pre-build cleanup done."
+
 # ── Build images locally ────────────────────────────────────────────────────
 if [ "$DO_BUILD" = true ]; then
-  log "Building images locally (prod profile)..."
-  docker compose --profile prod --profile monitoring --profile logging build
-  ok "Images built successfully."
+  if [ "${#BUILD_SERVICES[@]}" -gt 0 ]; then
+    log "Building ${#BUILD_SERVICES[@]} targeted services: ${BUILD_SERVICES[*]}..."
+    docker compose -f docker-compose.yml -f docker-compose.ai.yml --profile prod --profile monitoring --profile logging build "${BUILD_SERVICES[@]}"
+    ok "Targeted build complete."
+  else
+    log "Building images locally (prod profile)..."
+    docker compose -f docker-compose.yml -f docker-compose.ai.yml --profile prod --profile monitoring --profile logging build
+    ok "Images built successfully."
+  fi
 else
   log "Skipping image build (--skip-build)."
 fi
@@ -168,7 +190,7 @@ while IFS= read -r img; do
   if [ -n "$img" ]; then
     RESOLVED_IMAGES+=("$img")
   fi
-done < <(docker compose --profile prod config 2>/dev/null | grep 'image: cryptoprice/' | awk '{print $2}' | sort -u)
+done < <(docker compose -f docker-compose.yml -f docker-compose.ai.yml --profile prod config 2>/dev/null | grep 'image: cryptoprice/' | awk '{print $2}' | sort -u)
 
 # ── Push custom images to the local registry ─────────────────────────────────
 # Only custom-built images need to be pushed; public images (redis, postgres,
@@ -318,6 +340,12 @@ docker stack ps "$STACK_NAME" --filter "desired-state=running" --format "table {
 
 echo ""
 ok "Deployment complete!"
+
+# ── Post-deploy cleanup: prune exited tasks + dangling images ───────────
+log "Post-deploy cleanup..."
+docker container prune -f >/dev/null 2>&1 || true
+docker image prune -af --filter "until=48h" >/dev/null 2>&1 || true
+ok "Post-deploy cleanup done."
 echo ""
 log "Next steps:"
 echo "  1. Verify all services:       docker stack services $STACK_NAME"

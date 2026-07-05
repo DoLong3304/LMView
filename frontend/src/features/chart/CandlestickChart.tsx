@@ -16,12 +16,14 @@ import { useI18n } from "@/i18n";
 import { useChartZoom } from "@/hooks/useChartZoom";
 import {
   fetchMergedCandles,
+  fetchLatestCandles,
   fetchCandles,
   fetchIndicatorSeries,
   fetchHistoricalCandles,
   subscribeIndicatorStream,
   subscribeAllTimeframes,
   fetchTicker,
+  getLivePrice,
   updateLivePrice,
   TIMEFRAMES as SERVICE_TIMEFRAMES,
 } from "@/services/marketDataService";
@@ -170,6 +172,8 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const timeframeRef = useRef(timeframeProp || "1m");
   const chartTypeRef = useRef<ChartType>(chartType);
   const lastClosedCandleRef = useRef<Candle | null>(null);
+  const reconcileTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const lastReconciledBucketRef = useRef<number | null>(null);
   // Store callbacks in refs for the chart init hook (runs once on mount)
   const getActivePriceSeriesRef = useRef<() => any>(() => null);
   const onTooltipRef = useRef<(data: any) => void>(() => {});
@@ -208,6 +212,16 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
   const [candles, setCandles] = useState<Candle[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [indicatorStatus, setIndicatorStatus] = useState<IndicatorPanelStatus>({});
+
+  // Tick counter to force periodic re-render for live price display.
+  // The left toolbar reads getLivePrice(symbol) from _livePriceMap (WS ticker).
+  // _livePriceMap is a plain mutable object — React can't track its changes,
+  // so we need an interval to trigger re-renders and read fresh data.
+  const [, setLiveTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setLiveTick(n => n + 1), 500);
+    return () => clearInterval(id);
+  }, []);
 
   // Surface indicator settings + selected indicator list to the parent so
   // the AI panel can build ``indicator_values`` and ``selected_indicators``
@@ -1190,6 +1204,111 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     [commitCandlesState, setAllPriceSeriesData, setInitialVisibleRange, syncIndicatorData],
   );
 
+  const applyAuthoritativeCandles = useCallback(
+    (officialCandles: Candle[]) => {
+      const clean = sanitizeCandlesForChart(officialCandles);
+      if (clean.length === 0) return;
+
+      const forming = formingCandleRef.current;
+      const byTime = new Map<number, Candle>();
+      for (const candle of candlesRef.current) byTime.set(candle.time, candle);
+
+      let changed = false;
+      for (const official of clean) {
+        const existing = byTime.get(official.time);
+        if (forming && official.time === forming.time) {
+          // Current bucket is still forming: keep live ticker close, but use
+          // authoritative OH/volume as baseline so reloads match once final.
+          const merged = {
+            ...official,
+            high: Math.max(official.high, forming.high),
+            low: Math.min(official.low, forming.low),
+            close: forming.close,
+            volume: official.volume || forming.volume || 0,
+          };
+          if (!existing
+            || existing.open !== merged.open
+            || existing.high !== merged.high
+            || existing.low !== merged.low
+            || existing.close !== merged.close
+            || existing.volume !== merged.volume) {
+            formingCandleRef.current = merged;
+            byTime.set(merged.time, merged);
+            changed = true;
+          }
+          continue;
+        }
+
+        // Closed bucket: replace synthetic ticker-built candle completely.
+        if (!existing
+          || existing.open !== official.open
+          || existing.high !== official.high
+          || existing.low !== official.low
+          || existing.close !== official.close
+          || existing.volume !== official.volume) {
+          byTime.set(official.time, official);
+          changed = true;
+        }
+        if (!forming || official.time < forming.time) {
+          lastClosedCandleRef.current = official;
+        }
+      }
+
+      if (!changed) return;
+
+      const next = Array.from(byTime.values())
+        .sort((a, b) => a.time - b.time)
+        .slice(-CHART_CONFIG.MAX_BARS_MEMORY);
+      candlesRef.current = next;
+      setAllPriceSeriesData(next);
+      if (volumeRef.current) {
+        volumeRef.current.setData(next.map((c) => ({
+          time: c.time,
+          value: c.volume || 0,
+          color: c.close >= c.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
+        })));
+      }
+      syncLatestIndicatorData(next);
+      commitCandlesState(next);
+    },
+    [commitCandlesState, setAllPriceSeriesData, syncLatestIndicatorData],
+  );
+
+  const scheduleClosedCandleReconciliation = useCallback(
+    (closedBucketTime: number) => {
+      if (!Number.isFinite(closedBucketTime) || closedBucketTime <= 0) return;
+      if (lastReconciledBucketRef.current === closedBucketTime) return;
+      lastReconciledBucketRef.current = closedBucketTime;
+
+      const requestSymbol = symbolRef.current;
+      const requestInterval = normalizeTimeframe(timeframeRef.current);
+      const currentTimeframeSec = getTimeframeSeconds(requestInterval);
+      if (!currentTimeframeSec || currentTimeframeSec < 60) return;
+
+      const run = async () => {
+        if (frozenRef.current || eventFrozenRef.current) return;
+        if (normalizeTimeframe(timeframeRef.current) !== requestInterval) return;
+        if (symbolRef.current !== requestSymbol) return;
+        try {
+          const latest = await fetchLatestCandles(requestSymbol, requestInterval, 5);
+          const relevant = latest.filter((c) => c.time <= closedBucketTime);
+          applyAuthoritativeCandles(relevant);
+        } catch (err) {
+          console.warn("[chart] closed candle reconciliation failed", err);
+        }
+      };
+
+      // Kline REST runs every ~30s and final Redis/Flink writes can lag after
+      // recovery. Retry a few times so a just-closed synthetic candle is replaced
+      // by authoritative OHLCV without requiring page reload.
+      [2_000, 15_000, 35_000].forEach((delay) => {
+        const timer = setTimeout(run, delay);
+        reconcileTimersRef.current.push(timer);
+      });
+    },
+    [applyAuthoritativeCandles],
+  );
+
   // Historical mode handlers
   const handleHistoricalRange = useCallback(
     async (range: HistoricalRange) => {
@@ -1365,8 +1484,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         // the gap with a synthetic candle. Bridging draws a vertical line from
         // the stale close to the live price, which the user sees as the chart
         // "snapping to a point". Instead, drop the stale reference and wait for
-        // a fresh onCandle event to re-anchor. Threshold = 5 buckets.
-        const MAX_BRIDGE_BUCKETS = 5;
+        // a fresh onCandle event to re-anchor.
+        //
+        // For 1s timeframe: be more lenient (30 buckets) since there may be no
+        // initial 1s candle in Redis yet (binance-kline-ws may not be deployed).
+        // For all other timeframes: threshold = 5 buckets.
+        const MAX_BRIDGE_BUCKETS = timeframeSec === 1 ? 30 : 5;
         const maxGapSec = timeframeSec * MAX_BRIDGE_BUCKETS;
         if (forming && bucketTime - forming.time > maxGapSec) {
           formingCandleRef.current = null;
@@ -1391,6 +1514,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           formingCandleRef.current = nextCandle;
         } else if (forming && forming.time < bucketTime) {
           lastClosedCandleRef.current = forming;
+          scheduleClosedCandleReconciliation(forming.time);
           const open = forming.close;
           nextCandle = {
             time: bucketTime,
@@ -1439,30 +1563,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
         if (cancelled || !candleRef.current) return;
         const official = sanitizeCandlesForChart([candle])[0];
         if (!official) return;
-        const forming = formingCandleRef.current;
-        if (!forming) return;
-        if (official.time !== forming.time) return;
-
-        const merged = {
-          ...forming,
-          high: Math.max(official.high, forming.high),
-          low: Math.min(official.low, forming.low),
-          volume: official.volume || forming.volume || 0,
-        };
-        formingCandleRef.current = merged;
-        updateAllPriceSeries(merged);
-        if (volumeRef.current) {
-          volumeRef.current.update({
-            time: merged.time,
-            value: merged.volume || 0,
-            color: merged.close >= merged.open ? themeRef.current.volumeUp : themeRef.current.volumeDown,
-          });
-        }
-        const closed = candlesRef.current.filter((c) => c.time < merged.time);
-        const updatedCandles = [...closed, merged];
-        candlesRef.current = updatedCandles;
-        syncLatestIndicatorData(updatedCandles);
-        commitCandlesState(updatedCandles);
+        applyAuthoritativeCandles([official]);
       },
     });
 
@@ -1535,6 +1636,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
           formingCandleRef.current = nextCandle;
         } else if (forming && forming.time < bucketTime) {
           lastClosedCandleRef.current = forming;
+          scheduleClosedCandleReconciliation(forming.time);
           nextCandle = {
             time: bucketTime,
             open: forming.close,
@@ -1586,6 +1688,9 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       if (pollId) clearInterval(pollId);
       if (unsub) unsub();
       if (indicatorUnsub) indicatorUnsub();
+      for (const timer of reconcileTimersRef.current) clearTimeout(timer);
+      reconcileTimersRef.current = [];
+      lastReconciledBucketRef.current = null;
       pollIntervalRef.current = null;
       unsubscribeRef.current = null;
       indicatorUnsubscribeRef.current = null;
@@ -1597,9 +1702,11 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
     isLiveMode,
     retryCount,
     applyDataToChart,
+    applyAuthoritativeCandles,
     applyStreamedIndicatorSnapshot,
     commitCandlesState,
     preloadInitialCandles,
+    scheduleClosedCandleReconciliation,
     syncLatestIndicatorData,
     updateAllPriceSeries,
     isReplayActive,
@@ -1876,12 +1983,13 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 
   const lastCandle = candles[candles.length - 1];
   const firstCandle = candles[0];
-  const priceDiff =
-    lastCandle && firstCandle ? lastCandle.close - firstCandle.open : 0;
-  const pricePct = firstCandle
-    ? ((priceDiff / firstCandle.open) * 100).toFixed(2)
-    : null;
-  const isUp = priceDiff >= 0;
+  // Live price from WS ticker — faster than candles state (no startTransition lag)
+  const livePrice = getLivePrice(symbol);
+  const displayPrice = livePrice?.price ?? lastCandle?.close ?? 0;
+  const displayChange = livePrice?.change24h ??
+    (lastCandle && firstCandle ? ((lastCandle.close - firstCandle.open) / firstCandle.open) * 100 : 0);
+  const pricePct = displayChange !== 0 ? Math.abs(displayChange).toFixed(2) : null;
+  const isUp = displayChange >= 0;
 
   const handleExportChart = useCallback(async () => {
     const stage = chartStageRef.current;
@@ -2011,12 +2119,12 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                 onToggleStar={handleToggleSymbolStar}
               />
 
-              {lastCandle && (
+              {displayPrice > 0 && (
                 <div className="flex h-8 min-w-0 flex-shrink-0 items-center gap-2 whitespace-nowrap">
                   <span
                     className={`font-mono text-sm font-bold ${isUp ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
                   >
-                    {lastCandle.close.toLocaleString(undefined, {
+                    {displayPrice.toLocaleString(undefined, {
                       minimumFractionDigits: 2,
                       maximumFractionDigits: 2,
                     })}
@@ -2029,7 +2137,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
                           : "bg-red-100 text-red-700 dark:bg-red-900/70 dark:text-red-300"
                       }`}
                     >
-                      {isUp ? "+" : ""}
+                      {isUp ? "+" : "-"}
                       {pricePct}%
                     </span>
                   )}
@@ -2209,9 +2317,19 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
       {/* Tab content — candlestick chart is always mounted to preserve the
            lightweight-charts instance; visibility is toggled via CSS. */}
       <div className="flex min-h-0 flex-1 flex-col">
-        {/* OHLCV bar */}
-        <div className="min-h-[28px] flex-none border-b border-[var(--lm-border)] bg-[var(--lm-bg-primary)] px-3 py-1">
-          <OHLCVBar data={tooltip} />
+        {/* OHLCV bar with frozen badge */}
+        <div className="flex min-h-[28px] flex-none items-center justify-between border-b border-[var(--lm-border)] bg-[var(--lm-bg-primary)] px-3 py-1">
+          <div className="flex-1">
+            <OHLCVBar data={tooltip} />
+          </div>
+          {(frozen || eventFrozen) && (
+            <div className="flex flex-shrink-0 items-center gap-1.5 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5">
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+              <span className="text-[10px] font-medium text-amber-300">
+                Frozen
+              </span>
+            </div>
+          )}
         </div>
         {/* Chart canvas + overlay slot */}
         <div ref={chartStageRef} data-ai-section="chart-canvas" className="relative min-h-0 flex-1 overflow-hidden">
@@ -2246,15 +2364,7 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
               </p>
             </div>
           )}
-          {/* Frozen overlay for Interact mode tours */}
-          {(frozen || eventFrozen) && (
-            <div className="absolute inset-0 z-10 flex items-start justify-center bg-[var(--lm-bg-primary)]/20 pt-12">
-              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-center shadow-lg backdrop-blur-sm">
-                <p className="text-xs font-semibold text-amber-300">❄ Chart frozen for analysis</p>
-                <p className="mt-0.5 text-[10px] text-amber-200/60">Resumes after tour ends</p>
-              </div>
-            </div>
-          )}
+
           {typeof children === 'function'
             ? children(chartRef.current, seriesControllerRef.current)
             : children}
@@ -2266,3 +2376,4 @@ const CandlestickChart: React.FC<CandlestickChartProps> = ({
 };
 
 export default CandlestickChart;
+// FORCE_REBUILD: 1782497832

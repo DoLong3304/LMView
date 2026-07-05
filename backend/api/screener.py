@@ -13,7 +13,7 @@ from backend.core.database import get_redis, get_trino_connection
 router = APIRouter(prefix="/api/screener", tags=["screener"])
 logger = logging.getLogger(__name__)
 
-DB = "iceberg.crypto_lakehouse"
+DB = "iceberg_catalog.crypto_lakehouse"
 GOLD_FRESHNESS_MINUTES = 30
 
 

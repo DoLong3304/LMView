@@ -10,7 +10,7 @@ Project rules for AI coding agents.
 - **Purpose:** Real-time cryptocurrency technical-analysis platform
 - **Architecture:** Lambda Architecture: speed, batch/lakehouse, serving, frontend
 - **Core stack:** Kafka, Flink, Spark, Redis Sentinel, InfluxDB, PostgreSQL, Iceberg/MinIO, Trino, FastAPI, React 19
-- **Current release:** `0.27.0` in `docs/CHANGELOG.md`
+- **Current release:** `0.32.0` in `docs/CHANGELOG.md`
 - **Deployment:** Docker Swarm on AWS EC2 (2-node or 3-node, EFS or local storage)
 - **Current focus:** Production stability, 3-node migration preparation, AI/backend separation
 
@@ -42,6 +42,17 @@ Before editing, run `git pull --ff-only` when safe. If worktree is dirty, do not
 - Keep batches small: 1-3 files when practical, then verify.
 - Prefer repo patterns over new abstractions.
 - Never revert changes you did not make.
+- Targeted rebuild only: use `--services svc1,svc2` flag or `make swarm-deploy-services SVCS=svc1,svc2` to rebuild only affected images.
+
+  | Changed code | Rebuild image |
+  |---|---|
+  | `ai_service/` | `ai-service` |
+  | `backend/` | `fastapi-prod` |
+  | `frontend/` | `nginx-prod` |
+  | `docker-compose.ai.yml` | `ai-service`, `litellm` |
+  | `.env` / config files | No rebuild needed — just `docker stack deploy` |
+
+  Full rebuild (no `--services`) reserved for infrastructure/compose-wide changes.
 - Ask before destructive actions: volume deletion, checkpoint deletion, data deletion, `git reset`, schema migration, account/session purge.
 
 ---
@@ -201,6 +212,89 @@ npm run build
 ```
 
 New backend behavior needs unit tests. Endpoint behavior should include integration tests when practical. Data-pipeline changes need focused tests for mapping, dedup, aggregation, or serialization.
+
+---
+
+## Redis Sentinel Recovery Procedures (Updated July 2026)
+
+### Prevention (Permanent fixes implemented v0.28.1)
+
+After Redis Sentinel split-brain incident (July 3, 2026), implemented permanent resilience:
+
+1. **redis-master-start.sh**: Forces redis-master to always start as MASTER, clearing stale replication config
+2. **Uniform memory limits**: All data nodes at 4G (prevents selective OOM kills)
+3. **Enhanced health checks**: Verify replication role + link status, not just PING
+4. **Startup ordering**: Sentinels wait for ALL data nodes before starting
+5. **Sentinel IP announcement**: Prevents stale DNS in overlay networks
+6. **Restart policies**: Gradual restart with delays prevents rapid failure cycles
+
+### Recovery if System Goes Down
+
+If Redis cluster becomes unstable after future outages:
+
+**Symptoms**:
+- FastAPI logs: `No master found for 'mymaster'` every ~60-90s
+- WebSocket drops after 45s silence
+- `redis-cli info replication` shows all nodes as `role:slave` with dead `master_host`
+- DNS resolves `redis-master` to wrong/stale IP
+
+**Immediate recovery**:
+```bash
+# 1. Check which services are actually running
+docker service ls | grep redis
+
+# 2. Force-restart redis-master FIRST (this triggers master role enforcement)
+docker service update --force cryptoprice_redis-master
+
+# 3. Wait 20-30s for overlay network attachment
+sleep 30
+
+# 4. Verify master role
+docker exec redis-master redis-cli info replication | grep -E "role:|connected_slaves:"
+# Should show: role:master, connected_slaves:2
+
+# 5. If replicas not connected, force-restart them
+docker service update --force cryptoprice_redis-replica-1
+docker service update --force cryptoprice_redis-replica-2
+
+# 6. Wait for replication to sync (check master_link_status:up)
+sleep 15
+
+# 7. Force-restart sentinels LAST (after data layer stable)
+docker service update --force cryptoprice_redis-sentinel-1
+docker service update --force cryptoprice_redis-sentinel-2
+docker service update --force cryptoprice_redis-sentinel-3
+
+# 8. Verify all sentinels agree on master
+for i in 1 2 3; do
+  docker exec redis-sentinel-$i redis-cli -p 26379 SENTINEL get-master-addr-by-name mymaster
+done
+# All three should return same IP (redis-master current IP)
+
+# 9. Monitor FastAPI logs for 5+ minutes
+docker logs fastapi-prod --since 5m | grep -c "No master found"
+# Should be 0 after cluster stabilizes
+```
+
+**Root cause pattern to watch for**:
+- Memory limit changes → OOM kills → simultaneous restarts
+- Services show "Running 1/1" but orphaned from overlay network
+- Docker service ps doesn't detect overlay attachment failures
+- Sentinel failover during chaos causes circular slave references
+
+**Prevention verification** (after any deployment):
+```bash
+# Confirm all redis services healthy
+docker service ls | grep redis  # All should be 1/1
+
+# Confirm master role persisted
+docker exec redis-master redis-cli info replication
+
+# Confirm zero errors for 5+ minutes
+docker logs fastapi-prod --since 5m | grep -E "Stream.*error|No master found"
+```
+
+See mem_save ID 114 for full technical details on permanent fixes.
 
 ---
 

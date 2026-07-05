@@ -6,7 +6,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Dict, Optional
 
 from backend.models.ai.providers import (
     LLMCompletionRequest,
@@ -16,9 +16,35 @@ from backend.models.ai.providers import (
     ProviderType,
 )
 from ai_service.providers.base import BaseProvider
-from ai_service.config import get_api_keys, rotate_api_key, get_current_api_key
+from ai_service.config import get_api_base_urls, get_api_keys
 
 logger = logging.getLogger("ai_service.providers.litellm_provider")
+
+# ── Provider-level exact-match cache ───────────────────────────────────────
+_PROVIDER_CACHE: Dict[str, LLMCompletionResponse] = {}
+_PROVIDER_CACHE_MAX = 50
+_PROVIDER_CACHE_TTL = 15.0  # seconds
+
+
+def _provider_cache_get(key: str) -> Optional[LLMCompletionResponse]:
+    """Get cached response if not expired."""
+    entry = _PROVIDER_CACHE.get(key)
+    if entry is None:
+        return None
+    response_obj, ts = entry
+    if time.time() - ts > _PROVIDER_CACHE_TTL:
+        _PROVIDER_CACHE.pop(key, None)
+        return None
+    return response_obj
+
+
+def _provider_cache_set(key: str, response_obj: LLMCompletionResponse) -> None:
+    """Store response in cache with timestamp."""
+    if len(_PROVIDER_CACHE) >= _PROVIDER_CACHE_MAX:
+        # Evict oldest
+        oldest = min(_PROVIDER_CACHE.keys(), key=lambda k: _PROVIDER_CACHE[k][1])
+        _PROVIDER_CACHE.pop(oldest, None)
+    _PROVIDER_CACHE[key] = (response_obj, time.time())
 
 
 class QuotaExhaustedError(Exception):
@@ -42,6 +68,7 @@ class LiteLLMProvider(BaseProvider):
         is_local: bool = False,
         priority: int = 10,
         fallback_models: Optional[list] = None,
+        tier: Optional[str] = None,  # filter: 'standard', 'reserved', 'benchmark'
     ):
         super().__init__(provider_name=provider_name, model_name=model_name)
         self.base_url = base_url or os.environ.get("LITELLM_BASE_URL", "http://litellm:4000")
@@ -49,6 +76,7 @@ class LiteLLMProvider(BaseProvider):
         self.is_local = is_local
         self.priority = priority
         self.fallback_models = fallback_models or []
+        self.tier = tier
         self._litellm = None
 
     def _get_litellm(self):
@@ -66,38 +94,83 @@ class LiteLLMProvider(BaseProvider):
     def _is_quota_error(exc: Exception) -> bool:
         """Check if an exception indicates quota exhaustion or rate limiting.
 
-        Matches:
-        - ``AllocationQuota.FreeTierOnly`` (Alibaba Cloud — free quota exhausted)
-        - HTTP 429 (rate limit)
-        - HTTP 401/402/403 with quota/exhausted wording
-        - LiteLLM's built-in rate limit detection
-        - Generic "exhausted" / "insufficient_quota" patterns
+        DashScope (Alibaba Cloud ModelStudio) returns specific error codes
+        for quota exhaustion vs other failures. Use exact code matching
+        instead of broad keyword search to avoid false positives.
+
+        DashScope quota codes:
+        - ``AllocationQuota.FreeTierOnly`` — free quota exhausted for this model+key
+        - ``Throttling.RateLimit`` — rate-limited
+        - ``FlowControl.Limit`` — concurrency limit
+        - ``QuotaExhausted`` — general quota exhausted
         """
-        msg = str(exc).lower()
+        msg = str(exc)
+        msg_lower = msg.lower()
 
-        # Alibaba Cloud ModelStudio: free quota exhausted per model
-        if "allocationquota" in msg or "freetieronly" in msg:
-            return True
-        if "free tier" in msg and "exhaust" in msg:
-            return True
-
-        # HTTP status code + keyword matching
-        if any(code in msg for code in ["429", "401", "402", "403"]):
-            if any(kw in msg for kw in ["quota", "exhaust", "rate", "limit", "insufficient", "token", "credit"]):
+        # DashScope/Alibaba Cloud exact error codes
+        dashscope_codes = [
+            "allocationquota.freetieronly",
+            "allocationquota",
+            "throttling.ratelimit",
+            "flowcontrol.limit",
+            "quotae exhausted",  # DashScope code text
+            "insufficient_quota",  # OpenAI-compatible quota code (DashScope returns this on 403)
+        ]
+        for code in dashscope_codes:
+            if code in msg_lower:
                 return True
 
-        # LiteLLM-specific rate limit
-        if "rate_limit_error" in msg or "rate limit" in msg:
+        # LiteLLM wraps errors with "API error <code>:" — check code substring
+        if "allocationquota" in msg_lower or "freetieronly" in msg_lower:
             return True
 
-        # Generic exhaustion patterns (catch-all for provider-specific wording)
-        if any(kw in msg for kw in ["quota", "exhaust", "insufficient_quota", "free tier", "billing", "credit balance"]):
+        # HTTP status code 429 (rate limit) — common across providers
+        if "429" in msg:
             return True
 
-        # Content policy / safety violations are NOT quota errors
-        if "content_filter" in msg or "safety" in msg:
-            return False
+        # Quota exhausted message — works across providers (OpenAI-compatible)
+        # LiteLLM wraps 403 insufficient_quota as a generic APIError with
+        # the human-readable message but without the status code in str().
+        if "quota" in msg_lower and "exhausted" in msg_lower:
+            return True
+
+        # Generic rate limit patterns (avoid "quota" broad match — too many false positives)
+        if "rate_limit_error" in msg_lower or "rate limit" in msg_lower:
+            return True
+
+        # Known non-quota errors that should NOT be treated as quota:
+        # - InvalidApiKey, AccessDenied, ModelNotFound, InvalidParameter, etc.
+        non_quota = [
+            "invalidapikey", "accessdenied", "access_denied",
+            "modelnotfound", "model_not_found",
+            "invalidparameter", "invalid_parameter",
+            "contentfilter", "content_filter",
+            "internalerror", "internal_error",
+            "timeout", "timed out",
+        ]
+        for nq in non_quota:
+            if nq in msg_lower:
+                return False
+
         return False
+
+    @staticmethod
+    def _is_retriable_key_model_error(exc: Exception) -> bool:
+        """Return True for key/model access errors where another key/model may work."""
+        msg = str(exc).lower()
+        patterns = [
+            "access to model denied",
+            "model access denied",
+            "not eligible for using the model",
+            "modelnotfound",
+            "model_not_found",
+            "accessdenied",
+            "access_denied",
+            "invalidapikey",
+            "invalid_api_key",
+            "invalid api key",
+        ]
+        return any(p in msg for p in patterns)
 
     async def generate_chat_completion(
         self,
@@ -114,19 +187,57 @@ class LiteLLMProvider(BaseProvider):
         litellm = self._get_litellm()
         messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
+        # Provider-level exact-match cache (rapid dedup, 15s TTL)
+        cache_key = str(messages)
+        cached = _provider_cache_get(cache_key)
+        if cached is not None:
+            logger.debug("Provider cache hit for exact messages")
+            return cached
+
         models_to_try = [self.model_name] + self.fallback_models if self.model_name else self.fallback_models
         if not models_to_try:
             raise ValueError(f"No model specified for provider {self.provider_name}")
 
         env_key = "DASHSCOPE_API_KEY"
         keys = get_api_keys(env_key) if not self.is_local else []
+        num_keys = len(keys)
+
+        # Per-key base URLs for DashScope workspace-scoped keys.
+        # Each workspace API key must be used with its own endpoint.
+        # If DASHSCOPE_API_BASE_URLS is set, it must have the same count as keys.
+        base_urls = get_api_base_urls(env_key) if not self.is_local else []
+        if base_urls and len(base_urls) != num_keys:
+            logger.warning(
+                "DASHSCOPE_API_BASE_URLS count (%d) != DASHSCOPE_API_KEYS count (%d) — ignoring per-key URLs",
+                len(base_urls), num_keys,
+            )
+            base_urls = []
+
+        # ── Key-rotation strategy ──────────────────────────────────────────
+        # Each key_attempt uses `keys[key_idx]` directly instead of the global
+        # _API_KEY_INDEX, eliminating concurrent-request races on key selection.
+        # key_start_offset provides best-effort spreading across requests
+        # without a global lock.
+        # Exhaustion cache is NOT used for skipping — failed combos are always
+        # retried because quota state may change between requests or a key may
+        # have quota on a different model. Only used for logging.
+        key_offset: int = 0
+        if not self.is_local and num_keys > 1:
+            try:
+                job_id = os.environ.get("HOSTNAME", "")
+                if job_id:
+                    key_offset = sum(ord(c) for c in job_id) % num_keys
+            except Exception:
+                key_offset = 0
 
         last_error: Optional[Exception] = None
 
         for model_idx, model in enumerate(models_to_try):
-            max_key_attempts = max(len(keys), 1) if not self.is_local else 1
+            # ── Try each key for this model ────────────────────────────────
+            for key_attempt in range(num_keys if not self.is_local else 1):
+                # Key index: start from offset, wrap around
+                key_idx = (key_offset + key_attempt) % num_keys if not self.is_local and num_keys > 0 else 0
 
-            for key_attempt in range(max_key_attempts):
                 start_ms = time.monotonic_ns() // 1_000_000
 
                 try:
@@ -138,12 +249,15 @@ class LiteLLMProvider(BaseProvider):
                         "top_p": request.top_p,
                     }
 
-                    if self.base_url:
+                    # Use per-key base URL if available (DashScope workspace keys)
+                    if base_urls and key_idx < len(base_urls):
+                        kwargs["api_base"] = base_urls[key_idx]
+                    elif self.base_url:
                         kwargs["api_base"] = self.base_url
 
-                    active_key = get_current_api_key(env_key) if not self.is_local else self.api_key
-                    if active_key:
-                        kwargs["api_key"] = active_key
+                    # Use key_idx directly — no global _API_KEY_INDEX
+                    if not self.is_local and keys and key_idx < len(keys):
+                        kwargs["api_key"] = keys[key_idx]
                     elif self.api_key:
                         kwargs["api_key"] = self.api_key
 
@@ -154,6 +268,15 @@ class LiteLLMProvider(BaseProvider):
                         kwargs["tools"] = [t.model_dump() for t in request.tools]
                     if request.tool_choice:
                         kwargs["tool_choice"] = request.tool_choice
+
+                    # DashScope context caching: mark system prompt for KV cache
+                    # Reduces first-token latency by ~80% on repeated system prompts.
+                    api_base = kwargs.get("api_base", self.base_url or "")
+                    if "dashscope" in api_base or "aliyuncs" in api_base:
+                        kwargs["extra_headers"] = {
+                            "X-DashScope-Cache": "enable",
+                            "X-DashScope-SSE": "enable",
+                        }
 
                     response = await litellm.acompletion(**kwargs)
 
@@ -176,7 +299,7 @@ class LiteLLMProvider(BaseProvider):
                                 },
                             })
 
-                    return LLMCompletionResponse(
+                    response_obj = LLMCompletionResponse(
                         content=content,
                         provider=self.provider_name,
                         model_name=model,
@@ -189,7 +312,7 @@ class LiteLLMProvider(BaseProvider):
                         metadata={
                             "provider_type": "litellm",
                             "model_fallback_used": model_idx > 0,
-                            "key_fallback_used": key_attempt > 0,
+                            "key_fallback_used": key_idx != 0,
                             "tool_calls": tool_calls,
                             "usage": {
                                 "prompt_tokens": getattr(usage, "prompt_tokens", None),
@@ -198,31 +321,42 @@ class LiteLLMProvider(BaseProvider):
                             },
                         },
                     )
+                    # Store in provider cache (exact message dedup, 15s TTL)
+                    _provider_cache_set(cache_key, response_obj)
+                    return response_obj
 
                 except Exception as exc:
                     last_error = exc
                     elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
 
-                    if self._is_quota_error(exc) and len(keys) > 1:
-                        rotate_api_key(env_key)
+                    if self._is_quota_error(exc):
+                        # Log exhaustion but DO NOT skip on retry — quota may
+                        # free up or a different model+key may work.
+                        logger.info(
+                            "Quota exhausted for %s (key %d/%d) — trying next",
+                            model, key_idx + 1, max(num_keys, 1),
+                        )
+                        continue  # Try next key (or next model if last key)
+
+                    if self._is_retriable_key_model_error(exc):
                         logger.warning(
-                            "Quota exhausted for %s — key %d/%d, rotating",
-                            model, key_attempt + 1, max_key_attempts,
+                            "Model/key unavailable for %s (key %d/%d) — trying next key/model: %s",
+                            model, key_idx + 1, max(num_keys, 1), str(exc)[:160],
                         )
                         continue
 
-                    if self._is_quota_error(exc):
-                        logger.warning(
-                            "All keys exhausted for %s — trying next model (%d/%d)",
-                            model, model_idx + 1, len(models_to_try),
-                        )
-                        break  # All keys tried, move to next model
-
+                    # Non-retriable error: fail immediately
                     logger.error(
                         "LiteLLM completion failed for %s: %s",
                         model, exc,
                     )
                     raise
+
+            # All keys exhausted for this model; try next model
+            logger.info(
+                "All keys exhausted for %s (key_offset=%d) — trying next model (%d/%d)",
+                model, key_offset, model_idx + 1, len(models_to_try),
+            )
 
         # All models + keys exhausted
         raise QuotaExhaustedError(
@@ -249,11 +383,28 @@ class LiteLLMProvider(BaseProvider):
 
         env_key = "DASHSCOPE_API_KEY"
         keys = get_api_keys(env_key) if not self.is_local else []
+        num_keys = len(keys)
+
+        # Per-key base URLs for DashScope workspace-scoped keys (streaming)
+        base_urls = get_api_base_urls(env_key) if not self.is_local else []
+        if base_urls and len(base_urls) != num_keys:
+            base_urls = []
+
+        key_offset: int = 0
+        if not self.is_local and num_keys > 1:
+            try:
+                job_id = os.environ.get("HOSTNAME", "")
+                if job_id:
+                    key_offset = sum(ord(c) for c in job_id) % num_keys
+            except Exception:
+                key_offset = 0
+
         last_error: Optional[Exception] = None
 
         for model_idx, model in enumerate(models_to_try):
-            max_key_attempts = max(len(keys), 1) if not self.is_local else 1
-            for key_attempt in range(max_key_attempts):
+            for key_attempt in range(num_keys if not self.is_local else 1):
+                key_idx = (key_offset + key_attempt) % num_keys if not self.is_local and num_keys > 0 else 0
+
                 try:
                     kwargs: dict = {
                         "model": model,
@@ -263,13 +414,24 @@ class LiteLLMProvider(BaseProvider):
                         "top_p": request.top_p,
                         "stream": True,
                     }
-                    if self.base_url:
+                    # Use per-key base URL if available (DashScope workspace keys)
+                    if base_urls and key_idx < len(base_urls):
+                        kwargs["api_base"] = base_urls[key_idx]
+                    elif self.base_url:
                         kwargs["api_base"] = self.base_url
-                    active_key = get_current_api_key(env_key) if not self.is_local else self.api_key
-                    if active_key:
-                        kwargs["api_key"] = active_key
+                    # Use key_idx directly — no global _API_KEY_INDEX
+                    if not self.is_local and keys and key_idx < len(keys):
+                        kwargs["api_key"] = keys[key_idx]
                     elif self.api_key:
                         kwargs["api_key"] = self.api_key
+
+                    # DashScope context caching (streaming)
+                    api_base = kwargs.get("api_base", self.base_url or "")
+                    if "dashscope" in api_base or "aliyuncs" in api_base:
+                        kwargs["extra_headers"] = {
+                            "X-DashScope-Cache": "enable",
+                            "X-DashScope-SSE": "enable",
+                        }
 
                     accumulated = ""
                     response = await litellm.acompletion(**kwargs)
@@ -288,26 +450,92 @@ class LiteLLMProvider(BaseProvider):
 
                 except Exception as exc:
                     last_error = exc
-                    if self._is_quota_error(exc) and len(keys) > 1:
-                        rotate_api_key(env_key)
-                        logger.warning(
-                            "Stream quota exhausted for %s — key %d/%d, rotating",
-                            model, key_attempt + 1, max_key_attempts,
+                    if self._is_quota_error(exc):
+                        logger.info(
+                            "Stream quota exhausted for %s (key %d/%d) — trying next",
+                            model, key_idx + 1, max(num_keys, 1),
                         )
                         continue
-                    if self._is_quota_error(exc):
+                    if self._is_retriable_key_model_error(exc):
                         logger.warning(
-                            "All keys exhausted for %s — trying next model (%d/%d)",
-                            model, model_idx + 1, len(models_to_try),
+                            "Stream model/key unavailable for %s (key %d/%d) — trying next key/model: %s",
+                            model, key_idx + 1, max(num_keys, 1), str(exc)[:160],
                         )
-                        break
+                        continue
                     logger.error("LiteLLM stream failed for %s: %s", model, exc)
                     raise
+
+            logger.info(
+                "All keys exhausted for %s (stream) — trying next model (%d/%d)",
+                model, model_idx + 1, len(models_to_try),
+            )
 
         # All models + keys exhausted — yield error as stream event
         error_msg = f"All models/keys exhausted: {models_to_try}"
         logger.error(error_msg)
         yield f'{{"error": {json.dumps(error_msg)}, "done": true}}'
+
+    async def warmup(self) -> None:
+        """Pre-warm provider connection pool and API key validation.
+
+        Runs a minimal health-check completion to prime LiteLLM connection
+        cache, validate API keys, and load model into inference cache.
+        Failures are logged but not raised.
+        """
+        import litellm
+
+        # Enable litellm library-level in-memory response caching
+        # Caches exact message → response mappings for 60s TTL.
+        # This is Layer 2 — complements ai_service.core.cache (Layer 1)
+        # and the provider-level exact-match cache (Layer 0).
+        try:
+            if not hasattr(litellm, "cache") or litellm.cache is None:
+                import diskcache  # type: ignore
+                litellm.cache = litellm.Cache(
+                    type="disk",
+                    ttl=60,
+                    namespace="litellm_response_cache",
+                )
+                logger.info("LiteLLM disk cache enabled (ttl=60s)")
+        except ImportError:
+            # diskcache not installed; use in-memory cache
+            litellm.cache = litellm.Cache(
+                type="local",
+                ttl=60,
+            )
+            logger.info("LiteLLM in-memory cache enabled (ttl=60s)")
+        except Exception as exc:
+            logger.warning("Failed to enable litellm cache: %s", exc)
+
+        try:
+            model = self.model_name
+            if not model:
+                return
+            kwargs: dict = {
+                "model": model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 5,
+                "temperature": 0,
+            }
+            if self.base_url:
+                kwargs["api_base"] = self.base_url
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
+
+            logger.info(
+                "Pre-warming provider '%s' with model %s...",
+                self.provider_name, model,
+            )
+            await litellm.acompletion(**kwargs)
+            logger.info(
+                "Provider '%s' warmed up successfully (model=%s)",
+                self.provider_name, model,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Provider warmup failed for %s (model=%s): %s",
+                self.provider_name, model, str(exc)[:200],
+            )
 
     async def health_check(self) -> ProviderHealthStatus:
         """Check provider health by attempting a minimal completion."""

@@ -43,6 +43,8 @@ class AiHelperSettings(BaseModel):
     require_action_confirmation: bool = True
     max_context_candles: int = Field(300, ge=50, le=2000)
     memory_retention_days: int = Field(30, ge=1, le=365)
+    selected_model: Optional[str] = Field(None, description="User's chosen model. None/empty = Auto (use default rotation).")
+    model_tier: Optional[str] = Field(None, description="Model tier filter: 'standard' | 'reserved' | 'benchmark'. None = use all for rotation.")
 
 
 class AlertSettings(BaseModel):

@@ -33,11 +33,14 @@ RUN mkdir -p /opt/flink/plugins/flink-s3-fs-hadoop \
     cp /opt/flink/opt/flink-s3-fs-hadoop-1.18.1.jar /opt/flink/plugins/flink-s3-fs-hadoop/ && \
     cp /opt/flink/opt/flink-s3-fs-presto-1.18.1.jar /opt/flink/plugins/flink-s3-fs-presto/
 
+# Activate flink-python JAR for Python job submission
+RUN cp /opt/flink/opt/flink-python-*.jar /opt/flink/lib/
+
 
 # â”€â”€ Fix checkpoint directory permissions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 RUN mkdir -p /tmp/flink-checkpoints && chown -R flink:flink /tmp/flink-checkpoints
 
 ENV PYFLINK_PYTHON=python3
-ENV PYTHONPATH=/opt/flink/src:/opt/flink/src/processing:$PYTHONPATH
+ENV PYTHONPATH=/app/src:/app/src/processing:/opt/flink/src:/opt/flink/src/processing:$PYTHONPATH
 
 ENV PYFLINK_PYTHON=python3

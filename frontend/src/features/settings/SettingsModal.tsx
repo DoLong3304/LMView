@@ -261,6 +261,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   const [debugLoading, setDebugLoading] = useState<string | null>(null);
   const [debugResult, setDebugResult] = useState("");
   const [chartActionJson, setChartActionJson] = useState(DEFAULT_ACTION_TEST);
+  const [modelsByTier, setModelsByTier] = useState<Record<string, string[]> | null>(null);
+
+  // Sync selected model to module-level state for useAiChat hook
+  const syncSelectedModel = React.useCallback(() => {
+    const { selected_model, model_tier } = settings.ai_settings;
+    if (selected_model || model_tier) {
+      import("@/services/aiService").then(({ setSelectedModel }) => {
+        setSelectedModel(selected_model || null, model_tier || null);
+      });
+    }
+  }, [settings.ai_settings]);
   const [adminQuery, setAdminQuery] = useState("");
   const [adminUsers, setAdminUsers] = useState<AdminUsersResponse>({
     users: [],
@@ -305,6 +316,22 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       setActiveTab("account");
     }
   }, [activeTab, isAdmin]);
+
+  // Fetch available models by tier for model selector
+  useEffect(() => {
+    if (!isOpen || activeTab !== "aiHelper" || !isAuthenticated) return;
+    let cancelled = false;
+    import("@/services/aiService").then(({ aiHealth }) => {
+      aiHealth().then((health) => {
+        if (!cancelled && health.models_by_tier) {
+          setModelsByTier(health.models_by_tier);
+        }
+      }).catch(() => {
+        if (!cancelled) setModelsByTier(null);
+      });
+    });
+    return () => { cancelled = true; };
+  }, [isOpen, activeTab, isAuthenticated]);
 
   useEffect(() => {
     if (!isOpen || !user) {
@@ -491,6 +518,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
       const updated = await next;
       setSettings(updated);
       setStatusMessage("success", t("settingsSaved"));
+      syncSelectedModel();
     } catch (error) {
       setStatusError(error, t("error"));
     } finally {
@@ -1072,13 +1100,59 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
               isAuthenticated ? (
                 <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
                   <Panel title={t("aiAgentSettings")}>
-                    <SelectRow
-                      label={t("aiResponseStyle")}
-                      value={settings.ai_settings.response_style}
-                      options={["concise", "balanced", "detailed"]}
-                      getOptionLabel={(value) => t(AI_RESPONSE_STYLE_LABEL_KEYS[value] ?? "aiResponseBalanced")}
-                      onChange={(value) => setSettings((draft) => ({ ...draft, ai_settings: { ...draft.ai_settings, response_style: value } }))}
-                    />
+                    {/* Model selector — fetch available models from health endpoint */}
+      {(() => {
+        const sel = settings.ai_settings.selected_model;
+        const allModels = modelsByTier
+          ? Object.values(modelsByTier).flat()
+          : [];
+        const hasAnyModel = allModels.length > 0;
+
+        return hasAnyModel ? (
+          <SelectRow
+            label={t("aiModel")}
+            value={sel || ""}
+            options={["", ...allModels]}
+            getOptionLabel={(value) => {
+              if (!value) return t("aiModelAuto") || "Auto (Default)";
+              // Find which tier this model belongs to
+              let modelTier = "";
+              if (modelsByTier) {
+                for (const [t, models] of Object.entries(modelsByTier)) {
+                  if (models.includes(value)) {
+                    modelTier = t;
+                    break;
+                  }
+                }
+              }
+              const suffix = modelTier ? ` (${modelTier})` : "";
+              return `${value}${suffix}`;
+            }}
+            onChange={(value) => {
+              // Remove tier suffix if present
+              const modelName = value.includes(" (") ? value.split(" (")[0] : value;
+              setSettings((draft) => ({
+                ...draft,
+                ai_settings: {
+                  ...draft.ai_settings,
+                  selected_model: modelName || null,
+                  model_tier: modelName && modelsByTier
+                    ? (Object.entries(modelsByTier).find(([, models]) => models.includes(modelName))?.[0] || null)
+                    : null,
+                },
+              }));
+            }}
+          />
+        ) : null;
+      })()}
+
+      <SelectRow
+        label={t("aiResponseStyle")}
+        value={settings.ai_settings.response_style}
+        options={["concise", "balanced", "detailed"]}
+        getOptionLabel={(value) => t(AI_RESPONSE_STYLE_LABEL_KEYS[value] ?? "aiResponseBalanced")}
+        onChange={(value) => setSettings((draft) => ({ ...draft, ai_settings: { ...draft.ai_settings, response_style: value } }))}
+      />
                     <Toggle label={t("riskReminders")} checked={settings.ai_settings.risk_reminders} onChange={(value) => setSettings((draft) => ({ ...draft, ai_settings: { ...draft.ai_settings, risk_reminders: value } }))} />
                     <Toggle label={t("includeChartContext")} checked={settings.ai_settings.auto_include_chart_context} onChange={(value) => setSettings((draft) => ({ ...draft, ai_settings: { ...draft.ai_settings, auto_include_chart_context: value } }))} />
                     <Toggle label={t("allowChartActions")} checked={settings.ai_settings.allow_chart_actions} onChange={(value) => setSettings((draft) => ({ ...draft, ai_settings: { ...draft.ai_settings, allow_chart_actions: value } }))} />

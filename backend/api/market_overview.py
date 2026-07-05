@@ -1,6 +1,6 @@
 """
 Market Overview API - Comprehensive market metrics for Overview tab.
-Reads current gold-style tables from `iceberg.crypto_lakehouse.*` and keeps Redis fallback.
+Reads current gold-style tables from `iceberg_catalog.crypto_lakehouse.*` and keeps Redis fallback.
 """
 from fastapi import APIRouter, HTTPException, Query
 from typing import List, Dict, Any, Optional
@@ -38,7 +38,7 @@ try:
 except Exception as _e:  # pragma: no cover - manifest is best-effort
     logger.debug("market_overview: gold_schema_manifest not loaded: %s", _e)
 
-DB = "iceberg.crypto_lakehouse"
+DB = "iceberg_catalog.crypto_lakehouse"
 # P1 fix (v0.24.4): GOLD_FRESHNESS_MINUTES is now defined in the canonical
 # schema manifest (src/lakehouse/gold_schema_manifest.py) as the single
 # source of truth. The value here is kept as a fallback for the import
@@ -866,7 +866,7 @@ from(bucket: "{INFLUX_BUCKET}")
 # ============================================================================
 
 
-_NEWS_IMPACT_TABLE = "iceberg.crypto_lakehouse.gold_news_market_impact"
+_NEWS_IMPACT_TABLE = "iceberg_catalog.crypto_lakehouse.gold_news_market_impact"
 
 
 @router.get("/news-impact")

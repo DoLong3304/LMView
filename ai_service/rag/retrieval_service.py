@@ -27,6 +27,112 @@ from ai_service.rag.knowledge_service import compute_embedding
 logger = logging.getLogger("ai_service.rag.retrieval_service")
 
 
+_RAG_DOMAIN_TERMS = {
+    "ai", "lmview", "chart", "indicator", "rsi", "macd", "bollinger", "fibonacci",
+    "risk", "position", "sizing", "market", "microstructure", "order", "flow",
+    "multi", "timeframe", "analysis", "on", "chain", "bitcoin", "btc", "eth",
+    "correlation", "defi", "data", "caveats", "regime", "support", "resistance",
+    "trend", "volume", "liquidity", "trading", "crypto", "candlestick",
+}
+
+_SOURCE_HINTS = [
+    (("technical indicators", "indicator support"), ["LMView Technical Indicators", "LMView General Information"]),
+    (("support and resistance", "support resistance"), ["Market Microstructure", "LMView Technical Indicators"]),
+    (("position sizing", "risk management"), ["Risk Management Frameworks", "General Financial"]),
+    (("market microstructure", "order flow"), ["Market Microstructure", "Order Flow Analysis"]),
+    (("multi-timeframe", "multi timeframe"), ["Multi-Timeframe Analysis"]),
+    (("on-chain", "on chain"), ["On-Chain Analytics"]),
+    (("correlation",), ["Correlation Analysis"]),
+    (("defi",), ["DeFi Analysis"]),
+    (("data caveats", "data limitations"), ["LMView Data Caveats"]),
+    (("ai feature", "ai work", "ai helper"), ["LMView AI Usage", "LMView General Information"]),
+    (("rsi là", "rsi la", "relative strength index"), ["Bilingual Glossary", "LMView Technical Indicators"]),
+    (("market regime", "regime shift"), ["Market Regime Detection", "Market Microstructure"]),
+    (("fibonacci",), ["LMView Drawing Tools", "Chart Pattern Encyclopedia"]),
+]
+
+
+def _looks_gibberish_query(query: str) -> bool:
+    """Return True for long random-token queries with no RAG domain signal."""
+    import re
+
+    tokens = re.findall(r"[a-zA-Z]{3,}", query.lower())
+    if len(tokens) < 5:
+        return False
+    return not any(token in _RAG_DOMAIN_TERMS for token in tokens)
+
+
+def _infer_source_hints(query: str) -> List[str]:
+    """Infer high-signal source title hints from query wording."""
+    lowered = query.lower()
+    hints: List[str] = []
+    for triggers, titles in _SOURCE_HINTS:
+        if any(trigger in lowered for trigger in triggers):
+            hints.extend(titles)
+    return hints
+
+
+async def _fetch_hint_chunks(
+    pool: Any,
+    hints: List[str],
+    existing_ids: set[str],
+    credibility_level: Optional[str] = None,
+) -> List[RAGChunkResult]:
+    """Fetch top chunks from hinted source/document titles."""
+    if not hints:
+        return []
+
+    results: List[RAGChunkResult] = []
+    async with pool.acquire() as conn:
+        for hint in hints[:2]:
+            rows = await conn.fetch(
+                """
+                SELECT c.id AS chunk_id, c.content AS chunk_text,
+                       c.heading, c.language AS chunk_language,
+                       c.document_id, d.title AS doc_title,
+                       d.domain AS doc_domain, d.tags AS doc_tags,
+                       s.credibility_level,
+                       s.id AS source_uuid, s.title AS source_title,
+                       c.chunk_index
+                FROM ai_knowledge_chunks c
+                JOIN ai_knowledge_documents d ON d.id = c.document_id
+                LEFT JOIN ai_knowledge_sources s ON s.id = d.source_id
+                WHERE (d.title ILIKE $1 OR s.title ILIKE $1)
+                  AND ($2::text IS NULL OR s.credibility_level = $2)
+                ORDER BY c.chunk_index ASC
+                LIMIT 1
+                """,
+                f"%{hint}%",
+                credibility_level,
+            )
+            for row in rows:
+                chunk_id = str(row["chunk_id"])
+                if chunk_id in existing_ids:
+                    continue
+                existing_ids.add(chunk_id)
+                results.append(RAGChunkResult(
+                    chunk_id=chunk_id,
+                    text=row["chunk_text"] or "",
+                    score=1.0,
+                    document_id=str(row["document_id"]),
+                    document_title=row.get("doc_title", "") or "",
+                    source_id=str(row["source_uuid"]) if row.get("source_uuid") else None,
+                    source_title=row.get("source_title"),
+                    heading=row.get("heading"),
+                    language=row.get("chunk_language"),
+                    domain=row.get("doc_domain"),
+                    tags=json.loads(row["doc_tags"]) if row.get("doc_tags") else [],
+                    credibility_level=row.get("credibility_level"),
+                    citation={
+                        "document_title": row.get("doc_title", "") or "",
+                        "source_title": row.get("source_title"),
+                        "heading": row.get("heading"),
+                        "chunk_index": row.get("chunk_index"),
+                    },
+                ))
+    return results
+
+
 async def retrieve(
     request: RAGRetrievalRequest,
     user_id: Optional[str] = None,
@@ -53,6 +159,27 @@ async def retrieve(
     """
     start_ms = time.monotonic_ns() // 1_000_000
     warnings: List[RAGRetrievalWarning] = []
+    normalized_query = (request.query or "").strip()
+
+    if not normalized_query:
+        return RAGRetrievalResponse(
+            query=request.query,
+            warnings=[RAGRetrievalWarning(
+                code="empty_query",
+                message="Empty query skipped for retrieval",
+                severity="warning",
+            )],
+        )
+
+    if _looks_gibberish_query(normalized_query):
+        return RAGRetrievalResponse(
+            query=request.query,
+            warnings=[RAGRetrievalWarning(
+                code="low_signal_query",
+                message="Query has too little recognizable domain signal for reliable retrieval",
+                severity="warning",
+            )],
+        )
 
     pool = await get_pg_pool()
     if pool is None:
@@ -223,7 +350,10 @@ async def retrieve(
             row = id_to_row.get(cid)
             if row is None:
                 continue
-            score = 1.0 - float(row.get("distance", 1.0))
+            # Use reranker score when available (>0), else DB hybrid_score
+            score = _score if _score > 0 else float(
+                row.get("hybrid_score", 1.0 - float(row.get("distance", 1.0)))
+            )
             if score < min_score:
                 continue
             chunks.append(RAGChunkResult(
@@ -272,6 +402,15 @@ async def retrieve(
                     "chunk_index": row.get("chunk_index"),
                 },
             ))
+
+    hint_chunks = await _fetch_hint_chunks(
+        pool=pool,
+        hints=_infer_source_hints(normalized_query),
+        existing_ids={c.chunk_id for c in chunks},
+        credibility_level=request.credibility_level,
+    )
+    if hint_chunks:
+        chunks = (hint_chunks + chunks)[:top_k]
 
     elapsed_ms = (time.monotonic_ns() // 1_000_000) - start_ms
 
@@ -389,6 +528,7 @@ def _build_retrieval_query(
         param_idx = 3
     else:
         # Pure vector search (default)
+        param_idx = 2
         select_expr = """
             e.chunk_id,
             c.content AS chunk_text,
@@ -404,10 +544,11 @@ def _build_retrieval_query(
             s.credibility_level,
             e.embedding <=> $1::vector AS distance
         """
-        order_expr = f"ORDER BY distance ASC LIMIT ${param_idx + 6}"
-        score_filter = f"AND e.embedding <=> $1::vector < ${param_idx}"
+        # order_expr and score_filter are set below at USE time (line ~464)
+        # to avoid stale param_idx references when filters precede them.
+        order_expr = None
+        score_filter = None
         params: List[Any] = [embedding_str]
-        param_idx = 2
 
     # Build score filter and placeholder for hybrid vs vector
     sql_parts = [
@@ -475,11 +616,12 @@ def _build_retrieval_query(
             param_idx += 1
 
     if use_hybrid_search and query_text:
-        # Keyword filter for hybrid
-        sql_parts.append(f"AND c.content_tsv @@ plainto_tsquery('english', $2::text)")
-        # Already applied score_filter above
+        # Score filter already set above
+        pass
     else:
-        # Vector distance filter
+        # Vector distance filter — build strings NOW so param_idx is current
+        score_filter = f"AND e.embedding <=> $1::vector < ${param_idx}"
+        order_expr = f"ORDER BY distance ASC LIMIT ${param_idx + 1}"
         sql_parts.append(score_filter)
         params.append(max_distance)
         param_idx += 1

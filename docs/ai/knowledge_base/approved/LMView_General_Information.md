@@ -2,7 +2,7 @@
 
 > **Document Type**: User-Facing Platform Introduction
 > **Audience**: End users, AI assistant context, new users
-> **Version**: 0.25.42+ | **Review Status**: Ready for Review
+> **Version**: 0.32.0+ | **Review Status**: Approved
 
 ---
 
@@ -10,7 +10,7 @@
 
 **LMView** is a professional-grade, real-time cryptocurrency technical analysis platform. It delivers live market data, advanced charting, technical indicators, and AI-powered analysis tools for traders who need precision and speed.
 
-Built on a **Lambda Architecture**, LMView processes millions of price updates per second while maintaining sub-second chart responsiveness and years of historical data accessibility.
+Built on a **Lambda Architecture**, LMView processes millions of price updates per second while maintaining sub-second chart responsiveness and years of historical data accessibility (back to 2022 via Iceberg cold storage).
 
 ---
 
@@ -234,10 +234,18 @@ The AI acts as a technical analysis tutor:
 The AI can propose safe UI actions:
 
 - Add/remove indicators
-- Change timeframes
+- Change timeframes and symbols
 - Navigate to other panels (order book, screener, watchlist)
-- Highlight specific chart areas
-- Start guided tours
+- Highlight specific chart areas (candles, zones, sections)
+- Draw trendlines, Fibonacci retracements, annotations
+- Start guided walkthroughs (multi-step auto-executed analysis plans)
+
+**Walkthrough Mode** (v0.29.0+, redesigned v0.32.0):
+- AI produces a structured N-step analysis plan
+- Each step auto-executes multiple chart actions simultaneously
+- Sensitive actions (highlights, navigation) reset per step; persistent actions (drawings, indicators, timeframe) accumulate
+- Input disabled and full-screen click blocker during walkthrough
+- Recap summarizes findings; user can Keep or Revert the chart state
 
 **Safety**: All actions require explicit user approval. The AI never modifies settings without permission.
 
@@ -264,15 +272,16 @@ All API responses include `freshness` metadata indicating source, age, and fallb
 
 ### Backend
 - **FastAPI** — REST and WebSocket API
-- **PostgreSQL** — Auth, AI sessions, settings, catalog, pgvector for RAG
+- **PostgreSQL** — Auth, AI sessions, settings, Iceberg catalog, pgvector for RAG
 - **Redis Sentinel** — Hot cache (candles, indicators, order book)
 - **InfluxDB** — Warm time-series storage (90-day retention)
 - **Apache Kafka** — Message bus (4 topics, high-throughput)
 - **Apache Flink** — Stream processing (real-time aggregations)
 - **Apache Spark** — Batch processing (historical backfills, gold tables)
 - **Apache Iceberg** — Table format for historical data
-- **MinIO** — S3-compatible object storage
+- **AWS S3** (`lmview-iceberg-storage`) — Object storage for Iceberg (MinIO alternative exists for dev)
 - **Trino** — SQL query engine for lakehouse
+- **ai-service** — Standalone AI container (LangGraph pipeline, LiteLLM, RAG with pgvector)
 
 ### Frontend
 - **React 19** — Modern UI framework
@@ -283,9 +292,10 @@ All API responses include `freshness` metadata indicating source, age, and fallb
 
 ### Infrastructure
 - **Docker & Docker Swarm** — Container orchestration
-- **Nginx** — Reverse proxy and TLS termination
-- **AWS EC2** — Cloud hosting (2-node cluster)
+- **Nginx** — Reverse proxy and TLS termination (certbot automation)
+- **AWS EC2** — Cloud hosting (2-3 node cluster, core/worker/data role labels)
 - **EFS** — Shared file storage
+- **Local registry** (`REGISTRY_ADDR`) — Image push + `--resolve-image never` deploy
 
 ---
 

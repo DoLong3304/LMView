@@ -82,7 +82,10 @@ async def get_session_messages(
     if pool is None:
         return None
 
-    sid = uuid.UUID(session_id)
+    sid = uuid.UUID(session_id) if session_id else None
+    if sid is None:
+        logger.error("get_session_messages called with null/empty session_id")
+        return None
     uid = uuid.UUID(user_id)
 
     async with pool.acquire() as conn:
@@ -125,8 +128,19 @@ async def store_message(
     if pool is None:
         return None
 
-    sid = uuid.UUID(session_id)
-    uid = uuid.UUID(user_id)
+    try:
+        sid = uuid.UUID(session_id) if session_id else None
+    except ValueError:
+        logger.error("store_message called with invalid session_id: %s", session_id)
+        return None
+    if sid is None:
+        logger.error("store_message called with null/empty session_id")
+        return None
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        logger.error("store_message called with invalid user_id: %s", user_id)
+        return None
     now = datetime.now(timezone.utc)
     meta_json = json.dumps(metadata or {})
 
@@ -166,7 +180,10 @@ async def soft_delete_session(
         return False
 
     try:
-        sid = uuid.UUID(session_id)
+        sid = uuid.UUID(session_id) if session_id else None
+        if sid is None:
+            logger.error("delete_session called with null/empty session_id")
+            return False
         uid = uuid.UUID(user_id)
     except ValueError:
         return False
@@ -194,8 +211,15 @@ async def store_chart_snapshot(
     if pool is None:
         return None
 
-    uid = uuid.UUID(user_id)
-    sid = uuid.UUID(session_id) if session_id else None
+    try:
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        logger.error("store_chart_snapshot called with invalid user_id: %s", user_id)
+        return None
+    try:
+        sid = uuid.UUID(session_id) if session_id else None
+    except ValueError:
+        sid = None
     now = datetime.now(timezone.utc)
 
     async with pool.acquire() as conn:
@@ -223,6 +247,88 @@ async def store_chart_snapshot(
         )
 
     return str(snapshot_id) if snapshot_id else None
+
+
+async def update_session_metadata(
+    session_id: str,
+    user_id: str,
+    metadata: Dict[str, Any],
+) -> bool:
+    """Update session metadata (merged into existing context_summary).
+
+    Merges the provided metadata into the session's ``context_summary``
+    JSONB column. If ``context_summary`` doesn't exist yet, creates it.
+    """
+    pool = await get_pg_pool()
+    if pool is None:
+        return False
+
+    try:
+        sid = uuid.UUID(session_id) if session_id else None
+        if sid is None:
+            return False
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        return False
+
+    now = datetime.now(timezone.utc)
+
+    try:
+        async with pool.acquire() as conn:
+            import json as _json
+            # Use COALESCE to handle NULL context_summary (sessions created before migration 002)
+            result = await conn.execute(
+                """
+                UPDATE ai_chat_sessions
+                SET context_summary = COALESCE(context_summary, '{}'::jsonb) || $1::jsonb,
+                    updated_at = $2
+                WHERE id = $3 AND user_id = $4
+                """,
+                _json.dumps(metadata), now, sid, uid,
+            )
+            return result and result != "UPDATE 0"
+    except Exception as exc:
+        logger.warning("update_session_metadata failed: %s", exc)
+        return False
+
+
+async def get_session_metadata(
+    session_id: str,
+    user_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Get session metadata from ``context_summary`` column.
+
+    Returns None if not found or unauthorized.
+    """
+    pool = await get_pg_pool()
+    if pool is None:
+        return None
+
+    try:
+        sid = uuid.UUID(session_id) if session_id else None
+        if sid is None:
+            return None
+        uid = uuid.UUID(user_id)
+    except ValueError:
+        return None
+
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT context_summary FROM ai_chat_sessions
+            WHERE id = $1 AND user_id = $2
+            """,
+            sid, uid,
+        )
+
+    if row is None:
+        return None
+
+    meta = row.get("context_summary")
+    if isinstance(meta, str):
+        import json as _json
+        meta = _json.loads(meta)
+    return meta or {}
 
 
 def _session_to_dict(row) -> dict:

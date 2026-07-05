@@ -1,39 +1,45 @@
 # Caveats & Known Issues — Complete Bug Inventory
 
-All known bugs, design weaknesses, and technical debt as of 2026-06-25 (v0.28.0).
+All known bugs, design weaknesses, and technical debt as of 2026-06-26 (v0.28.3).
 
 > **Note:** This doc is updated at each major release. For the current release
 > changes, see `docs/CHANGELOG.md`. For 3-node migration planning, see
 > `docs/3NODE-MIGRATION-PLAN.md`.
 
-**Recent progress (v0.28.0, 2026-06-25):**
-- ✅ **Scripts/Configs**: All 7 scripts with hardcoded IPs → env-var driven
-- ✅ **Backend/AI separation**: `AI_SERVICE_EMBEDDED=false` default, lazy imports
-- ✅ **Deploy script**: CUSTOM_IMAGES array → dynamic compose resolution
-- ✅ **.env.example**: Fully parameterized with `${VAR:-default}`
-- ✅ **Docker cleanup**: ~7GB reclaimed, thesis/backup docs → trash/
+**Recent progress (v0.28.2–v0.28.3, 2026-06-26):**
+- ✅ **BB-9**: 1s kline fallthrough to 1m in merged endpoint — fixed
+- ✅ **BB-10**: WebSocket synthetic 1s candle when Redis empty — fixed
+- ✅ **FE-1**: Frontend gap defense too strict for 1s (MAX_BRIDGE_BUCKETS 5→30) — fixed
+- ✅ **FE-2**: Cache TTL too aggressive for 1s (500ms vs 3s) — fixed
+- ✅ **FE-3**: Left toolbar price lag — _livePriceMap + 500ms interval — fixed
+- ✅ **DP-9**: binance-kline-ws deployed (8/8 shards, 131+ symbols) — done
 - 🟡 **CI-1 / CI-2**: `exchange` drop in depth/ticker dedup — still open
+- 🟡 **DP-6**: Producer dead — Binance WS 403 geofenced; REST pollers active
+- 🟡 **IB-10**: Flink TM restart loop mitigated via `pgrep` healthcheck
 
 > **Status legend** (each entry below carries one):
-> - **✅ FIXED** — verified resolved in code (may still need deploy/rebuild to take effect in prod)
+> - **✅ FIXED** — verified resolved in code
 > - **🟡 PARTIAL** — mitigation in place but root cause remains
 > - **🔴 OPEN** — unfixed, candidate for next sprint
-> - **⚪ OBSOLETE** — no longer applicable (was a non-issue or already covered elsewhere)
+> - **⚪ OBSOLETE** — no longer applicable
 > - **🟢 NEW** — newly discovered/added this audit
 
 ---
 
 ## TL;DR — Audit Summary (2026-06-20)
 
-**Fixed in v0.25.42–v0.25.51 sprints** (15 items): CI-3 (mitigation), BB-1, DP-1, DP-2, IB-3, IB-5, IB-8 (partial), plus the YAML env-leak bug, forming-candle Blob WS parse, chart-not-updating-without-F5, and producer-OOM replacement by `binance-ticker-ws`.
+**Fixed in v0.28.1** (3 items): spark-worker healthcheck port, combined-stream OOM limit, storage management (log rotation + cleanup hooks)
 
-**Still open high-impact** (6 items):
-1. **DP-6 (NEW)** — Producer permanently dead (Binance WS 403 geofenced from this AWS region). Only ticker flows; klines/trades/depth dead. REST cron stopgap in place.
+**Fixed in v0.28.2–v0.28.3** (4 items): 1s kline fallthrough to 1m (BB-9), WS synthetic 1s candle when Redis empty (BB-10), frontend gap defense too strict for 1s (FE-1), cache TTL too aggressive for 1s (FE-2), left toolbar price lag via _livePriceMap + 500ms interval (FE-3), binance-kline-ws deployed to production (DP-9).
+
+**Still open high-impact** (7 items):
+1. **DP-6 (NEW)** — Producer permanently dead (Binance WS 403 geofenced). REST pollers active.
 2. **CI-1 / CI-2** — `exchange` field dropped in Flink depth + Spark ticker dedup.
-3. **BB-3 / BB-4** — WS has no heartbeat + 50ms all-timeframe payload (browser jank, idle drops).
+3. **BB-3 / BB-4** — WS has no heartbeat + 50ms all-timeframe payload (browser jank).
 4. **CI-4** — Symbol selection alphabetical, not volume-ranked.
 5. **BB-2** — Trino connection churn per query.
 6. **IB-7** — Migration `004_` prefix collision.
+7. **ST-2/ST-3** — Dead containers + dangling images accumulate between deploys.
 
 **Live production mitigations running**:
 - `scripts/cron_refresh_klines.sh` every 2 min → REST kline → Redis refresh for top-30 symbols (stopgap for DP-6).
@@ -109,13 +115,46 @@ All known bugs, design weaknesses, and technical debt as of 2026-06-25 (v0.28.0)
 - **Impact**: Symbol and interval interpolated directly into Flux query string. Validated upstream by `validate_symbol()` and `validate_interval()`, but defense-in-depth should use parameterized queries.
 - **Fix**: Use InfluxDB Flux parameterized query API when available.
 
-### BB-8: Frontend Chart Snaps on Stale Candle Cache — 🟢 NEW (mitigated)
+### BB-8: Frontend Chart Snaps on Stale Candle Cache — ✅ FIXED (v0.28.2)
 - **File**: `frontend/src/features/chart/CandlestickChart.tsx` (`onTicker` handler, ~line 1858)
 - **Symptom**: Chart "snaps to a point" — vertical line from stale close to live ticker price.
 - **Root cause**: When Redis `candle:1m:*` cache goes stale (producer down), `applyDataToChart` sets `lastClosedCandleRef` to a candle 11h old. The `onTicker` synthetic-candle branch then bridges from stale `lastClosed.close` (e.g. 63300) to live `ticker.price` (e.g. 63622) → 322 USD vertical jump. Auto-fit visible range keeps re-snapping as new ticks arrive.
-- **Fix applied** (needs frontend rebuild + nginx redeploy to take effect): Gap defense in `onTicker`. If `bucketTime - forming.time` OR `bucketTime - lastClosed.time` exceeds `5 * timeframeSec`, drop the stale ref and return without drawing a synthetic candle. Chart waits for next real `onCandle` to re-anchor.
-- **Also fixed by**: DP-6 REST kline cron keeps `candle:1m:*` fresh → gap never opens in normal operation.
-- **Verification**: `npm run typecheck` + `npm run build` pass. Confirmed gap closed in Redis (last 1m close 63667 vs ticker 63660, 7 USD gap; was 322 USD).
+- **Fix**: Gap defense in `onTicker`. If `bucketTime - forming.time` OR `bucketTime - lastClosed.time` exceeds `5 * timeframeSec`, drop the stale ref and return without drawing a synthetic candle.
+- **Also fixed by**: DP-6 REST kline cron keeps `candle:1m:*` fresh.
+
+### BB-9: 1s Kline Fallthrough to 1m in Merged Endpoint — ✅ FIXED (v0.28.3)
+- **File**: `backend/api/klines.py` (~line 460–475)
+- **Symptom**: Chart shows 1m candles when 1s timeframe selected; no real-time updates.
+- **Root cause**: `elif interval != "1m"` allowed 1s to fall through to InfluxDB 1m fetch when Redis `candle:1s:*` was empty.
+- **Fix**: `elif interval not in ("1m", "1s")` — 1s returns empty array, frontend builds synthetic candles from WS ticker.
+
+### BB-10: WebSocket Returns None for 1s When Redis Empty — ✅ FIXED (v0.28.3)
+- **File**: `backend/api/websocket.py` (~line 310–320)
+- **Symptom**: WS pushes no data for 1s → frontend `onCandle` never fires → no updates.
+- **Root cause**: `_get_stream_candle("1s")` returns `None` when Redis empty.
+- **Fix**: When Redis empty for 1s, build synthetic candle from `ticker:latest:binance:{symbol}`.
+
+### FE-1: Frontend Gap Defense Too Strict for 1s — ✅ FIXED (v0.28.3)
+- **File**: `frontend/src/features/chart/CandlestickChart.tsx` (~line 1360–1370)
+- **Symptom**: On 1s timeframe, initial 1m data (minutes old) has gap ≫5s → all ticker-driven synthetic candles dropped → blank chart.
+- **Root cause**: `MAX_BRIDGE_BUCKETS = 5` × 1s = 5s slack, too tight for initial 1m data load.
+- **Fix**: `MAX_BRIDGE_BUCKETS = timeframeSec === 1 ? 30 : 5` (30s slack for 1s).
+
+### FE-2: Cache TTL Too Aggressive for 1s — ✅ FIXED (v0.28.3)
+- **File**: `frontend/src/services/marketDataService.ts`
+- **Symptom**: Stale 1m data served for 1s timeframe from cache.
+- **Root cause**: `fetchMergedCandles` used same TTL (3s) for all intervals.
+- **Fix**: `minTimeframeSec === 1 ? 500 : 3000`ms TTL.
+
+### FE-3: Left Toolbar Price Lag — ✅ FIXED (v0.28.3)
+- **File**: `frontend/src/features/chart/CandlestickChart.tsx` (render ~lines 1881–2040)
+- **Symptom**: Left toolbar price updates slower than chart candle and RightPanel.
+- **Root cause**: Price used `lastCandle.close` from `candles` state updated via `startTransition` — React defers low-priority updates. RightPanel used `_livePriceMap` (synchronous mutation) + 2s interval.
+- **Fix**:
+  1. Imported `getLivePrice` from `marketDataService` → reads `_livePriceMap`
+  2. `displayPrice = getLivePrice(symbol)?.price ?? lastCandle?.close ?? 0`
+  3. Added 500ms `setLiveTick` interval to force periodic re-renders
+  4. Used `change24h` from live ticker instead of total-return from candles
 
 ---
 
@@ -155,11 +194,14 @@ All known bugs, design weaknesses, and technical debt as of 2026-06-25 (v0.28.0)
   - `scripts/cron_refresh_klines.sh` — host crontab entry firing every 2 min, refreshes top-30 USDT symbols × 100 1m candles via the `fastapi-prod` container (has redis-py + Sentinel env).
   - Log: `/tmp/lmview-kline-refresh.log`.
 - **Known stopgap gaps**:
-  1. 1s candles NOT refreshed (would need ~5 symbols × 1s polling, under Binance rate limit but heavy).
+  1. ✅ **1s candles now covered** — `binance-kline-ws` (8-shard WS) writes `candle:1s:binance:*` continuously. Deployed v0.28.3.
   2. Trades + depth NOT refreshed (no REST equivalent writing to `trade:latest:*` / `orderbook:*`).
   3. Top-30 only — long-tail symbols stay stale until browsed (frontend `fetchCandles` for an unrefreshed symbol still returns stale data).
   4. Cron depends on `fastapi-prod` container being up on this node.
-- **Long-term fix (proposed, not implemented)**: Build a dedicated `binance-kline-rest` Swarm service modeled on `binance-ticker-ws`. Continuously polls Binance REST `/api/v3/klines` for all USDT pairs on a rolling 1-min window, writes to Redis + Kafka. Decouples from the dead producer entirely. Trades/depth would need separate REST pollers (`/api/v3/trades` and `/api/v3/depth`).
+- **Long-term fix**:
+  - ✅ `binance-kline-ws` (8-shard WS for 1s) — deployed v0.28.3
+  - 🟡 `binance-kline-rest` already exists and runs for 1m candles (KLINE_REST_ENABLE_1S=false, correct)
+  - 🔴 Trades + depth still need separate REST pollers (`/api/v3/trades` and `/api/v3/depth`)
 - **Alternative long-term**: Move producer to a host in a non-geofenced region (e.g. on-prem or different cloud), feed Kafka cross-region. Higher latency + ops cost.
 
 ---
@@ -255,13 +297,85 @@ All known bugs, design weaknesses, and technical debt as of 2026-06-25 (v0.28.0)
 - **Permanent fix**: remove the broken healthcheck blocks from
   `docker-compose.yml` (TCP 6123 for flink-taskmanager) and the two
   spark-worker entries. They were never correct.
+- **Current status (v0.28.1)**: Spark-worker healthcheck port fixed (8081→8084).
+  Flink TM uses `pgrep` workaround. IB-10 **mitigated** but not fully resolved.
 - **Impact**: Kafka → Flink → Redis indicator pipeline is **fully
   blocked** as long as this loop runs. All services report
   `healthy` to the manager, but Flink has 0 taskmanagers, 0 jobs.
 
 ---
 
-## AI Service Issues
+## Storage Management Issues
+
+### ST-1: Container Logs Fill Disk Without Rotation — ✅ FIXED
+- **Root cause**: All services used default json-file logger (unbounded).
+  FastAPI, kline-rest, ticker-ws, depth-trades-rest generated 4.4GB+ logs
+  that were never trimmed.
+- **Fix**: YAML anchor `x-logging` with `max-size: 10m, max-file: 3` applied
+  to all 38 services in docker-compose.yml.
+- **Impact**: Each container capped at 30MB log storage.
+- **Note**: Fix applies to NEW containers only (next deploy). Running
+  containers retain old unlimited log config.
+
+### ST-2: Dead Containers Accumulate on Compute Node — 🟡 PARTIAL
+- **Root cause**: Every `docker service update` creates new task containers
+  but old exited tasks remain. Compute node had 42.6GB of dead containers.
+- **Fix**: Pre/post-deploy cleanup hooks added to `deploy_aws_swarm.sh`.
+  Manual cleanup run: `42.6GB` reclaimed.
+- **Remaining risk**: Cleanup runs only during deploy. If services restart
+  independently (healthcheck failure), dead containers accumulate until
+  next deploy.
+
+### ST-3: Dangling Images from Rebuilds — 🟡 PARTIAL
+- **Root cause**: Each rebuild creates new image layers; old layers become
+  dangling. Core node had 13.3GB of dangling images.
+- **Fix**: `docker image prune -af --filter "until=24h"` in pre-build hook.
+  Manual cleanup run: `13.3GB` reclaimed.
+- **Caveat**: `until=24h` filter may miss old images if builds happen
+  more frequently than 24h.
+
+### ST-4: Build Cache Never Pruned — ✅ FIXED
+- **Root cause**: Docker build cache accumulated to 19.7GB on core node.
+- **Fix**: `docker builder prune -af` in pre-build hook.
+- **Note**: First prune after fix removes all cache; subsequent builds
+  rebuild cache from scratch each time, adding ~1-2min to build time.
+
+---
+
+## SSL / Certificate Issues
+
+### SS-1: lmview.duckdns.org Using Self-Signed Cert — ✅ FIXED
+- **Symptom**: Browser showed "Your connection is not private" — HSTS
+  blocked bypass. Nginx always sent HSTS even with self-signed cert.
+- **Root cause**: Nginx entrypoint creates self-signed placeholder when
+  no LE cert exists. Certbot webroot (HTTP-01) failed because DuckDNS
+  nameservers timeout on CAA queries.
+- **Fix**: Issued LE cert via certbot-dns-duckdns plugin (DNS-01).
+  HSTS temporarily disabled during issuance, re-enabled after.
+- **Valid until**: 2026-09-24
+- **Learned**: DuckDNS requires DNS-01 challenge; HTTP-01 fails due to
+  CAA query timeouts on DuckDNS nameservers.
+
+---
+
+## Data Pipeline Issues (Updated)
+
+### DP-9: Combined-Stream Producer OOM — ✅ FIXED
+- **Service**: `cryptoprice_combined-stream-producer`
+- **Symptom**: Exit code 137 (OOM) every ~1h. 5 consecutive failures.
+- **Root cause**: 512M memory limit insufficient for 200-symbol combined
+  stream (Binance /stream WebSocket).
+- **Fix**: Memory limit 512M → 1G in docker-compose.yml.
+- **Verification**: Running 1h+ with 66MB actual usage (stable).
+
+### DP-10: Spark-Worker Healthcheck Wrong Port — ✅ FIXED
+- **Service**: `cryptoprice_spark-worker` (0/1 for 4h)
+- **Symptom**: Exit code 143 (SIGTERM from unhealthy container).
+  Repeated every 15s × 6 attempts.
+- **Root cause**: Healthcheck tested `localhost:8081` but worker WebUI
+  is on port 8084 (copy-paste bug from spark-worker-2 which uses 8085).
+- **Fix**: Changed to `curl -f http://localhost:8084`.
+- **Verification**: Running 1/1, stable.
 
 ### AI-1: litellm/sentence-transformers Installed at Runtime — 🔴 OPEN
 - **Impact**: First request triggers `pip install` inside FastAPI lifespan thread. Creates 5-30s delay on first /api/ai/chat call.

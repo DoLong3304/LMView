@@ -1,11 +1,26 @@
 # AI Service - API Mode Configuration
 # Online provider catalog. Keys stay in env:
-# - DASHSCOPE_API_KEY (preferred)
+# - DASHSCOPE_API_KEY (preferred single key, legacy)
+# - DASHSCOPE_API_KEYS (comma-separated multi-key for rotation)
 # - QWEN_API_KEY (legacy alias)
+#
+# Model tiers:
+#   standard  → default rotation for normal usage
+#   reserved  → strong models reserved for manual/admin use only
+#   benchmark → decent models for benchmark/automated testing
+#
+# The provider router honours `selected_model` and `model_tier` overrides
+# from the AIChatRequest. When both are null/auto, it rotates through
+# `standard` models in priority order.
 
 mode: api
 providers:
-  # ── Primary: Qwen3.7-Plus (newest June 2026, best quality/price) ────────
+
+  # ════════════════════════════════════════════════════════════════════════
+  # STANDARD TIER — default rotation, newest + efficient models
+  # ════════════════════════════════════════════════════════════════════════
+
+  # Primary: Qwen3.7-Plus (newest June 2026, best quality/price ratio)
   - name: dashscope-qwen3.7-plus
     type: litellm
     public_provider: api
@@ -13,26 +28,43 @@ providers:
     base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
     env_key: DASHSCOPE_API_KEY
     priority: 10
+    tier: standard
+    cutoff: "2026-06"
 
-  # ── Fallback 1: Qwen3.7-Max (highest quality, more expensive) ───────────
-  - name: dashscope-qwen3.7-max
+  # Fallback 1: Qwen3.7-Max-Preview (July 2026 preview, best upcoming quality)
+  - name: dashscope-qwen3.7-max-preview
     type: litellm
     public_provider: api
-    model: openai/qwen3.7-max
+    model: openai/qwen3.7-max-preview
     base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
     env_key: DASHSCOPE_API_KEY
-    priority: 20
+    priority: 15
+    tier: standard
+    cutoff: "2026-07"
 
-  # ── Fallback 2: Qwen3.6-Max-Preview (next-gen preview) ──────────────────
-  - name: dashscope-qwen3.6-max-preview
+  # Fallback 2: Qwen3-Coder-Plus (best for tool-calling heavy tasks, Jul 2025)
+  - name: dashscope-qwen3-coder-plus
     type: litellm
     public_provider: api
-    model: openai/qwen3.6-max-preview
+    model: openai/qwen3-coder-plus
     base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
     env_key: DASHSCOPE_API_KEY
     priority: 30
+    tier: standard
+    cutoff: "2025-07"
 
-  # ── Fallback 3: Qwen3.6-Plus (well-tested previous gen) ─────────────────
+  # Fallback 3: Qwen3-Coder-Flash (fast tool calling, lightweight)
+  - name: dashscope-qwen3-coder-flash
+    type: litellm
+    public_provider: api
+    model: openai/qwen3-coder-flash
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 35
+    tier: standard
+    cutoff: "2025-09"
+
+  # Fallback 4: Qwen3.6-Plus (well-tested previous gen, good mid-range)
   - name: dashscope-qwen3.6-plus
     type: litellm
     public_provider: api
@@ -40,17 +72,10 @@ providers:
     base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
     env_key: DASHSCOPE_API_KEY
     priority: 40
+    tier: standard
+    cutoff: "2026-03"
 
-  # ── Fallback 4: Qwen3.5-Plus (old but reliable) ─────────────────────────
-  - name: dashscope-qwen3.5-plus
-    type: litellm
-    public_provider: api
-    model: openai/qwen3.5-plus
-    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
-    env_key: DASHSCOPE_API_KEY
-    priority: 50
-
-  # ── Fallback 5: Qwen3.6-Flash (fast, cheap, simple queries) ─────────────
+  # Fallback 5: Qwen3.6-Flash (fast, cheap, simple queries)
   - name: dashscope-qwen3.6-flash
     type: litellm
     public_provider: api
@@ -58,16 +83,161 @@ providers:
     base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
     env_key: DASHSCOPE_API_KEY
     priority: 60
+    tier: standard
+    cutoff: "2026-03"
 
-  # ── Fallback 6: Qwen3.5-Flash (budget last resort) ──────────────────────
+  # Fallback 6: Qwen-Plus-Latest (maintained legacy, widest compatibility)
+  - name: dashscope-qwen-plus-latest
+    type: litellm
+    public_provider: api
+    model: openai/qwen-plus-latest
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 55
+    tier: standard
+    cutoff: "2025-09"
+
+  # Fallback 7: Qwen3.5-Plus (old but reliable fallback)
+  - name: dashscope-qwen3.5-plus
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.5-plus
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 50
+    tier: standard
+    cutoff: "2025-12"
+
+  # ════════════════════════════════════════════════════════════════════════
+  # RESERVED TIER — top models for manual/premium/synthesis use only
+  # ════════════════════════════════════════════════════════════════════════
+
+  # Reserved 1: Qwen3.7-Max (highest quality, expensive, June 2026)
+  - name: dashscope-qwen3.7-max
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.7-max
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 20
+    tier: reserved
+    cutoff: "2026-06"
+
+  # Reserved 2: Qwen3-Next-80B-A3B-Thinking (next-gen MoE reasoning, Jul 2025)
+  - name: dashscope-qwen3-next-thinking
+    type: litellm
+    public_provider: api
+    model: openai/qwen3-next-80b-a3b-thinking
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 22
+    tier: reserved
+    cutoff: "2025-07"
+
+  # Reserved 3: QwQ-Plus (reasoning model, best for complex multi-step analysis)
+  - name: dashscope-qwq-plus
+    type: litellm
+    public_provider: api
+    model: openai/qwq-plus
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 25
+    tier: reserved
+    cutoff: "2025-03"
+
+  # Reserved 4: DeepSeek-V4-Pro (latest DeepSeek reasoning, via DashScope)
+  - name: dashscope-deepseek-v4-pro
+    type: litellm
+    public_provider: api
+    model: openai/deepseek-v4-pro
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 27
+    tier: reserved
+    cutoff: "2026-07"
+
+  # Reserved 5: DeepSeek-R1 (legacy reasoning, kept for compatibility)
+  - name: dashscope-deepseek-r1
+    type: litellm
+    public_provider: api
+    model: openai/deepseek-r1
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 28
+    tier: reserved
+    cutoff: "2026-01"
+
+  # Reserved 6: QwQ-32B (legacy reasoning, kept for compatibility)
+  - name: dashscope-qwq-32b
+    type: litellm
+    public_provider: api
+    model: openai/qwq-32b
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 29
+    tier: reserved
+    cutoff: "2025-05"
+
+  # ════════════════════════════════════════════════════════════════════════
+  # BENCHMARK TIER — for automated benchmark/ablation testing
+  # ════════════════════════════════════════════════════════════════════════
+
+  # Benchmark 1: Qwen3.5-Flash (fast, budget baseline for automated evals)
   - name: dashscope-qwen3.5-flash
     type: litellm
     public_provider: api
     model: openai/qwen3.5-flash
     base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
     env_key: DASHSCOPE_API_KEY
-    priority: 70
+    priority: 30
+    tier: benchmark
+    cutoff: "2025-12"
 
+  # Benchmark 2: DeepSeek-V4-Flash (fast comparison baseline via DashScope)
+  - name: dashscope-deepseek-v4-flash
+    type: litellm
+    public_provider: api
+    model: openai/deepseek-v4-flash
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 35
+    tier: benchmark
+    cutoff: "2026-07"
+
+  # Benchmark 3: Qwen3.6-35B-A3B (MoE quality/efficiency comparison)
+  - name: dashscope-qwen3.6-35b-a3b
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.6-35b-a3b
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 55
+    tier: benchmark
+    cutoff: "2026-04"
+
+  # Benchmark 4: Qwen2.5-72B-Instruct (broad knowledge baseline)
+  - name: dashscope-qwen2.5-72b
+    type: litellm
+    public_provider: api
+    model: openai/qwen2.5-72b-instruct
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 70
+    tier: benchmark
+    cutoff: "2025-09"
+
+  # Benchmark 5: Qwen3.6-Max-Preview (slower high-quality eval fallback)
+  - name: dashscope-qwen3.6-max-preview
+    type: litellm
+    public_provider: api
+    model: openai/qwen3.6-max-preview
+    base_url: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+    env_key: DASHSCOPE_API_KEY
+    priority: 90
+    tier: benchmark
+    cutoff: "2026-04"
+
+  # ── None (fallback when all providers exhausted) ──────────────────────
   - name: none
     type: none
     public_provider: none
@@ -77,7 +247,7 @@ rag:
   enabled: true
   top_k: 6
   min_score: 0.25
-  embedding_model: all-MiniLM-L6-v2
+  embedding_model: BAAI/bge-small-en-v1.5
 
 inference:
   temperature: 0.3

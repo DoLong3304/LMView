@@ -4,7 +4,7 @@ Market Overview Service - Gold-first market metrics with Redis fallback.
 from typing import Dict, List, Any
 from backend.core.database import get_redis
 
-DB = "iceberg.crypto_lakehouse"
+DB = "iceberg_catalog.crypto_lakehouse"
 GOLD_FRESHNESS_MINUTES = 30
 
 

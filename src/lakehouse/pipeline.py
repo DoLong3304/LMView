@@ -29,15 +29,26 @@ from common.config import (
     ICEBERG_TABLE_TICKER,
     ICEBERG_TABLE_TRADES,
     ICEBERG_TABLE_KLINES,
-    MINIO_ENDPOINT,
-    MINIO_ACCESS_KEY,
-    MINIO_SECRET_KEY,
+    S3_ENDPOINT,
+    AWS_ACCESS_KEY_ID,
+    AWS_SECRET_ACCESS_KEY,
+    AWS_REGION,
+    AWS_S3_BUCKET,
+    S3_SSL_ENABLED,
+    S3_PATH_STYLE,
+    S3_PREFIX,
 )
 
-# â”€â”€ Checkpoint locations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-CHECKPOINT_TICKER = "s3://cryptoprice/checkpoints/crypto_ticker_v1"
-CHECKPOINT_TRADES = "s3://cryptoprice/checkpoints/crypto_trades_v1"
-CHECKPOINT_KLINES = "s3://cryptoprice/checkpoints/crypto_klines_v1"
+# ── S3 paths from env ────────────────────────────────────────────
+# ── Build S3 paths from bucket + optional prefix ────────────────────────────
+S3_BASE = f"s3a://{AWS_S3_BUCKET}/{S3_PREFIX}" if S3_PREFIX else f"s3a://{AWS_S3_BUCKET}"
+
+CHECKPOINT_TICKER = f"{S3_BASE}/checkpoints/crypto_ticker_v1"
+CHECKPOINT_TRADES = f"{S3_BASE}/checkpoints/crypto_trades_v1"
+CHECKPOINT_KLINES = f"{S3_BASE}/checkpoints/crypto_klines_v1"
+
+# ── Warehouse (Iceberg data files) ──────────────────────────────────────────
+WAREHOUSE_PATH = f"{S3_BASE}/warehouse"
 
 # â”€â”€ Load Avro schemas from canonical schema files â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 SCHEMA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "schemas")
@@ -56,7 +67,7 @@ KLINES_AVRO_SCHEMA = _load_avro_schema("kline.avsc")
 
 
 def build_spark() -> SparkSession:
-    """Build a SparkSession configured for Iceberg + MinIO."""
+    """Build a SparkSession configured for Iceberg + AWS S3."""
     return (
         SparkSession.builder.appName("BinanceDualStreamToIceberg")
         .config("spark.sql.session.timeZone", "UTC")
@@ -70,22 +81,20 @@ def build_spark() -> SparkSession:
         .config("spark.sql.catalog.iceberg_catalog.jdbc.user",       os.environ.get("POSTGRES_USER", ""))
         .config("spark.sql.catalog.iceberg_catalog.jdbc.password",   os.environ.get("POSTGRES_PASSWORD", ""))
         .config("spark.sql.catalog.iceberg_catalog.warehouse",
-                "s3://cryptoprice/iceberg")
+                WAREHOUSE_PATH)
         .config("spark.sql.catalog.iceberg_catalog.io-impl",
                 "org.apache.iceberg.aws.s3.S3FileIO")
-        .config("spark.sql.catalog.iceberg_catalog.s3.endpoint",         MINIO_ENDPOINT)
-        .config("spark.sql.catalog.iceberg_catalog.s3.access-key-id",     MINIO_ACCESS_KEY)
-        .config("spark.sql.catalog.iceberg_catalog.s3.secret-access-key", MINIO_SECRET_KEY)
-        .config("spark.sql.catalog.iceberg_catalog.client.region",        "us-east-1")
-        .config("spark.hadoop.fs.s3a.endpoint",        MINIO_ENDPOINT)
-        .config("spark.hadoop.fs.s3a.access.key",      MINIO_ACCESS_KEY)
-        .config("spark.hadoop.fs.s3a.secret.key",      MINIO_SECRET_KEY)
+        .config("spark.sql.catalog.iceberg_catalog.s3.endpoint",         S3_ENDPOINT)
+        .config("spark.sql.catalog.iceberg_catalog.s3.access-key-id", os.environ.get("AWS_ACCESS_KEY_ID", ""))
+        .config("spark.sql.catalog.iceberg_catalog.s3.secret-access-key", os.environ.get("AWS_SECRET_ACCESS_KEY", ""))
+        .config("spark.sql.catalog.iceberg_catalog.s3.path-style-access", str(S3_PATH_STYLE).lower())
+        .config("spark.sql.catalog.iceberg_catalog.client.region",        AWS_REGION)
+        .config("spark.hadoop.fs.s3a.endpoint",        S3_ENDPOINT)
+        .config("spark.hadoop.fs.s3a.access.key", os.environ.get("AWS_ACCESS_KEY_ID", ""))
+        .config("spark.hadoop.fs.s3a.secret.key", os.environ.get("AWS_SECRET_ACCESS_KEY", ""))
 
-        .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
-
-        .config("spark.hadoop.fs.s3a.path.style.access", "true")
-        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+        .config("spark.hadoop.fs.s3a.path.style.access", str(S3_PATH_STYLE).lower())
+        .config("spark.hadoop.fs.s3a.connection.ssl.enabled", str(S3_SSL_ENABLED).lower())
         .config("spark.hadoop.fs.s3.impl",
                 "org.apache.hadoop.fs.s3a.S3AFileSystem")
         .config("spark.hadoop.fs.s3a.aws.credentials.provider",
@@ -95,6 +104,7 @@ def build_spark() -> SparkSession:
         .config("spark.streaming.backpressure.enabled", "true")
         .config("spark.task.maxFailures", "4")
         .config("spark.cores.max", "2")
+        .config("spark.local.dir", "/app/tmp/spark")
         .getOrCreate()
     )
 

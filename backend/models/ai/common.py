@@ -48,3 +48,5 @@ class AIHealthResponse(BaseModel):
     available_providers: Optional[List[str]] = None
     pgvector_ready: bool = False
     knowledge_source_count: int = 0
+    # Model tier info for frontend model selector
+    models_by_tier: dict = Field(default_factory=dict, description="Models grouped by tier: {tier: [model_names]}")

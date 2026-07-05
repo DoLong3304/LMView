@@ -26,6 +26,11 @@ COPY docker/fastapi/requirements-ai.txt ./requirements-ai.txt
 RUN pip install --no-cache-dir -r requirements.txt \
     && pip install --no-cache-dir -r requirements-ai.txt
 
+# Pre-cache embedding model to avoid cold-start download
+# BAAI/bge-small-en-v1.5 — lightweight 384-dim model, ~33MB
+RUN python3 -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('BAAI/bge-small-en-v1.5')" \
+    && python3 -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+
 # Copy source — everything the ai-service needs
 COPY ai_service/ ./ai_service/
 COPY backend/ backend/

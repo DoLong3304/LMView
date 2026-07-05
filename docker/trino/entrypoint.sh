@@ -8,15 +8,16 @@ JMX_JAR="/opt/trino-jmx/jmx_prometheus_javaagent.jar"
 JMX_CFG="/etc/trino/jmx/trino-442.yaml"
 
 # Substituting env-var placeholders in Trino catalog properties
-CATALOG="/etc/trino/catalog/iceberg.properties"
-if [ -f "$CATALOG" ]; then
-  sed -i \
-    -e "s|__POSTGRES_USER__|${POSTGRES_USER:?POSTGRES_USER is required}|g" \
-    -e "s|__POSTGRES_PASSWORD__|${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}|g" \
-    -e "s|__MINIO_ROOT_USER__|${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}|g" \
-    -e "s|__MINIO_ROOT_PASSWORD__|${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}|g" \
-    "$CATALOG"
-fi
+for CATALOG in /etc/trino/catalog/*.properties; do
+  if [ -f "$CATALOG" ]; then
+    sed -i \
+      -e "s|__POSTGRES_USER__|${POSTGRES_USER:?POSTGRES_USER is required}|g" \
+      -e "s|__POSTGRES_PASSWORD__|${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}|g" \
+      -e "s|__AWS_ACCESS_KEY_ID__|${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}|g" \
+      -e "s|__AWS_SECRET_ACCESS_KEY__|${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}|g" \
+      "$CATALOG"
+  fi
+done
 
 # Ensure the JMX agent appears exactly once in jvm.config.
 JVM_CONFIG="/etc/trino/jvm.config"

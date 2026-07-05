@@ -38,6 +38,8 @@ class AIChatRequest(BaseModel):
     language: Optional[str] = None
     chart_context: Optional[Dict[str, Any]] = None
     rag_enabled: Optional[bool] = Field(None, description="Override RAG on/off for ablation testing. None = use config default.")
+    model_name: Optional[str] = Field(None, description="Force a specific model (e.g. 'qwen3.7-plus'). None/empty = use provider rotation.")
+    model_tier: Optional[str] = Field(None, description="Model tier: 'standard' | 'reserved' | 'benchmark'. None = use rotation default.")
 
 
 class AISessionCreateRequest(BaseModel):
@@ -79,6 +81,15 @@ class AIChatResponse(BaseModel):
     news_context: Optional[Dict[str, Any]] = None
     # Tour plan for Interact mode guided analysis
     tour_plan: Optional[TourPlan] = None
+    # Phase B — structured sections and knowledge chunks for expandable rendering
+    response_sections: Optional[List[Dict[str, str]]] = Field(
+        None,
+        description="Parsed markdown sections (title + body) for expandable rendering.",
+    )
+    knowledge_chunks: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Full KB chunk data with text, source, score for expandable knowledge cards.",
+    )
 
 
 class AISessionResponse(BaseModel):

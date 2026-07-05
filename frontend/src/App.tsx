@@ -5,6 +5,30 @@ import React, {
     useLayoutEffect,
     useRef,
 } from "react";
+
+// ── Suppress harmless browser warning from lightweight-charts internal ──────
+// touch event handlers.  Modern browsers default touch/wheel to passive: true,
+// so preventDefault() inside them triggers "Unable to preventDefault inside
+// passive event listener invocation".  Force passive: false on these events
+// so the chart library can prevent page scroll while dragging on the chart.
+(function() {
+  const orig = EventTarget.prototype.addEventListener;
+  EventTarget.prototype.addEventListener = function (
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+    options?: boolean | AddEventListenerOptions
+  ) {
+    let opts = options;
+    if (type === "wheel" || type === "touchstart" || type === "touchmove") {
+      opts =
+        typeof opts === "boolean"
+          ? opts
+          : { ...(opts as AddEventListenerOptions), passive: false };
+    }
+    return orig.call(this, type, listener, opts);
+  };
+})();
+
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import Header from "@/components/layout/Header";
 import LeftSidebar from "@/components/layout/LeftSidebar";

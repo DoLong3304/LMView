@@ -46,7 +46,7 @@ def create_table_env():
         CREATE CATALOG iceberg_catalog WITH (
             'type' = 'iceberg',
             'catalog-type' = 'hadoop',
-            'warehouse' = 's3a://cryptoprice/warehouse',
+            'warehouse' = 's3a://lmview-iceberg-storage/warehouse',
             'property-version' = '1'
         )
     """)

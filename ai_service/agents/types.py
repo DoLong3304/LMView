@@ -58,6 +58,7 @@ class IntentClassification:
     activated_experts: List[ExpertName] = field(default_factory=list)
     confidence: float = 0.5
     routing_method: RoutingMethod = RoutingMethod.RULE_BASED
+    routing_reason: str = ""
     requires_chart_context: bool = False
     requires_market_data: bool = False
     reasoning: str = ""
@@ -101,6 +102,42 @@ class ExpertOutput:
             "latency_ms": self.latency_ms,
             "warnings": self.warnings,
             "error": self.error,
+        }
+
+
+@dataclass
+class ContextNeeds:
+    """Identifies what data/context the user query requires.
+
+    Produced by the intent router's LLM pre-pass. Informs expert execution
+    about which data sources to query and which to skip.
+    """
+    symbols: List[str] = field(default_factory=list)
+    timeframes: List[str] = field(default_factory=list)
+    indicators: List[str] = field(default_factory=list)
+    needs_news: bool = False
+    needs_orderbook: bool = False
+    needs_historical_prices: bool = False
+    needs_market_data: bool = False  # explicit flag for candle/price fetch
+    needs_drawings: bool = False
+    needs_rag: bool = True
+    unretrievable: List[str] = field(default_factory=list)  # data types known to be unavailable
+    fallback_description: Optional[str] = None  # e.g. "using 1h data since 15m unavailable"
+    raw_llm_analysis: str = ""  # full LLM reasoning for debug
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "symbols": self.symbols,
+            "timeframes": self.timeframes,
+            "indicators": self.indicators,
+            "needs_news": self.needs_news,
+            "needs_orderbook": self.needs_orderbook,
+            "needs_historical_prices": self.needs_historical_prices,
+            "needs_market_data": self.needs_market_data,
+            "needs_drawings": self.needs_drawings,
+            "needs_rag": self.needs_rag,
+            "unretrievable": self.unretrievable,
+            "fallback_description": self.fallback_description,
         }
 
 

@@ -78,6 +78,7 @@ interface RawKline {
   low: string | number;
   close: string | number;
   volume: string | number;
+  isFinal?: boolean;
 }
 
 function mapRawToCandle(k: RawKline): Candle {
@@ -91,6 +92,31 @@ function mapRawToCandle(k: RawKline): Candle {
   };
 }
 
+export async function fetchLatestCandles(
+  symbol: string,
+  timeframe: string = "1m",
+  limit: number = 5,
+  exchange: string = "binance",
+): Promise<Candle[]> {
+  const interval = normalizeTimeframe(timeframe);
+
+  if (DATA_SOURCE === "api") {
+    const query = buildQuery({
+      symbol,
+      interval,
+      limit,
+      exchange,
+      _ts: Date.now(),
+    });
+    const raw = await apiGet<RawKline[] | { data?: RawKline[] }>(`/klines?${query}`);
+    if (isUnavailableApiPayload(raw)) return [];
+    const rows = Array.isArray(raw) ? raw : raw.data ?? [];
+    return rows.map(mapRawToCandle);
+  }
+
+  return mockDataAdapter.fetchCandles(symbol, interval, limit);
+}
+
 export async function fetchMergedCandles(
   symbol: string,
   timeframe: string = "1m",
@@ -98,9 +124,11 @@ export async function fetchMergedCandles(
 ): Promise<Candle[]> {
   const interval = normalizeTimeframe(timeframe);
   const cacheKey = makeClientCacheKey(["merged", symbol, interval, limit]);
+  // 1s needs faster refresh (500ms) vs other intervals (3s)
+  const ttl = interval === "1s" ? 500 : CANDLE_LATEST_CACHE_MS;
   return withClientCache(
     cacheKey,
-    CANDLE_LATEST_CACHE_MS,
+    ttl,
     async () => {
       const raw = await apiGet<any>(`/merged/${symbol}?interval=${interval}&limit=${limit}`);
       if (!Array.isArray(raw)) return [];
@@ -184,7 +212,14 @@ function createReconnectingWebSocket(
   let lastMessageTs = 0;
 
   function connect() {
-    ws = new WebSocket(url);
+    try {
+      ws = new WebSocket(url);
+    } catch (error) {
+      handlers.onError?.(error instanceof Event ? error : new Event("error"));
+      // Mixed-content / invalid WS URL on HTTPS should not crash whole app.
+      // Fail soft and let polling / REST fallback paths continue.
+      return;
+    }
 
     ws.onopen = () => {
       retries = 0;
@@ -228,12 +263,29 @@ function createReconnectingWebSocket(
     };
   }
 
+  // Reconnect immediately when user switches back to the tab
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === "visible") {
+      const isDead = !ws || ws.readyState !== WebSocket.OPEN || (Date.now() - lastMessageTs > 15_000);
+      if (isDead && !manualClose) {
+        console.log("[WS] Tab focused and socket is dead/stale, reconnecting immediately.");
+        if (ws) {
+          try { ws.close(); } catch (_) {}
+        } else {
+          connect();
+        }
+      }
+    }
+  };
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+
   connect();
 
   return {
     get ws() { return ws; },
     cleanup: () => {
       manualClose = true;
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (watchdogTimer) clearInterval(watchdogTimer);
       ws?.close();

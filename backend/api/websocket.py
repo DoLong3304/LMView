@@ -318,7 +318,22 @@ def _get_stream_candle(
         return rt_candles[interval]
 
     if interval == "1s":
-        return candle_1s
+        # 1s candle from Redis zset (written by binance-kline-ws or DirectRedisWriter)
+        if candle_1s:
+            return candle_1s
+        # Synthetic 1s from ticker when Redis has no fresh 1s candle yet.
+        # This ensures the WS always pushes a 1s candle so frontend onCandle fires.
+        if live_price is not None and live_ts is not None:
+            bucket_start = (live_ts // target_ms) * target_ms
+            return {
+                "openTime": bucket_start,
+                "open": live_price,
+                "high": live_price,
+                "low": live_price,
+                "close": live_price,
+                "volume": 0,
+            }
+        return None
 
     if not candle_1m_data or not live_price or not live_ts:
         return None

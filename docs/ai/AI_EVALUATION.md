@@ -2,70 +2,64 @@
 
 ## Overview
 
-LMView includes an evaluation suite with 50 golden questions for automated quality testing of the AI Ask Mode.
+LMView includes an evaluation suite with **93 golden questions** across **17 categories** for automated quality testing of the AI Ask Mode. Questions are graded via AI self-evaluation on 4 dimensions (relevance, accuracy, completeness, safety) using a secondary benchmark model.
 
 ## Golden Questions
 
 | Category | Count | Description |
 |----------|-------|-------------|
-| Technical Indicator | 10 | RSI, SMA, EMA, MACD, Bollinger, Ichimoku, VWAP, ATR, Stochastic |
-| Live Chart Analysis | 8 | Chart analysis with context, support/resistance, volume |
-| LMView Limitation | 5 | Data caveats, OKX status, order book freshness |
-| RAG Retrieval | 5 | Knowledge base retrieval accuracy |
-| Out-of-Scope Refusal | 8 | Weather, recipes, stocks, hacking, jokes |
-| Prompt Injection Refusal | 5 | System override, jailbreak, SQL injection, DAN |
-| Stale Data Warning | 3 | News, market overview, order book freshness |
-| Bilingual Response | 3 | Vietnamese: RSI, head-shoulders, BTC trend |
-| Risk Disclaimer | 3 | Buy/sell advice, price predictions, safe investments |
+| Technical Indicator | 10 | RSI, MACD, SMA/EMA, Bollinger Bands, etc. |
+| Live Chart Analysis | 8 | Current chart patterns, trends, support/resistance |
+| LMView Limitation | 5 | Data latency, exchange coverage, disclaimer |
+| RAG Retrieval | 5 | Platform knowledge: indicators, drawing tools, settings |
+| Out-of-Scope Refusal | 8 | Weather, recipes, non-trading topics |
+| Prompt Injection Refusal | 5 | Role-play, instruction override, system prompt attacks |
+| Stale Data Warning | 3 | Handling of stale/cached data disclosure |
+| Bilingual Response | 3 | Vietnamese queries, mixed-language responses |
+| Risk Disclaimer | 3 | Financial risk disclosure requirements |
+| Multi-Intent | 8 | Multiple simultaneous requests in one query |
+| Hallucination Boundary | 7 | Historical prices, predictions, specific claims |
+| Consistency | 5 | Same question across history, rephrased questions |
+| Walkthrough | 6 | Interact mode tour quality assessment |
+| Edge Case | 7 | Empty, symbols-only, very long, contradictory queries |
+| Cross-Turn Memory | 5 | Session context carry-over, preference recall |
+| Bilingual Mixed | 3 | Vietnamese with English financial terms |
+| Configuration | 2 | Model info, tier awareness |
 
-## Test Metrics
+## Latest Benchmark Results (2026-06-30)
 
-### Scope Accuracy
-- Out-of-scope prompts must be blocked by the scope gate
-- In-scope prompts must pass through to RAG/model
+- **Model:** qwen3.5-flash (benchmark tier)
+- **Sampled questions:** 11 across 6 categories
+- **Pass rate:** 90.9% (10/11)
+- **Avg latency:** 28.1s per question
+- **Safety/refusal:** 100% (6/6)
+- **TA knowledge:** 66.7% (2/3, one timeout)
+- **RAG retrieval:** 100% (1/1)
+- **Multi-intent:** 100% (1/1)
 
-### Retrieval Relevance
-- RAG queries should return relevant chunks with score > 0.25
-- Knowledge base documents should be cited when relevant
+See [benchmark report](../ai-benchmark-report.md) for full details.
 
-### Answer Contract Compliance
-- Responses must follow the structured format (context, analysis, risk, disclaimer)
-- Confidence level must be included
-- Data caveats must be stated when applicable
+## Running
 
-### Unsupported-Claim Prevention
-- No guaranteed predictions
-- No direct buy/sell recommendations
-- Code execution patterns removed by output guard
+```bash
+# Full benchmark
+python tests/ai/run_benchmark.py --full
 
-### Provider Fallback Behavior
-- Mock mode returns deterministic responses
-- Fallback is logged in provider_metadata
-- Degraded state is communicated to frontend
+# Specific set
+python tests/ai/run_benchmark.py --model qwen3.5-flash --set ta
 
-### Vietnamese Output Validity
-- Vietnamese questions answered in Vietnamese
-- Vietnamese disclaimer included when appropriate
-- Bilingual glossary terms used correctly
-
-## Running Evaluations
-
-```python
-# Import golden questions
-from tests.ai.golden_questions import GOLDEN_QUESTIONS
-
-# Run scope gate evaluation
-for q in GOLDEN_QUESTIONS:
-    result = check_scope(q.question)
-    if q.expected_scope == "out_of_scope":
-        assert not result.in_scope
-    else:
-        assert result.in_scope
+# List all question sets
+python tests/ai/run_benchmark.py --list
 ```
 
-## Location
+## Adding Questions
 
-- Golden questions: `tests/ai/golden_questions.py`
-- Eval models: `backend/models/ai/evals.py`
-- Phase 1 tests: `tests/ai/test_ai_phase1.py`
-- Phase 0 tests: `tests/unit/test_ai_phase0.py`
+1. Add `GoldenQuestion` entry to `tests/ai/golden_questions.py` with `id`, `question`, `category`, `expected_behavior`, `expected_contains`
+2. Add the question id to the appropriate test class in `tests/ai/test_ai_graded.py`
+3. Run `python tests/ai/run_benchmark.py --set <category>` to verify
+
+## Known Issues
+
+- First query after container start takes >60s (LiteLLM warmup + model loading)
+- 60s per-question timeout may be insufficient for complex multi-intent queries (~40s typical)
+- All questions target Ask mode only; Interact mode coverage is limited to Playwright UI tests

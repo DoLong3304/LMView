@@ -27,6 +27,8 @@ class AIProviderConfig:
     env_key: Optional[str] = None
     priority: int = 100
     is_local: bool = False
+    tier: str = "standard"
+    cutoff: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +136,8 @@ def load_settings() -> AISettings:
                 env_key=row.get("env_key"),
                 priority=int(row.get("priority") or 100),
                 is_local=bool(row.get("is_local") or provider_type == "vllm"),
+                tier=str(row.get("tier") or "standard"),
+                cutoff=str(row.get("cutoff") or "") or None,
             )
         )
 
@@ -184,6 +188,22 @@ _API_KEY_INDEX: int = 0
 """Current active key index (module-level state for rotation)."""
 
 
+def get_api_base_urls(env_key: str) -> list:
+    """Resolve per-key base URLs if DASHSCOPE_API_BASE_URLS is set.
+
+    DashScope workspace-scoped API keys each have their own endpoint.
+    DASHSCOPE_API_BASE_URLS may contain comma-separated base URLs
+    that correspond 1:1 with keys in DASHSCOPE_API_KEYS.
+    If not set, returns empty list (caller uses single base_url from config).
+    """
+    if env_key != "DASHSCOPE_API_KEY":
+        return []
+    urls = os.environ.get("DASHSCOPE_API_BASE_URLS", "")
+    if urls:
+        return [u.strip() for u in urls.split(",") if u.strip()]
+    return []
+
+
 def get_api_keys(env_key: str) -> list:
     """Resolve all available API keys for a provider."""
     if env_key == "DASHSCOPE_API_KEY":
@@ -221,8 +241,16 @@ def get_current_api_key(env_key: str) -> str:
     keys = get_api_keys(env_key)
     return keys[_API_KEY_INDEX % len(keys)] if keys else ""
 
-def list_available_api_models(settings: Optional[AISettings] = None) -> List[str]:
-    """Return API models with available keys."""
+def list_available_api_models(
+    settings: Optional[AISettings] = None,
+    tier: Optional[str] = None,
+) -> List[str]:
+    """Return API model names (without 'openai/' prefix) with available keys.
+
+    Args:
+        settings: AI settings (defaults to current).
+        tier: Optional filter — 'standard', 'reserved', 'benchmark', or None for all.
+    """
     cfg = settings or load_settings()
     models = []
     for provider in cfg.providers:
@@ -230,5 +258,33 @@ def list_available_api_models(settings: Optional[AISettings] = None) -> List[str
             continue
         if provider.env_key and not get_api_key(provider.env_key):
             continue
+        if tier and provider.tier != tier:
+            continue
         models.append(provider.model.replace("openai/", ""))
     return models
+
+
+def list_models_by_tier(
+    settings: Optional[AISettings] = None,
+) -> dict:
+    """Return models grouped by tier.
+
+    Returns dict like:
+        {
+            "standard": ["qwen3.7-plus", "qwen3.6-plus", ...],
+            "reserved": ["qwen3.7-max", "qwq-32b", ...],
+            "benchmark": ["qwen3.6-max-preview", ...],
+        }
+    """
+    cfg = settings or load_settings()
+    result: dict = {}
+    for provider in cfg.providers:
+        if provider.name != "api":
+            continue
+        if provider.env_key and not get_api_key(provider.env_key):
+            continue
+        tier = provider.tier or "standard"
+        if tier not in result:
+            result[tier] = []
+        result[tier].append(provider.model.replace("openai/", ""))
+    return result

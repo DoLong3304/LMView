@@ -11,8 +11,8 @@ sources:
     credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-19"
-    lmview_version_scope: "0.25.42+"
+    reviewed_date: "2026-07-01"
+    lmview_version_scope: "0.32.0+"
     source_urls: []
     tags: [lmview, overview, capabilities, features]
     allowed_for_rag: true
@@ -28,8 +28,8 @@ sources:
     credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-19"
-    lmview_version_scope: "0.25.42+"
+    reviewed_date: "2026-07-01"
+    lmview_version_scope: "0.32.0+"
     source_urls: []
     tags: [lmview, architecture, internal, system, services]
     allowed_for_rag: true
@@ -45,8 +45,8 @@ sources:
     credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-19"
-    lmview_version_scope: "0.25.42+"
+    reviewed_date: "2026-07-01"
+    lmview_version_scope: "0.32.0+"
     source_urls: []
     tags: [lmview, function-calling, interact, api, actions]
     allowed_for_rag: true
@@ -114,8 +114,8 @@ sources:
     credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-16"
-    lmview_version_scope: "0.25.x"
+    reviewed_date: "2026-07-01"
+    lmview_version_scope: "0.32.0+"
     source_urls: []
     tags: [lmview, architecture, capabilities, grounding, ai]
     allowed_for_rag: true
@@ -131,10 +131,10 @@ sources:
     credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-16"
-    lmview_version_scope: "0.25.x"
+    reviewed_date: "2026-07-01"
+    lmview_version_scope: "0.32.0+"
     source_urls: []
-    tags: [lmview, caveats, limitations, data, freshness, safety]
+    tags: [lmview, caveats, limitations, data, freshness, safety, rag, session-memory]
     allowed_for_rag: true
     file_path: approved/lmview_data_caveats.md
     internal_only: false
@@ -225,138 +225,197 @@ sources:
     internal_only: false
 
   - source_id: chart-pattern-encyclopedia
-    title: Chart Pattern Encyclopedia
-    description: Complete reference for candlestick and chart patterns including H&S, double top/bottom, triangles, flags, cup and handle.
+    title: Chart Pattern Encyclopedia — Complete Reference
+    description: Comprehensive chart pattern reference covering reversal patterns (H&S, double/triple tops/bottoms, rounding, V-reversals), continuation patterns (flags, wedges, triangles, rectangles, cup and handle, measured move), bilateral patterns (symmetrical triangle, megaphone, diamond), harmonic patterns (ABCD, Gartley, Bat, Crab, Butterfly, Shark, Cypher), candlestick reversals (doji, hammer, engulfing, harami, morning/evening star, three methods), Elliott Wave basics, volume confirmation statistics, and reliability data from Bulkowski.
     domain: technical_analysis
     language: en
     source_type: system_doc
-    credibility_level: reviewed
+    credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-21"
-    lmview_version_scope: "0.26.0+"
-    source_urls: []
-    tags: [patterns, chart, technical-analysis, hns, triangles]
+    reviewed_date: "2026-06-27"
+    lmview_version_scope: "0.27.0+"
+    source_urls:
+      - https://www.bulgowski.com/
+      - https://www.tradingview.com/support/solutions/43000589597/
+    tags: [patterns, chart, technical-analysis, H&S, triangles, flags, wedges, harmonic, candlestick, volume, elliott-wave]
     allowed_for_rag: true
     file_path: approved/Chart_Pattern_Encyclopedia.md
     internal_only: false
 
   - source_id: multi-timeframe-analysis
-    title: Multi-Timeframe Analysis
-    description: Top-down analysis approach, timeframe alignment signals, confluency scoring.
+    title: Multi-Timeframe Analysis — Complete Guide
+    description: Comprehensive MTFA guide covering top-down pyramid, timeframe hierarchy (1:4 ratio principle), alignment signals (7 patterns), confluency scoring (0–3), five common setups (trend continuation, breakout, reversal, pullback entry, failure swing), indicator alignment across timeframes, timeframe divergence, crypto-specific MTFA exceptions, and step-by-step workflow.
     domain: technical_analysis
     language: en
     source_type: system_doc
-    credibility_level: reviewed
+    credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-21"
-    lmview_version_scope: "0.26.0+"
-    source_urls: []
-    tags: [timeframe, multi-tf, analysis]
+    reviewed_date: "2026-06-27"
+    lmview_version_scope: "0.27.0+"
+    source_urls:
+      - https://www.tradingview.com/
+      - https://school.stockcharts.com/
+    tags: [timeframe, multi-tf, analysis, MTFA, trend, alignment, confluence]
     allowed_for_rag: true
     file_path: approved/Multi_Timeframe_Analysis.md
     internal_only: false
 
   - source_id: on-chain-analytics
-    title: On-Chain Analytics
-    description: Exchange flows, whale alerts, NVT ratio, MVRV, SOPR, network metrics.
+    title: On-Chain Analytics — Complete Guide
+    description: Comprehensive on-chain analysis covering exchange flows (inflow/outflow/netflow), whale alerts, NVT ratio and Z-score, MVRV ratio and Z-score, SOPR (aSOPR), network activity metrics (active addresses, new addresses, hash rate, staking ratio), realized cap and HODL waves, miner/staker behavior, stablecoin on-chain metrics, DeFi on-chain (TVL, liquidations), market cycle top/bottom signals, and practical analysis workflow.
     domain: crypto_education
     language: en
     source_type: system_doc
-    credibility_level: reviewed
+    credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-21"
-    lmview_version_scope: "0.26.0+"
-    source_urls: []
-    tags: [on-chain, analytics, metrics, blockchain]
+    reviewed_date: "2026-06-27"
+    lmview_version_scope: "0.27.0+"
+    source_urls:
+      - https://glassnode.com/
+      - https://santiment.net/
+      - https://coinmetrics.io/
+      - https://dune.com/
+    tags: [on-chain, analytics, NVT, MVRV, SOPR, exchange-flows, whale, miner, staking, cycle]
     allowed_for_rag: true
     file_path: approved/On_Chain_Analytics.md
     internal_only: false
 
   - source_id: defi-analysis
-    title: DeFi Analysis
-    description: TVL trends, yield farming risks, impermanent loss, protocol metrics.
+    title: DeFi Analysis — Complete Guide
+    description: Comprehensive DeFi analysis covering TVL trends and dominance, DEX volume and capital efficiency (Volume/TVL, fee generation, concentrated liquidity), lending protocol health (utilization rate, supply/borrow APY, reserve factor, liquidation threshold), yield farming sustainability (real yield, token emission analysis), impermanent loss math and mitigation, stablecoin de-peg tracking, liquidation cascades, governance tokenomics (P/E, voting participation), L2 DeFi growth, protocol security risks, sector rotation patterns, and practical analysis workflow.
     domain: crypto_education
     language: en
     source_type: system_doc
-    credibility_level: reviewed
+    credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-21"
-    lmview_version_scope: "0.26.0+"
-    source_urls: []
-    tags: [defi, tvl, yield, liquidity]
+    reviewed_date: "2026-06-27"
+    lmview_version_scope: "0.27.0+"
+    source_urls:
+      - https://defillama.com/
+      - https://tokenterminal.com/
+      - https://rekt.news/
+      - https://immunefi.com/
+    tags: [defi, TVL, DEX, lending, yield-farming, impermanent-loss, liquidations, governance, L2]
     allowed_for_rag: true
     file_path: approved/DeFi_Analysis.md
     internal_only: false
 
   - source_id: market-regime-detection
-    title: Market Regime Detection
-    description: Trending vs ranging detection, volatility regimes, ADX, chop index, mean reversion vs momentum.
+    title: Market Regime Detection — Complete Guide
+    description: Comprehensive regime detection covering trending vs ranging identification, ATR-based volatility regimes, ADX (+DI/-DI), Chop Index, Fractal Efficiency Ratio, MA slope, Bollinger Band Width squeeze, volume confirmation, regime scorecard, trading strategies by regime, and regime change warning signals.
     domain: technical_analysis
     language: en
     source_type: system_doc
-    credibility_level: reviewed
+    credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-21"
-    lmview_version_scope: "0.26.0+"
-    source_urls: []
-    tags: [regime, volatility, trend, ranging]
+    reviewed_date: "2026-06-27"
+    lmview_version_scope: "0.27.0+"
+    source_urls:
+      - https://www.tradingview.com/support/solutions/43000589338-adx/
+      - https://www.bollingerbands.com/
+    tags: [regime, volatility, trend, ranging, ADX, chop, squeeze, ATR]
     allowed_for_rag: true
     file_path: approved/Market_Regime_Detection.md
     internal_only: false
 
   - source_id: correlation-analysis
-    title: Correlation Analysis
-    description: BTC dominance cycle, alt season indicators, cross-asset correlations, stablecoin flows, macro correlations.
+    title: Correlation Analysis — Complete Guide
+    description: Comprehensive correlation analysis covering BTC dominance cycles, alt season indicators, cross-asset matrix (BTC/SPX/Gold/DXY/M2), stablecoin flows, sector rotation on-chain validation, and trading strategies.
     domain: crypto_education
     language: en
     source_type: system_doc
-    credibility_level: reviewed
+    credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-21"
-    lmview_version_scope: "0.26.0+"
-    source_urls: []
-    tags: [correlation, dominance, macro, altcoin]
+    reviewed_date: "2026-06-27"
+    lmview_version_scope: "0.27.0+"
+    source_urls:
+      - https://coinmarketcap.com/charts/bitcoin-dominance/
+      - https://www.coingecko.com/en/global-charts
+      - https://glassnode.com/
+      - https://dune.com/
+    tags: [correlation, dominance, macro, altcoin, stablecoin, sector-rotation, pair-trading]
     allowed_for_rag: true
     file_path: approved/Correlation_Analysis.md
     internal_only: false
 
   - source_id: order-flow-analysis
-    title: Order Flow Analysis
-    description: CVD, footprint charts, absorption/exhaustion patterns, delta divergence.
+    title: Order Flow Analysis — Complete Guide
+    description: Comprehensive order flow analysis covering CVD, footprint charts, absorption/exhaustion patterns, delta divergence, icebregs, OI/liquidations, volume profile, and practical playbook.
     domain: technical_analysis
     language: en
     source_type: system_doc
-    credibility_level: reviewed
+    credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-21"
-    lmview_version_scope: "0.26.0+"
-    source_urls: []
-    tags: [orderflow, cvd, footprint, delta]
+    reviewed_date: "2026-06-27"
+    lmview_version_scope: "0.27.0+"
+    source_urls:
+      - https://www.jigsawtrading.com/
+      - https://www.sierrachart.com/
+      - https://www.tradingview.com/pine-script-docs/
+      - https://www.binance.com/en/support/faq
+    tags: [orderflow, cvd, footprint, delta, volume-profile, icebreg, OI, liquidation]
     allowed_for_rag: true
     file_path: approved/Order_Flow_Analysis.md
     internal_only: false
 
   - source_id: risk-management-frameworks
-    title: Risk Management Frameworks
-    description: Kelly criterion, fixed fractional, position sizing, portfolio allocation, max drawdown, risk-reward optimization.
+    title: Risk Management Frameworks — Complete Guide
+    description: Comprehensive risk management covering position sizing models (fixed fractional, fixed ratio, Kelly Criterion, Optimal f), risk-reward analysis and required win rates, drawdown management and recovery math, circuit breaker rules, portfolio allocation models (total exposure, within-crypto diversification), stop loss strategies (price-based, time-based, volatility-adjusted), take profit and scaling out methods, correlation-based risk reduction, crypto-specific risks (24/7, exchange, liquidity, funding, black swan), psychological risk management, and practical pre-trade workflow.
     domain: risk_management
     language: en
     source_type: system_doc
-    credibility_level: reviewed
+    credibility_level: verified
     review_status: approved
     reviewer: system
-    reviewed_date: "2026-06-21"
-    lmview_version_scope: "0.26.0+"
-    source_urls: []
-    tags: [risk, management, kelly, position-sizing]
+    reviewed_date: "2026-06-27"
+    lmview_version_scope: "0.27.0+"
+    source_urls:
+      - https://www.investopedia.com/terms/k/kellycriterion.asp
+      - https://www.amazon.com/Trade-Your-Way-Financial-Freedom/dp/007147871X
+    tags: [risk-management, position-sizing, kelly, drawdown, stops, portfolio, crypto-risk, psychology]
     allowed_for_rag: true
     file_path: approved/Risk_Management_Frameworks.md
+    internal_only: false
+
+  - source_id: bilingual-glossary
+    title: Bilingual Crypto Glossary — English/Vietnamese Complete Reference
+    description: Comprehensive bilingual glossary covering 150+ crypto and trading terms with English/Vietnamese pairs, covering A-Z technical analysis terms, DeFi, on-chain, risk management, exchange mechanics, and LMView-specific terminology.
+    domain: crypto_education
+    language: en,vi
+    source_type: glossary
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-06-27"
+    lmview_version_scope: "0.27.0+"
+    source_urls: []
+    tags: [glossary, bilingual, english, vietnamese, terminology, trading, crypto, defi]
+    allowed_for_rag: true
+    file_path: approved/Bilingual_Glossary.md
+    internal_only: false
+
+  - source_id: lmview-ai-usage
+    title: LMView AI Usage — Ask Mode and Interact Mode Complete Guide
+    description: Comprehensive AI assistant usage guide covering Ask Mode (educational analysis, language support, knowledge base grounding, limitations), Interact Mode (40+ chart actions, mandatory approval workflow, tour system), AI model selection (three tiers, auto mode), response caching, financial safety protections, bilingual support details, and practical usage examples.
+    domain: project
+    language: en
+    source_type: system_doc
+    credibility_level: verified
+    review_status: approved
+    reviewer: system
+    reviewed_date: "2026-07-01"
+    lmview_version_scope: "0.32.0+"
+    source_urls: []
+    tags: [lmview, AI, ask-mode, interact-mode, assistant, chat, model-selection, bilingual, tool-blueprints, json-schema]
+    allowed_for_rag: true
+    max_document_version: 0.32.0
+    file_path: approved/LMView_AI_Usage.md
     internal_only: false
 

@@ -51,14 +51,13 @@ from common.config import (
     MAX_BACKFILL_DAYS,
     MAX_WORKERS,
     MIN_GAP_SEC,
-    MINIO_ACCESS_KEY,
-    MINIO_ENDPOINT,
-    MINIO_SECRET_KEY,
     BACKFILL_SPARK_CORES_MAX,
     BACKFILL_SPARK_SHUFFLE_PARTITIONS,
     REQUEST_DELAY,
     MAX_RETRIES,
 )
+
+from common.config import AWS_ACCESS_KEY_ID as AWS_AK, AWS_SECRET_ACCESS_KEY as AWS_SK, AWS_REGION as AWS_R, S3_ENDPOINT
 from exchanges.binance.client import BinanceClient
 
 logging.basicConfig(
@@ -353,16 +352,16 @@ def build_spark():
                 f"jdbc:postgresql://{os.environ.get('POSTGRES_HOST', 'postgres')}:5432/iceberg_catalog")
         .config("spark.sql.catalog.iceberg_catalog.jdbc.user",     os.environ.get("POSTGRES_USER", ""))
         .config("spark.sql.catalog.iceberg_catalog.jdbc.password", os.environ.get("POSTGRES_PASSWORD", ""))
-        .config("spark.sql.catalog.iceberg_catalog.warehouse",     "s3://cryptoprice/iceberg")
+        .config("spark.sql.catalog.iceberg_catalog.warehouse",     "s3a://lmview-iceberg-storage/warehouse")
         .config("spark.sql.catalog.iceberg_catalog.io-impl",
                 "org.apache.iceberg.aws.s3.S3FileIO")
-        .config("spark.sql.catalog.iceberg_catalog.s3.endpoint",          MINIO_ENDPOINT)
-        .config("spark.sql.catalog.iceberg_catalog.s3.access-key-id",     MINIO_ACCESS_KEY)
-        .config("spark.sql.catalog.iceberg_catalog.s3.secret-access-key", MINIO_SECRET_KEY)
-        .config("spark.sql.catalog.iceberg_catalog.client.region",        "us-east-1")
-        .config("spark.hadoop.fs.s3a.endpoint",          MINIO_ENDPOINT)
-        .config("spark.hadoop.fs.s3a.access.key",        MINIO_ACCESS_KEY)
-        .config("spark.hadoop.fs.s3a.secret.key",        MINIO_SECRET_KEY)
+        .config("spark.sql.catalog.iceberg_catalog.s3.endpoint",          S3_ENDPOINT)
+        .config("spark.sql.catalog.iceberg_catalog.s3.access-key-id", os.environ.get("AWS_ACCESS_KEY_ID", ""))
+        .config("spark.sql.catalog.iceberg_catalog.s3.secret-access-key", os.environ.get("AWS_SECRET_ACCESS_KEY", ""))
+        .config("spark.sql.catalog.iceberg_catalog.client.region",        AWS_R)
+        .config("spark.hadoop.fs.s3a.endpoint",          S3_ENDPOINT)
+        .config("spark.hadoop.fs.s3a.access.key", os.environ.get("AWS_ACCESS_KEY_ID", ""))
+        .config("spark.hadoop.fs.s3a.secret.key", os.environ.get("AWS_SECRET_ACCESS_KEY", ""))
         .config("spark.hadoop.fs.s3a.impl",
                 "org.apache.hadoop.fs.s3a.S3AFileSystem")
         .config("spark.hadoop.fs.s3.impl",

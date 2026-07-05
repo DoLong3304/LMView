@@ -1,6 +1,6 @@
 # Architecture Overview
 
-LMView is a real-time cryptocurrency technical-analysis platform using **Lambda Architecture** across 3 layers, deployed on 2-node Docker Swarm.
+LMView is a real-time cryptocurrency technical-analysis platform using **Lambda Architecture** across 3 layers, deployed on 3-node Docker Swarm.
 
 ## Lambda Architecture
 
@@ -8,13 +8,17 @@ LMView is a real-time cryptocurrency technical-analysis platform using **Lambda 
 Exchange WebSockets (Binance, OKX opt-in)
   │
   ▼
-┌──────────────────────────────────────────────────────┐
-│ INGESTION (src/producer/main.py)                      │
-│ WebSocket → Avro serialization → Kafka topics         │
-│ Topics: crypto_ticker, crypto_klines, crypto_trades,  │
-│         crypto_depth                                  │
-│ Direct Redis bypass (health-monitored, auto-failover)  │
-└────────┬─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│ INGESTION (src/producer/main.py)                         │
+│ WebSocket → Avro serialization → Kafka topics            │
+│ Topics: crypto_ticker, crypto_klines, crypto_trades,     │
+│         crypto_depth                                     │
+│ 1s klines → DirectRedisWriter (always, bypass Kafka)     │
+│ Other data → DirectRedisWriter (health-monitored failover)│
+│ 1s klines → DirectRedisWriter (always, bypass Kafka)       │
+│ 1s klines → binance-kline-ws 8-shard WS → Redis (primary)  │
+│ REST poller (binance-kline-rest) → Redis (1m only)         │
+└────────┬────────────────────────────────────────────────┘
          │
     ┌────▼────┐
     │  KAFKA  │  3 brokers, 12 partitions/topic, LZ4 compression
@@ -76,12 +80,23 @@ FastAPI ←───────────────────────
 WS push (50ms) → Browser renders candle update
 ```
 
-### Mode 2: Kafka/Flink Failure (Bypass)
+### Mode 2: 1s Klines Direct-to-Redis (Always-On)
 ```
 Binance WS → Producer → DirectRedisWriter → Redis
                                               │
 FastAPI ←──────────────────────────────────────┘
 ```
+Applies to: **1s klines only**. 1s data ALWAYS goes directly to Redis
+(bypassing Kafka/Flink latency). All other data uses Mode 1 or Mode 3.
+No activation gate — 1s path is always live.
+
+## Mode 3: Kafka/Flink Failure (Bypass)
+```
+Binance WS → Producer → DirectRedisWriter → Redis
+                                              │
+FastAPI ←──────────────────────────────────────┘
+```
+Applies to: tickers, trades, depth, 1m+ klines.
 Activation: Kafka + Flink both unreachable for >60s (health_monitor)
 Deactivation: Either Kafka or Flink recovers
 
@@ -110,21 +125,31 @@ Kafka → Spark Streaming → Iceberg Bronze
 | Cold lakehouse | Iceberg/MinIO + Trino | SQL | 50-500ms | Indefinite | ~5.6GB |
 | Relational | PostgreSQL 16 + pgvector | SQL | 1-10ms | Indefinite | ~500MB |
 
-## Service Placement Strategy (2-Node Swarm)
+## Service Placement Strategy (3-Node Swarm)
 
 ### Core Node (8 vCPU, 32 GB) — label `role=core`
-- **Stateful services**: postgres, redis-{master,replica,sentinel}×3, influxdb, minio
-- **Messaging**: zookeeper, kafka-1/2/3, schema-registry
-- **Serving**: fastapi-prod, nginx-prod, producer
-- **Utilities**: registry, certbot-auto, duckdns-auto, minio-init
-- **Total**: ~20 services, ~25GB memory budget
+- **Serving**: nginx-prod, fastapi-prod, producer (0/1, all WS disabled)
+- **Data feeds**: binance-ticker-ws, binance-kline-rest, binance-depth-trades-rest, combined-stream-producer
+- **AI**: ai-service, litellm, finbert-worker
+- **Utilities**: registry, certbot-auto, duckdns-auto
+- **Total**: ~14 services, ~12GB memory budget
 
-### Worker Node (4 vCPU, 16 GB) — label `role=worker`
-- **Compute**: flink-jobmanager, flink-taskmanager×2, spark-master, spark-worker×2
+### Data Node (8 vCPU, 32 GB) — label `role=data`
+- **Storage**: postgres, redis-master/replicas/sentinels ×6, influxdb, minio
+- **Messaging**: zookeeper, kafka-1/2/3, schema-registry
+- **Total**: ~15 services, ~10GB memory budget
+
+### Compute Node (8 vCPU, 32 GB) — label `role=compute`
+- **Streaming**: flink-jobmanager, flink-taskmanager ×2
+- **Batch**: spark-master, spark-worker, spark-worker-2, spark-submit
 - **Query**: trino
-- **Monitoring**: grafana, prometheus (opt-in), loki (opt-in)
-- **Orchestration**: dagster (opt-in)
-- **Total**: ~10 services, ~13GB memory budget
+- **Orchestration**: dagster-webserver, dagster-daemon, job-watchdog
+- **Monitoring**: grafana, prometheus, loki, promtail, kafka-exporter, node-exporter, redis-exporter
+- **Total**: ~18 services, ~16GB memory budget
+
+**Note**: All 3 nodes are identical hardware (8 vCPU, 32GB RAM, 145GB SSD).
+The data node is significantly underutilized (~3GB of 32GB RAM). The compute
+node carries the heaviest load (Flink + Spark + Trino + monitoring).
 
 ## Key Design Decisions & Rationale
 
@@ -150,10 +175,31 @@ Kafka → Spark Streaming → Iceberg Bronze
 
 ## Data Flow Critical Paths
 
-### End-to-End Candle Update (<1s target)
+### End-to-End 1s Candle Update (8-Shard WebSocket Path)
 ```
 Timestamp T0: Binance emits 1s candle
-T0+50ms: Producer receives via WebSocket
+T0+50ms:  binance-kline-ws shard receives via WebSocket
+T0+55ms:  parse_kline() → Redis writer buffer
+T0+80ms:  Redis pipeline flush (ZADD + EXPIRE)
+T0+120ms: FastAPI WebSocket poll reads Redis
+T0+170ms: Browser receives WS push, renders candle
+```
+**Total**: ~170ms for a 1s candle. Bypasses Kafka/Flink entirely.
+Uses 8 parallel WebSocket shards (~25 symbols/shard), writing
+directly to ``candle:1s:binance:{symbol}`` sorted set.
+
+Frontend acts as the final consumer:
+- **Chart candle (lightweight-charts)**: Updated imperatively via `updateAllPriceSeries()` — no React state involvement, immediate render on WS tick
+- **Right panel overview price**: Reads `_livePriceMap[symbol]` (synchronously mutated on each WS ticker message via `updateLivePrice()`), re-renders every 2s via internal interval
+- **Left toolbar price**: Same `_livePriceMap` source as right panel, re-rendered every 500ms via `setLiveTick` interval. Fixed v0.28.3 (was using deferred `candles` state — lagged).
+
+Fallback path (producer DirectRedisWriter): same latency profile.
+REST poller (binance-kline-rest) serves 1m data only.
+
+### End-to-End 1m+ Candle Update (Flink Path)
+```
+Timestamp T0: Binance emits candle
+T0+50ms:  Producer receives via WebSocket
 T0+100ms: Producer Avro-serializes → Kafka producer send()
 T0+150ms: Kafka broker acks (min ISR=2)
 T0+300ms: Flink TaskManager pulls from Kafka
@@ -162,7 +208,7 @@ T0+700ms: Flink BATCH flush → Redis + InfluxDB
 T0+750ms: FastAPI WebSocket poll reads Redis
 T0+800ms: Browser receives WS push, renders candle
 ```
-**Total**: ~800ms for a 1s candle. Bottleneck: Flink BATCH flush (300ms of 800ms).
+**Total**: ~800ms for a 1m+ candle. Bottleneck: Flink BATCH flush (300ms of 800ms).
 
 ### Ticker Page Load
 ```

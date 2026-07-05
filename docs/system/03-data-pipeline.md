@@ -13,9 +13,18 @@ PRODUCER (src/producer/main.py)
   ├──→ KAFKA (crypto_ticker, crypto_klines, crypto_trades, crypto_depth)
   │     3 brokers, 12 partitions, RF=3, LZ4, retention 48h
   │
-  ├──→ DirectRedisWriter (bypass when Kafka/Flink down)
-  │     Dynamic health gate via health_monitor
-  │     Pool: 50 connections, configurable
+  ├──→ DirectRedisWriter (1s klines: ALWAYS on; other data: bypass when
+  │     Kafka/Flink down) Dynamic health gate via health_monitor for
+  │     non-1s data. Pool: 50 connections, configurable.
+  │
+  ├──→ binance-kline-ws (8-shard WebSocket, independent service)
+  │     8 parallel WS connections, each subscribing to @kline_1s streams
+  │     Writes directly to Redis sorted set candle:1s:binance:{symbol}
+  │     Latency: ~170ms end-to-end. Primary low-latency path for 1s.
+  │
+  ├──→ binance-kline-rest (REST poller, independent service)
+  │     Polls Binance REST API for 1m klines only (1s disabled by default)
+  │     Writes directly to Redis (same key shape as DirectRedisWriter)
   │
   ▼
 FLINK (src/processing/pipeline.py)

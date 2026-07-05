@@ -31,33 +31,42 @@ All operational scripts in `scripts/`, their purposes, flaws, and improvement pa
 
 **Purpose**: Complete Swarm deployment lifecycle on 2-node AWS EC2 cluster.
 
-**Flow**:
+**Flow** (v0.28.1+):
 ```
 Preflight checks (swarm active, node labels, .env exists)
+  → Pre-build cleanup: prune dead containers + dangling images (24h) + build cache
   → Ensure registry service running
   → Build images (docker compose --profile prod build)
-  → Push to local registry (tag + push 10 custom images)
+  → Push to local registry (tag + push custom images)
   → Render stacked compose (docker compose config)
-    → Strip Swarm-incompatible keys (name, profiles, container_name, depends_on)
+    → Strip Swarm-incompatible keys (name, profiles, container_name, depends_on, profiles)
     → Fix port string formats
     → Rewrite image tags to registry address
   → docker stack deploy (--resolve-image never)
   → Post-deploy status output
+  → Post-deploy cleanup: prune exited containers + dangling images (48h)
 ```
 
-**Strengths**:
+**Strengths** (v0.28.1):
 - Comprehensive preflight checks (swarm, nodes, .env, compose files)
 - Idempotent registry creation with timeout
-- Clean compose rendering with Python inline script
+- Clean compose rendering with Python inline script (YAML-aware, not sed)
 - Graceful skip-build and registry-only modes
+- Pre-build cleanup (prune dead containers + dangling images + build cache)
+- Post-deploy cleanup (prune exited containers + old dangling images)
+- Stack state snapshot + rollback on deploy failure
 
 **Drawbacks & Bugs**:
-1. **CUSTOM_IMAGES array is stale** — includes `cryptoprice/kafka:3.9.0` but docker-compose.yml uses `apache/kafka:3.9.0` directly (no build). `kafka` image must be built manually first or the push silently skips it.
-2. **sed port normalization fragile** — Uses regex to strip quotes from published/target ports. If docker compose config outputs them unquoted, sed does nothing; if quoted differently, it may miss.
-3. **No rollback on failure** — If `docker stack deploy` fails, there's no `docker stack rm` + restore previous state.
-4. **EFS path hardcoded** — Assumes `/mnt/efs/LMView` on both nodes. No validation that path exists.
-5. **No image tag versioning** — `fastapi:latest` tag is pushed, not versioned. Rollback requires re-push of old code.
-6. **Health check gap** — Only waits 10s after deploy. Should poll `/api/health` until all services are ready.
+1. **CUSTOM_IMAGES resolution is correct** — dynamic from compose config.
+2. **Port normalization is safe** — Python YAML handles it, not fragile sed.
+3. **Rollback exists** — snapshots pre-deploy state, auto-restores on failure.
+4. **EFS path assumption** — Assumes `/mnt/efs/LMView` on all nodes. No validation.
+5. **No image tag versioning** — `fastapi:latest` tag is pushed, not versioned.
+   Rollback requires re-push of old code.
+6. **Health check gap** — Only waits 10s after deploy. Should poll `/api/health`.
+7. **Cleanup removes registry-tagged images** — `docker image prune -af` with
+   `--filter until=24h` is safe, but bare `-af` removes all unused images
+   including registry-tagged ones that Swarm needs with `--resolve-image never`.
 
 **Cooperation**:
 - Called from Makefile (`swarm-deploy`, `swarm-deploy-quick`, `swarm-push`)

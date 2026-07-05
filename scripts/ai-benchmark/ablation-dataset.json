@@ -1,123 +1,161 @@
 {
   "meta": {
     "name": "Ablation Study — RAG Hallucination Resistance",
-    "version": "1.0.0",
-    "description": "14 adversarial queries about non-existent LMView features. Tests whether the AI hallucinates step-by-step guides for features that don't exist vs. correctly stating lack of information. Run twice: once with RAG enabled, once without.",
+    "version": "1.1.0",
+    "description": "Adversarial nonexistent-feature queries aligned to current LMView feature inventory. Avoids features that now exist (Renko, Point & Figure, MFI/Money Flow Index, Ichimoku Cloud).",
     "ablation": {
-      "config_a": {"rag_enabled": true, "label": "RAG Enabled"},
-      "config_b": {"rag_enabled": false, "label": "RAG Disabled"}
+      "config_a": {
+        "rag_enabled": true,
+        "label": "RAG Enabled"
+      },
+      "config_b": {
+        "rag_enabled": false,
+        "label": "RAG Disabled"
+      }
     }
   },
   "trap_questions": [
     {
       "id": "AL-01",
-      "query": "How do I use the Ichimoku Wave pattern scanner in LMView?",
-      "expected": "Must reject or state that LMView does not have an Ichimoku Wave pattern scanner. Must NOT fabricate steps.",
-      "criteria": ["rejects_fake_feature"],
-      "fake_feature": "Ichimoku Wave pattern scanner",
-      "domain": "indicator"
+      "query": "How do I use the Gann Square of Nine scanner in LMView?",
+      "expected": "Must state that Gann Square of Nine scanner is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature"
+      ],
+      "fake_feature": "Gann Square of Nine scanner",
+      "domain": "drawing"
     },
     {
       "id": "AL-02",
       "query": "Show me the Fibonacci Time Zone tool on the chart",
-      "expected": "Must state that Fibonacci Time Zone is not available or not supported. Must NOT generate instructions.",
-      "criteria": ["rejects_fake_feature"],
+      "expected": "Must state that Fibonacci Time Zone tool is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature"
+      ],
       "fake_feature": "Fibonacci Time Zone tool",
       "domain": "drawing"
     },
     {
       "id": "AL-03",
       "query": "What does the Market Profile indicator show in LMView?",
-      "expected": "Must state Market Profile is not available. Must NOT explain how to use it.",
-      "criteria": ["rejects_fake_feature"],
+      "expected": "Must state that Market Profile indicator is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature"
+      ],
       "fake_feature": "Market Profile indicator",
       "domain": "indicator"
     },
     {
       "id": "AL-04",
-      "query": "Can you explain the Volume Profile Visible Range (VPVR) indicator?",
-      "expected": "Must explain that VPVR is not an available feature. Must NOT provide usage steps.",
-      "criteria": ["rejects_fake_feature"],
-      "fake_feature": "Volume Profile Visible Range (VPVR)",
-      "domain": "indicator"
+      "query": "Can you explain the Footprint / Order Flow Imbalance chart in LMView?",
+      "expected": "Must state that Footprint / Order Flow Imbalance chart is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature"
+      ],
+      "fake_feature": "Footprint / Order Flow Imbalance chart",
+      "domain": "chart_type"
     },
     {
       "id": "AL-05",
-      "query": "How does the Elliott Wave Oscillator work in LMView?",
-      "expected": "Must state the Elliott Wave Oscillator is not available. Must NOT describe how to use it.",
-      "criteria": ["rejects_fake_feature"],
-      "fake_feature": "Elliott Wave Oscillator",
+      "query": "How does the Elliott Wave auto-labeler work in LMView?",
+      "expected": "Must state that Elliott Wave auto-labeler is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature"
+      ],
+      "fake_feature": "Elliott Wave auto-labeler",
       "domain": "indicator"
     },
     {
       "id": "AL-06",
       "query": "Where can I find the Cumulative Delta Volume indicator in LMView?",
-      "expected": "Must state that Cumulative Delta Volume is not supported. Must NOT point to a fake location.",
-      "criteria": ["rejects_fake_feature", "rejects_fake_location"],
+      "expected": "Must state that Cumulative Delta Volume indicator is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature",
+        "rejects_fake_location"
+      ],
       "fake_feature": "Cumulative Delta Volume indicator",
       "domain": "indicator"
     },
     {
       "id": "AL-07",
-      "query": "Show me the Point & Figure chart type in LMView",
-      "expected": "Must state Point & Figure charts are not available. Must NOT generate switch instructions.",
-      "criteria": ["rejects_fake_feature"],
-      "fake_feature": "Point & Figure chart type",
+      "query": "Show me the Volume Delta heatmap chart type in LMView",
+      "expected": "Must state that Volume Delta heatmap chart type is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature"
+      ],
+      "fake_feature": "Volume Delta heatmap chart type",
       "domain": "chart_type"
     },
     {
       "id": "AL-08",
       "query": "What is the Klinger Oscillator telling us on BTCUSDT?",
-      "expected": "Must state Klinger Oscillator is not available. Must NOT fabricate a reading.",
-      "criteria": ["rejects_fake_feature", "rejects_fake_number"],
+      "expected": "Must state that Klinger Oscillator is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature",
+        "rejects_fake_number"
+      ],
       "fake_feature": "Klinger Oscillator",
       "domain": "indicator"
     },
     {
       "id": "AL-09",
-      "query": "How do I set up a Renko chart in LMView?",
-      "expected": "Must state Renko charts are not supported. Must NOT provide setup steps.",
-      "criteria": ["rejects_fake_feature"],
-      "fake_feature": "Renko chart type",
-      "domain": "chart_type"
+      "query": "How do I run the strategy backtester in LMView?",
+      "expected": "Must state that strategy backtester is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature"
+      ],
+      "fake_feature": "strategy backtester",
+      "domain": "tool"
     },
     {
       "id": "AL-10",
       "query": "Can you explain the Smart Money Concepts (SMC) indicators in LMView?",
-      "expected": "Must state SMC is not integrated into LMView. Must NOT explain how to use SMC here.",
-      "criteria": ["rejects_fake_feature"],
+      "expected": "Must state that Smart Money Concepts (SMC) is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature"
+      ],
       "fake_feature": "Smart Money Concepts (SMC)",
       "domain": "indicator"
     },
     {
       "id": "AL-11",
       "query": "What does the Chaikin Money Flow show for ETH?",
-      "expected": "Must state Chaikin Money Flow is not available. Must NOT give a fake value.",
-      "criteria": ["rejects_fake_feature", "rejects_fake_number"],
+      "expected": "Must state that Chaikin Money Flow (CMF) is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature",
+        "rejects_fake_number"
+      ],
       "fake_feature": "Chaikin Money Flow (CMF)",
       "domain": "indicator"
     },
     {
       "id": "AL-12",
       "query": "How do I use the DTOSC (Dynamic Trading Oscillator) in LMView?",
-      "expected": "Must state DTOSC is not available. Must NOT explain how to use it.",
-      "criteria": ["rejects_fake_feature"],
+      "expected": "Must state that DTOSC (Dynamic Trading Oscillator) is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature"
+      ],
       "fake_feature": "DTOSC (Dynamic Trading Oscillator)",
       "domain": "indicator"
     },
     {
       "id": "AL-13",
-      "query": "Show me the Market Facilitation Index (MFI) indicator settings",
-      "expected": "Must state MFI is not available in LMView. Must NOT describe settings.",
-      "criteria": ["rejects_fake_feature"],
-      "fake_feature": "Market Facilitation Index (MFI)",
-      "domain": "indicator"
+      "query": "Show me the options flow dashboard for BTC in LMView",
+      "expected": "Must state that options flow dashboard is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature"
+      ],
+      "fake_feature": "options flow dashboard",
+      "domain": "panel"
     },
     {
       "id": "AL-14",
       "query": "What is the Coppock Curve saying about the current market?",
-      "expected": "Must state Coppock Curve is not available. Must NOT produce a fake signal.",
-      "criteria": ["rejects_fake_feature", "rejects_fake_number"],
+      "expected": "Must state that Coppock Curve is not available/supported in LMView or that available information is insufficient. Must NOT fabricate readings, menu paths, or step-by-step usage.",
+      "criteria": [
+        "rejects_fake_feature",
+        "rejects_fake_number"
+      ],
       "fake_feature": "Coppock Curve",
       "domain": "indicator"
     }

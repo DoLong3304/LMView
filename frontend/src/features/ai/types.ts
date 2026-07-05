@@ -6,6 +6,8 @@ export interface AiMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
+  /** Mode that was active when this message was created */
+  mode?: "ask" | "interact";
   is_mock?: boolean;
   provider?: string | null;
   model_name?: string | null;
@@ -46,10 +48,23 @@ export interface AiMessage {
   estimated_cost_usd?: number | null;
   /** News context summary */
   news_context?: import("@/services/aiService").NewsContextSummary | null;
+  /** Phase B: structured response sections for expandable rendering */
+  response_sections?: Array<{ title: string; content: string }> | null;
+  /** Phase B: full KB chunk data for expandable knowledge cards */
+  knowledge_chunks?: Array<{
+    text: string;
+    title: string;
+    source: string;
+    source_type?: string;
+    credibility_level?: string;
+    score: number;
+    heading?: string;
+  }> | null;
 }
 
 /**
  * Tour step action for Interact mode guided analysis.
+ * Legacy single-action format.
  */
 export interface TourStepAction {
   action_type: string;
@@ -60,14 +75,71 @@ export interface TourStepAction {
 }
 
 /**
+ * Phase E: Multi-action guided action within a walkthrough step.
+ */
+export interface GuidedAction {
+  type: string;
+  params: Record<string, unknown>;
+  requires_approval?: boolean;
+}
+
+/**
+ * Phase E: Walkthrough step with multiple simultaneous actions.
+ */
+export interface WalkthroughStep {
+  explanation: string;
+  actions: GuidedAction[];
+  keep_effects?: boolean;
+  chart_freeze?: boolean;
+}
+
+/**
  * Tour plan for Interact mode guided analysis.
  */
 export interface TourPlan {
   tour_id: string;
   title: string;
-  steps: TourStepAction[];
+  steps: TourStepAction[] | WalkthroughStep[];
   summary: string;
   chart_snapshot?: Record<string, unknown> | null;
+}
+
+/**
+ * Normalize tour plan steps to WalkthroughStep[] format.
+ * Handles both legacy (TourStepAction) and new (WalkthroughStep) formats.
+ */
+export function normalizeTourSteps(steps: TourStepAction[] | WalkthroughStep[]): WalkthroughStep[] {
+  if (!steps || steps.length === 0) return [];
+  // Check if first step uses new format (has `actions` array with `type`)
+  const first = steps[0] as unknown as Record<string, unknown>;
+  if (first.actions && Array.isArray(first.actions)) {
+    // Already new format
+    return steps as WalkthroughStep[];
+  }
+  // Legacy format — convert
+  return (steps as TourStepAction[]).map((s: TourStepAction) => ({
+    explanation: s.explanation,
+    keep_effects: true,
+    chart_freeze: true,
+    actions: [{
+      type: s.action_type,
+      params: s.params || {},
+      requires_approval: s.requires_approval ?? false,
+    }],
+  }));
+}
+
+/**
+ * Normalize a tour_plan from API response to consistent format.
+ */
+export function normalizeTourPlan(plan: Record<string, unknown> | null | undefined): TourPlan | null {
+  if (!plan) return null;
+  const steps = plan.steps as TourStepAction[] | WalkthroughStep[] | undefined;
+  if (!steps) return plan as unknown as TourPlan;
+  return {
+    ...plan,
+    steps: normalizeTourSteps(steps),
+  } as TourPlan;
 }
 
 /** Active tour execution state */
@@ -119,6 +191,8 @@ export interface ChartContextForAi {
     signal?: string | null;
     params: Record<string, unknown>;
   }>;
+  /** User's IANA timezone for temporal reasoning (e.g., "Asia/Ho_Chi_Minh") */
+  user_timezone?: string;
   frontend_context_version: string;
 }
 

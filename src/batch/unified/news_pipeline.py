@@ -33,17 +33,17 @@ def create_spark_session():
         .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
         .config("spark.sql.catalog.iceberg_catalog", "org.apache.iceberg.spark.SparkCatalog") \
         .config("spark.sql.catalog.iceberg_catalog.type", "hadoop") \
-        .config("spark.sql.catalog.iceberg_catalog.warehouse", "s3a://cryptoprice/warehouse") \
+        .config("spark.sql.catalog.iceberg_catalog.warehouse", "s3a://lmview-iceberg-storage/warehouse") \
         .config("spark.sql.catalog.iceberg_catalog.io-impl", "org.apache.iceberg.aws.s3.S3FileIO") \
-        .config("spark.hadoop.fs.s3a.endpoint", os.getenv("MINIO_ENDPOINT", "http://minio:9000")) \
-        .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ACCESS_KEY", "")) \
-        .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_SECRET_KEY", "")) \
+        .config("spark.hadoop.fs.s3a.endpoint", "https://s3.ap-southeast-1.amazonaws.com") \
+        .config("spark.hadoop.fs.s3a.access.key", os.environ.get("AWS_ACCESS_KEY_ID", "")) \
+        .config("spark.hadoop.fs.s3a.secret.key", os.environ.get("AWS_SECRET_ACCESS_KEY", "")) \
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
         .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \
-        .config("spark.sql.catalog.iceberg_catalog.client.region", "us-east-1") \
-        .config("spark.sql.catalog.iceberg_catalog.s3.endpoint", os.getenv("MINIO_ENDPOINT", "http://minio:9000")) \
-        .config("spark.sql.catalog.iceberg_catalog.s3.access-key-id", os.getenv("MINIO_ACCESS_KEY", "")) \
-        .config("spark.sql.catalog.iceberg_catalog.s3.secret-access-key", os.getenv("MINIO_SECRET_KEY", "")) \
+        .config("spark.sql.catalog.iceberg_catalog.client.region", "ap-southeast-1") \
+        .config("spark.sql.catalog.iceberg_catalog.s3.endpoint", "https://s3.ap-southeast-1.amazonaws.com") \
+        .config("spark.sql.catalog.iceberg_catalog.s3.access-key-id", os.environ.get("AWS_ACCESS_KEY_ID", "")) \
+        .config("spark.sql.catalog.iceberg_catalog.s3.secret-access-key", os.environ.get("AWS_SECRET_ACCESS_KEY", "")) \
         .getOrCreate()
 
 

@@ -48,8 +48,8 @@ SYMBOL_BLACKLIST_PREFIXES = tuple(
 # forming 1m candle refreshes every 30s and the just-closed candle lands
 # within 30s of close. Binance 1m candles close on :00 of each minute.
 POLL_INTERVAL_1M_S = int(os.environ.get("KLINE_REST_POLL_1M_S", "30"))
-# 1s candles are heavier (1 call/s per symbol). Default disabled; enable
-# for a small curated set via KLINE_REST_1M_SYMBOLS.
+# 1s candles are heavier (1 call/s per symbol). Disabled by default;
+# use binance-kline-ws (8-shard WebSocket) instead for low-latency 1s.
 ENABLE_1S = os.environ.get("KLINE_REST_ENABLE_1S", "false").lower() in (
     "1", "true", "yes", "on",
 )

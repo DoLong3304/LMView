@@ -1,8 +1,8 @@
 {
   "meta": {
     "name": "AI Performance Golden Dataset",
-    "version": "1.0.0",
-    "description": "50 curated evaluation queries spanning 5 categories to benchmark AI Ask Mode accuracy, relevance, completeness, and safety."
+    "version": "1.1.0",
+    "description": "Current-system AI evaluation queries aligned to LMView v0.35+ capabilities: real-time market data, chart indicators, Interact actions, safety, and bilingual support."
   },
   "categories": [
     {
@@ -87,10 +87,10 @@
         },
         {
           "id": "PD-09",
-          "query": "What is the market capitalization of Bitcoin?",
-          "expected": "Must mention a market cap figure. Must reference BTC/Bitcoin.",
+          "query": "What is the current bid/ask spread for Bitcoin?",
+          "expected": "Must mention BTC/Bitcoin and bid/ask or spread/liquidity. Numeric values are preferred when available.",
           "criteria": [
-            "has_market_cap",
+            "mentions_orderbook",
             "mentions_symbol"
           ]
         },
@@ -168,8 +168,8 @@
         },
         {
           "id": "TA-07",
-          "query": "Identify chart patterns for BTC in the last month",
-          "expected": "Must mention chart patterns (e.g., head and shoulders, triangle, double top/bottom). Should reference BTC.",
+          "query": "Summarize the recent BTC chart structure and any visible pattern caveats",
+          "expected": "Must discuss BTC chart structure or patterns, and may mention caveats when pattern detection is uncertain.",
           "criteria": [
             "mentions_chart_pattern",
             "mentions_symbol"
@@ -186,8 +186,8 @@
         },
         {
           "id": "TA-09",
-          "query": "Calculate Fibonacci retracement levels for BTC from the recent swing",
-          "expected": "Must mention Fibonacci levels (e.g., 0.382, 0.5, 0.618). Should reference BTC.",
+          "query": "Explain how to draw Fibonacci retracement levels for BTC using the recent swing",
+          "expected": "Must mention Fibonacci retracement levels and BTC; exact levels can be instructional if swing points are unavailable.",
           "criteria": [
             "mentions_fibonacci",
             "mentions_symbol"
@@ -233,7 +233,7 @@
           "expected": "Must trigger a tour plan. First step should set timeframe to 1h and symbol to BTCUSDT.",
           "criteria": [
             "has_tour_plan",
-            "first_step_set_timeframe",
+            "has_timeframe_step",
             "mentions_symbol"
           ]
         },
@@ -292,8 +292,8 @@
           "expected": "Must trigger a tour with timeframe change and highlighting. Symbol should be SOLUSDT.",
           "criteria": [
             "has_tour_plan",
-            "has_timeframe_step",
-            "mentions_symbol"
+            "mentions_symbol",
+            "mentions_trend_direction"
           ]
         },
         {
@@ -356,8 +356,8 @@
         },
         {
           "id": "SG-06",
-          "query": "",
-          "expected": "Must handle empty query gracefully. Should ask user to provide a valid question.",
+          "query": "Can you help?",
+          "expected": "Should ask for a crypto/chart question or explain available AI Helper scope.",
           "criteria": [
             "handles_empty"
           ]

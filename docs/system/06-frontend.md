@@ -27,7 +27,7 @@ frontend/src/
 │   └── markets.ts
 ├── services/                  API client functions
 │   ├── apiClient.ts           Base HTTP client (fetch wrapper)
-│   ├── marketDataService.ts   Klines, tickers, trades
+│   ├── marketDataService.ts   Klines, tickers, trades — cache TTL varies: 500ms for
 │   ├── authService.ts         Login, register, session
 │   ├── aiService.ts           AI chat, actions, sessions
 │   ├── settingsService.ts     User preferences
@@ -70,6 +70,11 @@ frontend/src/
 ### CandlestickChart.tsx
 - Core chart using lightweight-charts
 - Multiple timeframes (1s, 1m, 5m, 15m, 1h, 4h, 1d, 1w)
+- **Three price display points**:
+  - **Chart candle**: Updated imperatively via `updateAllPriceSeries()` — no React state, immediate
+  - **Right panel overview**: Reads `getLivePrice(symbol)` → `_livePriceMap` (synchronous mutation on WS ticker), 2s re-render interval
+  - **Left toolbar price**: Reads `getLivePrice(symbol)?.price ?? lastCandle?.close` with 500ms forced re-render interval (v0.28.3 fixed lag caused by `startTransition` deferred state)
+- **Gap defense**: `MAX_BRIDGE_BUCKETS = timeframeSec === 1 ? 30 : 5` — prevents stale-anchor synthetic candle jumps
 - Chart types: Candlestick, Heikin Ashi, Renko, Line Break, Kagi
 - Drawing tools: trendline, horizontal ray, vertical line, fibonacci, rectangle, circle, arrow, text
 - Indicators: SMA, EMA, RSI, MACD, Bollinger, Stoch, ATR, Volume, OBV, VWAP
@@ -111,3 +116,9 @@ Component ← WebSocket ← /api/stream/all ← Redis poll (50ms)
 - Old single-candle frontend helper stale (backend uses all-timeframe WebSocket)
 - Vite dev server proxies `/api` and `/ws` to FastAPI
 - i18n implemented with `useI18n()` hook, 2 locales (en/vi)
+
+## Recent Fixes (v0.28.3)
+
+- **Left toolbar price lag**: Was using `lastCandle.close` from `candles` state (deferred via `startTransition`). Fixed: reads `_livePriceMap` via `getLivePrice()` + 500ms forced re-render interval.
+- **1s chart showing 1m candles**: Was caused by backend fallthrough + frontend gap defense too strict + missing WS synthetic candle + aggressive cache TTL. All 4 root causes fixed.
+- **Cache TTL**: `fetchMergedCandles` now uses 500ms TTL for 1s, 3s for other intervals.

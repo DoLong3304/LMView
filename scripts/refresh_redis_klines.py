@@ -214,7 +214,7 @@ def main() -> int:
     )
     parser.add_argument("--top", type=int, default=25, help="Top-N symbols (default 25)")
     parser.add_argument("--limit", type=int, default=500, help="1m candles per symbol (default 500)")
-    parser.add_argument("--with-1s", action="store_true", help="Also refresh 1s candles")
+    parser.add_argument("--with-1s", action="store_true", default=True, help="Also refresh 1s candles (default: on)")
     parser.add_argument("--limit-1s", type=int, default=60, help="1s candles per symbol (default 60)")
     parser.add_argument("--log-level", default=os.environ.get("LOG_LEVEL", "INFO"))
     args = parser.parse_args()

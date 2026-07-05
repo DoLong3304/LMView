@@ -29,8 +29,10 @@ services:
       - AI_ENABLE_REAL_LLM=${AI_ENABLE_REAL_LLM:-true}
       - AI_SERVICE_EMBEDDED=false
       - AI_ENABLE_RAG=${AI_ENABLE_RAG:-true}
-      - AI_RERANKER_MODEL=${AI_RERANKER_MODEL:-ms-marco-MiniLM-L-6-v2}
+      - AI_RERANKER_MODEL=${AI_RERANKER_MODEL:-cross-encoder/ms-marco-MiniLM-L-6-v2}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - DASHSCOPE_API_KEYS=${DASHSCOPE_API_KEYS:-}
+      - DASHSCOPE_API_BASE_URLS=${DASHSCOPE_API_BASE_URLS:-}
       - REDIS_HOST=redis-master
       - REDIS_MASTER_NAME=${REDIS_MASTER_NAME:-mymaster}
       - REDIS_PORT=6379
@@ -54,6 +56,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
+    volumes:
+      # Mount KB docs for auto-ingestion at startup
+      - ${PWD}/docs/ai/knowledge_base:/app/docs/ai/knowledge_base
     networks:
       - crypto-net
     deploy:

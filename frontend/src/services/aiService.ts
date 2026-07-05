@@ -17,6 +17,8 @@ export interface AIChatRequest {
   message: string;
   language?: string | null;
   chart_context?: Record<string, unknown> | null;
+  model_name?: string | null;
+  model_tier?: string | null;
 }
 
 export interface AIChartAction {
@@ -65,20 +67,39 @@ export interface AIChatResponse {
   estimated_cost_usd?: number | null;
   /** News context summary for display chips */
   news_context?: NewsContextSummary | null;
-  /** Tour plan for Interact mode guided analysis */
+  /** Tour plan for Interact mode guided analysis. Supports legacy flat steps and current steps[].actions[].type schema. */
   tour_plan?: {
     tour_id: string;
     title: string;
     steps: Array<{
-      action_type: string;
-      params: Record<string, unknown>;
+      action_type?: string;
+      params?: Record<string, unknown>;
       explanation: string;
       target_selector?: string | null;
       requires_approval?: boolean;
+      actions?: Array<{
+        type: string;
+        params?: Record<string, unknown>;
+        requires_approval?: boolean;
+      }>;
+      keep_effects?: boolean;
+      chart_freeze?: boolean;
     }>;
     summary: string;
     chart_snapshot?: Record<string, unknown> | null;
   } | null;
+  /** Phase B: structured response sections for expandable rendering */
+  response_sections?: Array<{ title: string; content: string }> | null;
+  /** Phase B: full KB chunk data for expandable knowledge cards */
+  knowledge_chunks?: Array<{
+    text: string;
+    title: string;
+    source: string;
+    source_type?: string;
+    credibility_level?: string;
+    score: number;
+    heading?: string;
+  }> | null;
 }
 
 /** Compact news context returned by AI chat */
@@ -145,16 +166,23 @@ export interface AIMessageResponse {
   latency_ms?: number | null;
   created_at?: string | null;
   metadata: Record<string, unknown>;
-  /** Tour plan for Interact mode guided analysis */
+  /** Tour plan for Interact mode guided analysis. Supports legacy flat steps and current steps[].actions[].type schema. */
   tour_plan?: {
     tour_id: string;
     title: string;
     steps: Array<{
-      action_type: string;
-      params: Record<string, unknown>;
+      action_type?: string;
+      params?: Record<string, unknown>;
       explanation: string;
       target_selector?: string | null;
       requires_approval?: boolean;
+      actions?: Array<{
+        type: string;
+        params?: Record<string, unknown>;
+        requires_approval?: boolean;
+      }>;
+      keep_effects?: boolean;
+      chart_freeze?: boolean;
     }>;
     summary: string;
     chart_snapshot?: Record<string, unknown> | null;
@@ -172,6 +200,7 @@ export interface AIHealthResponse {
   provider_mode?: string | null;
   effective_provider?: string | null;
   available_api_models?: string[];
+  models_by_tier?: Record<string, string[]>;
   local_available?: boolean;
   action_catalog_version?: string | null;
   rag_enabled?: boolean;
@@ -323,6 +352,22 @@ export async function aiValidateActions(
 
 export async function aiActionCatalog(): Promise<AiActionCatalog> {
   return aiFetch<AiActionCatalog>("/ai/actions/catalog");
+}
+
+// ── Model selection state ──────────────────────────────────────────────────
+// Simple module-level state shared between SettingsModal and useAiChat
+// to avoid prop drilling or hook parameter changes.
+
+let _selectedModelName: string | null = null;
+let _selectedModelTier: string | null = null;
+
+export function setSelectedModel(modelName: string | null, tier: string | null = null): void {
+  _selectedModelName = modelName;
+  _selectedModelTier = tier;
+}
+
+export function getSelectedModel(): { modelName: string | null; modelTier: string | null } {
+  return { modelName: _selectedModelName, modelTier: _selectedModelTier };
 }
 
 // ── Streaming ───────────────────────────────────────────────────────────────

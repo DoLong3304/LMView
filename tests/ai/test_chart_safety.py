@@ -71,7 +71,12 @@ class TestNoArbitraryExecution:
         assert "eval" not in CHART_TOOLS
 
     def test_all_tools_are_chart_related(self):
-        chart_prefixes = {"set_", "add_", "remove_", "draw_", "highlight_", "create_"}
+        chart_prefixes = {
+            "set_", "add_", "remove_", "configure_", "draw_", "highlight_",
+            "create_", "toggle_", "clear_", "delete_", "zoom_", "scroll_",
+            "reset_", "open_", "close_", "switch_", "view_", "fetch_",
+            "navigate_", "enter_", "export_",
+        }
         for tool_name in CHART_TOOLS:
             assert any(tool_name.startswith(p) for p in chart_prefixes), \
                 f"Tool '{tool_name}' doesn't match chart action prefixes"

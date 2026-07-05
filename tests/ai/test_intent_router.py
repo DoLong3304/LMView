@@ -69,44 +69,48 @@ class TestRuleBasedClassify:
 class TestClassifyIntentNode:
     """Test classify_intent as a LangGraph node function."""
 
-    def test_returns_state_update(self):
+    @pytest.mark.asyncio
+    async def test_returns_state_update(self):
         state = initial_state(
             user_query="What is the RSI?",
             session_id="s1",
             user_id="u1",
         )
-        update = classify_intent(state)
+        update = await classify_intent(state)
         assert "intent" in update
         assert "activated_experts" in update
         assert isinstance(update["activated_experts"], list)
         assert len(update["activated_experts"]) >= 1
 
-    def test_always_has_at_least_one_expert(self):
+    @pytest.mark.asyncio
+    async def test_always_has_at_least_one_expert(self):
         state = initial_state(
             user_query="",
             session_id="s1",
             user_id="u1",
         )
-        update = classify_intent(state)
+        update = await classify_intent(state)
         assert len(update["activated_experts"]) >= 1
 
-    def test_interact_mode_always_includes_chart(self):
+    @pytest.mark.asyncio
+    async def test_interact_mode_always_includes_chart(self):
         state = initial_state(
             user_query="Hello",
             session_id="s1",
             user_id="u1",
             mode="interact",
         )
-        update = classify_intent(state)
+        update = await classify_intent(state)
         assert ExpertName.CHART_INTERACTION.value in update["activated_experts"]
 
-    def test_confidence_range(self):
+    @pytest.mark.asyncio
+    async def test_confidence_range(self):
         state = initial_state(
             user_query="Analyze RSI divergence pattern",
             session_id="s1",
             user_id="u1",
         )
-        update = classify_intent(state)
+        update = await classify_intent(state)
         intent = update["intent"]
         assert 0.0 <= intent.confidence <= 1.0
         assert intent.routing_method == RoutingMethod.RULE_BASED

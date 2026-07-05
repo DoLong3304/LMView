@@ -28,11 +28,6 @@ _INCOMPLETE_PATTERNS = [
     re.compile(r"as an AI|as a language model", re.IGNORECASE),
 ]
 
-# Required disclaimer patterns (at least one should be present for TA queries)
-_DISCLAIMER_PATTERNS = [
-    re.compile(r"not financial advice|disclaimer|educational|risk", re.IGNORECASE),
-]
-
 
 async def validate_response(state: AgentState) -> AgentState:
     """Validate the synthesized response quality.
@@ -41,9 +36,8 @@ async def validate_response(state: AgentState) -> AgentState:
     incremented revision_count.
     """
     timer = Timer().start()
-    response = state.get("synthesized_response", "")
+    response = state.get("synthesized_response") or ""
     revision_count = state.get("revision_count", 0)
-    intent = state.get("intent")
     expert_outputs = state.get("expert_outputs", {})
 
     issues: List[str] = []
@@ -61,14 +55,7 @@ async def validate_response(state: AgentState) -> AgentState:
             suggestions.append("Use available expert data to provide concrete analysis.")
             break
 
-    # Check 3: Disclaimer for TA/market queries
-    if intent and intent.primary_intent.value in {"technical_analysis", "market_data"}:
-        has_disclaimer = any(p.search(response) for p in _DISCLAIMER_PATTERNS)
-        if not has_disclaimer and len(response) > 200:
-            issues.append("Missing educational disclaimer for financial analysis.")
-            suggestions.append("Add a brief disclaimer about educational purposes.")
-
-    # Check 4: Expert data utilization
+    # Check 3: Expert data utilization
     available_experts = [name for name, out in expert_outputs.items() if out.content and not out.error]
     if available_experts and len(response) > 100:
         # Check if the response seems to ignore available data

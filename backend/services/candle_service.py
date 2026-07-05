@@ -305,7 +305,7 @@ def query_trino_1m(
                     SELECT
                         kline_start AS open_time,
                         open, high, low, close, volume
-                    FROM crypto_lakehouse.coin_klines
+                    FROM iceberg_catalog.crypto_lakehouse.coin_klines
                     WHERE symbol = ?
                       AND interval = '1m'
                       AND is_closed = true
@@ -322,7 +322,7 @@ def query_trino_1m(
                     SELECT
                         kline_start AS open_time,
                         open, high, low, close, volume
-                    FROM crypto_lakehouse.coin_klines
+                    FROM iceberg_catalog.crypto_lakehouse.coin_klines
                     WHERE symbol = ?
                       AND interval = '1m'
                       AND is_closed = true
@@ -363,7 +363,7 @@ def query_trino_hourly(
                     SELECT
                         open_time,
                         open, high, low, close, volume
-                    FROM crypto_lakehouse.historical_hourly
+                    FROM iceberg_catalog.crypto_lakehouse.historical_hourly
                     WHERE symbol = ?
                       AND open_time >= ?
                       AND open_time < ?
@@ -378,7 +378,7 @@ def query_trino_hourly(
                     SELECT
                         open_time,
                         open, high, low, close, volume
-                    FROM crypto_lakehouse.historical_hourly
+                    FROM iceberg_catalog.crypto_lakehouse.historical_hourly
                     WHERE symbol = ?
                       AND open_time < ?
                     ORDER BY open_time DESC

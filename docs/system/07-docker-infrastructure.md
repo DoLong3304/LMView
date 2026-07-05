@@ -1,12 +1,12 @@
 # Docker Infrastructure
 
-Docker Compose + Swarm setup for LMView.
+Docker Compose + Swarm setup for LMView (v0.28.1, 3-node).
 
 ## Compose Files
 
 | File | Purpose |
 |---|---|
-| `docker-compose.yml` | Main — all services, profiles, volumes, networks (1300 lines) |
+| `docker-compose.yml` | Main — all services, profiles, volumes, networks (~1700 lines) |
 | `docker-compose.swarm.yml` | Swarm overlay — placement, resources, configs (extends main) |
 | `docker-compose.ai.yml` | AI service extension — LiteLLM, vLLM |
 
@@ -14,160 +14,208 @@ Deployment: `bash scripts/deploy_aws_swarm.sh`
 
 ## Dockerfiles (per service)
 
-Each service has its own Dockerfile under `docker/<service>/`:
-
 | Service | Dockerfile | Base Image | Purpose |
 |---|---|---|---|
-| fastapi | `docker/fastapi/Dockerfile` | python:3.11-slim | Backend API gateway (NO heavy AI deps) |
-| ai-service | `docker/ai-service/Dockerfile` | python:3.11-slim | Standalone AI service (has torch, transformers) |
-| nginx | `docker/nginx/Dockerfile` | nginx:alpine | Reverse proxy + SSL |
+| fastapi | `docker/fastapi/Dockerfile` | python:3.11-slim | Backend API (NO heavy AI deps) |
+| ai-service | `docker/ai-service/Dockerfile` | python:3.11-slim | Standalone AI service (torch, transformers) |
+| nginx | `docker/nginx/Dockerfile` | nginx:1.27.5 | Reverse proxy + SSL |
 | flink | `docker/flink/Dockerfile` | flink:1.18.1 | Flink jobmanager + taskmanager |
-| spark | `docker/spark/Dockerfile` | spark:3.5.5 | Spark master + worker |
+| spark | `docker/spark/Dockerfile` | bitnami/spark:3.5.5 | Spark master + worker |
 | ticker-ws | `docker/ticker-ws/Dockerfile` | python:3.11-slim | Binance WS ticker feed (8 shards) |
 | combined-stream | `docker/combined-stream/Dockerfile` | python:3.11-slim | Combined-stream Kafka producer |
-| kline-rest | `docker/kline-rest/Dockerfile` | python:3.11-slim | REST kline feed |
+| kline-rest | `docker/kline-rest/Dockerfile` | python:3.11-slim | REST kline feed (200 symbols) |
 | depth-trades-rest | `docker/depth-trades-rest/Dockerfile` | python:3.11-slim | REST depth + trades feed |
-| producer | `docker/producer/Dockerfile` | python:3.11-slim | Legacy producer (all WS paths disabled) |
+| producer | `docker/producer/Dockerfile` | python:3.11-slim | Legacy producer (all WS disabled, 403 geofenced) |
 | backfill | `docker/backfill/Dockerfile` | python:3.11-slim | InfluxDB backfill job |
 | dagster | `docker/dagster/Dockerfile` | python:3.11-slim | Dagster orchestration |
 
+## Profiles
+
 | Profile | Services |
 |---|---|
-| `dev` | Core: zookeeper, kafka-1/2/3, schema-registry, producer, redis-master/replicas/sentinels, influxdb, minio, postgres, flink-jobmanager/taskmanager, spark-master/workers, trino, fastapi-dev, frontend-dev, nginx-dev |
-| `prod` | Same as dev but fastapi-prod, nginx-prod (multi-worker, SSL) |
+| `dev` | Core data + compute + fastapi-dev + nginx-dev |
+| `prod` | Same as dev but fastapi-prod + nginx-prod (multi-worker, SSL) |
 | `monitoring` | Prometheus, Grafana, kafka-exporter, node-exporter, redis-exporter |
 | `logging` | Loki, promtail |
 | `ai-api` | LiteLLM, vLLM (from docker-compose.ai.yml) |
 
-## Services (41 total)
+## Logging (All Services)
 
-### Data Layer (Storage & Brokers)
+Every service has capped log rotation to prevent disk fill:
 
-| Service | Image | Replicas | Node | Ports |
-|---|---|---|---|---|
-| zookeeper | cp-zookeeper:7.6.0 | 1 | core | 2181, 7071 |
-| kafka-1/2/3 | cryptoprice/kafka:3.9.0 | 1 each | core | 19092, 9093, 9094 |
-| schema-registry | apicurio-registry-mem:2.6.2 | 1 | core | 8085 |
-| postgres | pgvector/pgvector:pg16 | 1 | core | 5432 |
-| redis-master | redis:7.2-alpine | 1 | core | 6379 |
-| redis-replica-1/2 | redis:7.2-alpine | 1 each | core | — |
-| redis-sentinel-1/2/3 | redis:7.2-alpine | 1 each | core | 26379-26381 |
-| influxdb | influxdb:2.7 | 1 | core | 8086 |
-| minio | minio:RELEASE.2025-09-07 | 1 | core | 9000-9001 |
+```yaml
+logging:
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+```
 
-### Streaming & Compute (Worker Node)
+Each container limited to **30MB** of logs. Applied via YAML anchor (`x-logging`)
+referenced in all 38 services.
 
-| Service | Image | Replicas | Node |
+## Services (46 total, 38 active)
+
+### Data Layer (data node — `role=data`)
+
+| Service | Image | Replicas | Ports |
 |---|---|---|---|
-| flink-jobmanager | cryptoprice/flink:1.18.1 | 1 | worker |
-| flink-taskmanager | cryptoprice/flink:1.18.1 | 2 | worker |
-| spark-master | cryptoprice/spark:3.5.5 | 1 | worker |
-| spark-worker | cryptoprice/spark:3.5.5 | 2 | worker |
-| trino | cryptoprice/trino:442 | 1 | worker |
-| spark-submit | cryptoprice/spark-submit:local | 0/1 | worker |
+| zookeeper | cp-zookeeper:7.6.0 | 1 | 2181, 7071 |
+| kafka-1 | apache/kafka:3.9.0 | 1 | 19092 |
+| kafka-2 | apache/kafka:3.9.0 | 1 | 9093 |
+| kafka-3 | apache/kafka:3.9.0 | 1 | 9094 |
+| schema-registry | apicurio-registry-mem:2.6.2 | 1 | 8085 |
+| postgres | pgvector/pgvector:pg16 | 1 | 5432 |
+| redis-master | redis:7.2-alpine | 1 | 16379 |
+| redis-replica-1/2 | redis:7.2-alpine | 2 | — |
+| redis-sentinel-1/2/3 | redis:7.2-alpine | 3 | 26379-26381 |
+| influxdb | influxdb:2.7 | 1 | 8086 |
+| minio | minio:RELEASE.2025-09-07 | 1 | 9000-9001 |
+| minio-init | minio/mc | 0/1 | — (one-shot) |
 
-### Serving Layer (Core Node)
+### Compute Layer (compute node — `role=compute`)
 
-| Service | Image | Replicas | Node | Ports |
-|---|---|---|---|---|
-| fastapi-prod | cryptoprice/fastapi:latest | 1 | core | 8080 |
-| nginx-prod | lmview-nginx:latest | 1 | core | 80, 443 |
-| producer | cryptoprice/producer:latest | 1 | core | — |
-
-### AI (Core Node)
-
-| Service | Image | Replicas | Status |
+| Service | Image | Replicas | Ports |
 |---|---|---|---|
-| ai-service | python:3.11-slim | 0/1 | FastAPI service for AI |
-| litellm | ghcr.io/berriai/litellm | 0/1 | Opt-in |
+| flink-jobmanager | cryptoprice/flink:1.18.1 | 1 | 8081 |
+| flink-taskmanager | cryptoprice/flink:1.18.1 | 2 | — |
+| spark-master | cryptoprice/spark:3.5.5 | 1 | 7077, 8082, 18080 |
+| spark-worker | cryptoprice/spark:3.5.5 | 1 | — |
+| spark-worker-2 | cryptoprice/spark:3.5.5 | 1 | — |
+| spark-submit | cryptoprice/spark-submit:local | 1 | — |
+| trino | cryptoprice/trino:442 | 1 | 8083 |
+| dagster-webserver | cryptoprice/dagster:1.8.10 | 1 | 3000 |
+| dagster-daemon | cryptoprice/dagster:1.8.10 | 1 | — |
+| job-watchdog | docker:27.0-cli | 1 | — |
 
-### Monitoring & Logging (Worker Node, opt-in)
+### Serving Layer (core node — `role=core`)
 
-| Service | Image | Replicas | Status |
+| Service | Image | Replicas | Ports |
 |---|---|---|---|
-| prometheus | prom/prometheus:v2.45.0 | 0/1 | Stopped |
-| grafana | grafana/grafana:10.2.0 | 1/1 | Running (port 3001) |
-| loki | grafana/loki:2.9.0 | 0/1 | Stopped |
-| promtail | grafana/promtail:2.9.0 | 0/1 | Stopped |
-| kafka-exporter | danielqsj/kafka-exporter | 1/1 | Running (port 9308) |
-| node-exporter | prom/node-exporter:v1.6.1 | 0/1 | Stopped |
-| redis-exporter | oliver006/redis_exporter | 0/1 | Stopped |
+| nginx-prod | cryptoprice/nginx:1.44.0 | 1 | 80, 443 |
+| fastapi-prod | cryptoprice/fastapi:0.28.0 | 1 | 8080 |
+| producer | cryptoprice/producer:0.25.0 | 1 | — (all WS disabled) |
+| binance-ticker-ws | cryptoprice/binance-ticker-ws:0.1.0 | 1 | — |
+| binance-kline-rest | cryptoprice/binance-kline-rest:0.1.0 | 1 | — |
+| binance-depth-trades-rest | cryptoprice/binance-depth-trades-rest:0.1.0 | 1 | — |
+| combined-stream-producer | cryptoprice/combined-stream:0.25.60 | 1 | — |
 
-### Utilities (Core Node)
+### AI Layer (core node — `role=core`)
 
-| Service | Image | Replicas | Status |
+| Service | Image | Replicas | Ports |
 |---|---|---|---|
-| registry | registry:2 | 1 | Running (port 5000) — local image registry |
-| certbot-auto | certbot/certbot:v5.6.0 | 1/1 | SSL auto-renewal |
-| duckdns-auto | curlimages/curl:8.7.1 | 1/1 | DuckDNS IP update |
-| minio-init | minio/mc | 0/1 | One-shot bucket create |
-| auto-submit-jobs | cryptoprice/flink:1.18.1 | 0/1 | Flink job submission |
-| job-watchdog | docker:27.0-cli | 0/1 | Job health watchdog |
-| dagster-webserver | cryptoprice/dagster:1.8.10 | 0/1 | Dagster UI (port 3000) |
-| dagster-daemon | cryptoprice/dagster:1.8.10 | 0/1 | Dagster scheduler |
-| influx-backfill | cryptoprice/influx-backfill:0.25.0 | 0/1 | Historical data backfill |
+| ai-service | cryptoprice/ai-service:latest | 1 | 8100 |
+| litellm | ghcr.io/berriai/litellm:main-latest | 1 | 4000 |
+| finbert-worker | python:3.11-slim | 1 | — |
 
-## Docker Images (Custom)
+### Monitoring & Logging (compute node — `role=compute`, all active)
 
-| Image | Source | Built From |
+| Service | Image | Replicas | Ports |
+|---|---|---|---|
+| prometheus | prom/prometheus:v2.45.0 | 1 | 9090 |
+| grafana | grafana/grafana:10.2.0 | 1 | 3001 |
+| loki | grafana/loki:2.9.0 | 1 | 3100 |
+| promtail | grafana/promtail:2.9.0 | 1 | — |
+| kafka-exporter | danielqsj/kafka-exporter:v1.7.0 | 1 | 9308 |
+| node-exporter | prom/node-exporter:v1.6.1 | 1 | 9100 |
+| redis-exporter | oliver006/redis_exporter:v1.83.0 | 1 | 9121 |
+
+### Utilities (core node — `role=core`)
+
+| Service | Image | Replicas | Ports |
+|---|---|---|---|
+| registry | registry:2 | 1 | 5000 (local image registry) |
+| certbot-auto | certbot/certbot:v5.6.0 | 1 | — (SSL renewal, 12h loop) |
+| duckdns-auto | curlimages/curl:8.7.1 | 1 | — (DNS update, 5min loop) |
+| auto-submit-jobs | cryptoprice/flink:1.18.1 | 0/1 | — (one-shot, manual) |
+| influx-backfill | cryptoprice/influx-backfill:0.25.0 | 0/1 | — (one-shot, completed) |
+
+## Docker Images (Custom, in local registry)
+
+| Image | Size | Built From |
 |---|---|---|
-| `cryptoprice/fastapi:latest` | docker/fastapi/Dockerfile | python:3.11-slim |
-| `cryptoprice/producer:latest` | docker/fastapi/Dockerfile (same image) | python:3.11-slim |
-| `cryptoprice/kafka:3.9.0` | docker/kafka/Dockerfile | apache/kafka:3.9.0 |
-| `cryptoprice/flink:1.18.1` | docker/flink/Dockerfile | flink:1.18.1-slim |
-| `cryptoprice/spark:3.5.5` | docker/spark/Dockerfile | bitnami/spark:3.5.5 |
-| `cryptoprice/trino:442` | docker/trino/Dockerfile (if exists) | trino:442 |
-| `cryptoprice/dagster:1.8.10` | dagster Dockerfile | python:3.11-slim |
-| `cryptoprice/spark-submit:local` | docker/spark/Dockerfile + submit entrypoint | bitnami/spark:3.5.5 |
-| `lmview-nginx:latest` | docker/nginx/Dockerfile | nginx:1.31.0-alpine |
+| `cryptoprice/ai-service:latest` | 9.34GB | python:3.11-slim + torch + transformers |
+| `cryptoprice/flink:1.18.1` | 2.91GB | flink:1.18.1-slim + python + deps |
+| `cryptoprice/trino:442` | 2.48GB | trino:442 + Iceberg connector |
+| `cryptoprice/dagster:1.8.10` | 2.12GB | python:3.11-slim + dagster + deps |
+| `cryptoprice/spark:3.5.5` | 1.59GB | bitnami/spark:3.5.5 + python + deps |
+| `cryptoprice/spark-submit:local` | 1.58GB | spark:3.5.5 + submit entrypoint |
+| `cryptoprice/producer:0.25.0` | 613MB | python:3.11-slim (same image as fastapi) |
+| `cryptoprice/fastapi:0.28.0` | 329MB | python:3.11-slim |
+| `cryptoprice/nginx:1.44.0` | 293MB | nginx:1.27.5 |
+| `cryptoprice/combined-stream:0.25.60` | 254MB | python:3.11-slim |
+| `cryptoprice/binance-kline-rest:0.1.0` | 243MB | python:3.11-slim |
+| `cryptoprice/influx-backfill:0.25.0` | 224MB | python:3.11-slim |
+| `cryptoprice/binance-ticker-ws:0.1.0` | 211MB | python:3.11-slim |
+| `cryptoprice/binance-depth-trades-rest:0.1.0` | 205MB | python:3.11-slim |
+| `cryptoprice/alpine:latest` | ~10MB | alpine:3.18 |
+
+**Total image storage**: ~13GB when pruned, up to 26GB with dangling images.
 
 ## Image Build & Push Flow
 
-1. `docker compose --profile prod build` — builds all custom images
-2. Images tagged as `172.31.21.135:5000/cryptoprice/*:*`
-3. Push to local registry (`registry:2` on port 5000)
+1. `docker compose --profile prod build` — builds custom images
+2. Tagged as `172.31.9.72:5000/cryptoprice/*:*` (registry address)
+3. Pushed to local registry (`registry:2` on port 5000, available at `127.0.0.1:5000`)
 4. Swarm nodes pull from local registry (`--resolve-image never`)
+
+## Storage Management
+
+### Docker Storage Drivers
+- Docker 29.6 uses **containerd** for image layer storage
+- Layers stored in `/var/lib/containerd` (not `/var/lib/docker/overlay2`)
+- Image metadata in `/var/lib/docker`
+
+### Storage Budget (target)
+
+| Category | Current | Target | Growth Control |
+|---|---|---|---|
+| Active images | ~13GB | ~15GB | Prune dangling after each deploy |
+| Build cache | ~0GB | ~1GB | `docker builder prune -af` pre-build |
+| Container logs | ~30MB | ~500MB | Log rotation (10m×3 per container) |
+| Dead containers | ~0GB | ~0GB | Prune post-deploy |
+| Data volumes | ~500MB | ~5GB | Protected (never pruned) |
+| **Total** | **~29GB** | **~36GB** | |
+
+### Cleanup Hooks (in deploy script)
+
+Pre-build: `docker container prune -f` + `docker image prune -af --filter "until=24h"` + `docker builder prune -af`
+Post-deploy: `docker container prune -f` + `docker image prune -af --filter "until=48h"`
 
 ## Node Placement Strategy
 
-- **Core node** (8 vCPU, 32 GB): labeled `role=core`
-  - Storage (redis, postgres, influxdb, minio), brokers (kafka, zookeeper), API (fastapi, nginx), producer, registry, certbot, duckdns
-  - Memory budget: ~25 GB services + ~5 GB OS/buffers
-- **Worker node** (4 vCPU, 16 GB): labeled `role=worker`
-  - Compute (flink, spark, trino), monitoring (grafana, prometheus), logging (loki, promtail)
-  - Memory budget: ~13 GB services + ~3 GB OS/buffers
+- **Core** (`role=core`, 8 vCPU, 32GB): Serving, data feeds, AI, utilities — ~14 containers, ~12GB
+- **Data** (`role=data`, 8 vCPU, 32GB): Storage + messaging — ~15 containers, ~10GB
+- **Compute** (`role=compute`, 8 vCPU, 32GB): Stream/batch processing + monitoring — ~18 containers, ~16GB
 
 ## Important Configs
 
-- **docker/fastapi/requirements.txt**: FastAPI deps including litellm, asyncpg, influxdb_client, prometheus_client
+- **docker/fastapi/requirements.txt**: FastAPI deps including litellm, asyncpg, influxdb_client
 - **docker/nginx/nginx-prod.conf**: SSL, HSTS, rate limiting, proxy to fastapi, gzip, security headers
-- **docker/flink/flink-conf.yaml**: TaskManager memory 1536MB, parallelism, checkpoint config
+- **docker/nginx/entrypoint.sh**: Self-signed bootstrap cert, domain substitution, htpasswd generation
+- **docker/flink/flink-conf.yaml**: TaskManager memory 2048MB, parallelism, checkpoint config
 - **docker/kafka/entrypoint.sh**: ZK session timeout 10s, stale node cleanup on restart
 
 ## Health Checks
 
-Services with health checks: zookeeper, kafka-1/2/3, postgres, redis-master/replicas/sentinels, influxdb, minio, fastapi-prod, nginx-prod, trino, spark-master
+**With health checks**: zookeeper, kafka-1/2/3, postgres, redis-master/replicas/sentinels, influxdb, minio, fastapi-prod, nginx-prod, trino, spark-master, spark-worker, spark-worker-2, flink-jobmanager, dagster-webserver, dagster-daemon, binance-ticker-ws, binance-kline-rest, binance-depth-trades-rest, ai-service
 
-Missing health checks: producer, flink-jobmanager, taskmanager, spark-worker/worker-2, schema-registry
+**Without health checks (known gap)**: producer, schema-registry, flink-taskmanager (uses `pgrep` workaround)
 
-## Scripts
+## SSL/TLS
 
-| Script | Purpose |
-|---|---|
-| `scripts/deploy_aws_swarm.sh` | Full deploy: build → push → deploy |
-| `scripts/auto_submit_jobs.sh` | Submit Flink/Spark streaming jobs |
-| `scripts/certbot_auto.sh` | SSL certificate request |
-| `scripts/init_certbot.sh` | Initial certbot setup |
-| `scripts/duckdns_auto.sh` | DuckDNS IP update |
-| `scripts/submit_flink.sh` | Manual Flink job submission |
-| `scripts/create_kafka_topics.sh` | Kafka topic creation |
-| `scripts/audit_data_coverage.py` | Data coverage audit |
-| `scripts/verify_all_via_grafana.py` | Verification via Grafana API |
+- **Domain**: `lmview.duckdns.org` → 18.140.245.176
+- **Provider**: Let's Encrypt (DNS-01 via certbot-dns-duckdns plugin)
+- **Valid until**: 2026-09-24
+- **HSTS**: Active (`max-age=63072000; includeSubDomains`)
+- **Renewal**: certbot-auto every 12h, nginx reload every 6h
+- **Bootstrap**: Nginx entrypoint creates 1-day self-signed fallback cert
 
 ## Known Issues
 
-- **FastAPI image**: Both `fastapi-prod` and `producer` use the same image (`docker/fastapi/Dockerfile`). The producer runs extra deps that bloats the API image.
-- **ai-service**: 0/1 — scaffolded service that exits immediately. AI runs inside FastAPI container.
-- **Monitoring services**: Most are 0/1 (stopped). Only grafana, kafka-exporter running.
-- **Missing health checks**: producer, flink, spark-worker, schema-registry lack health checks.
-- **EFS bind mounts**: Services with `/mnt/efs/LMView` bind mounts must run on EFS-mounted node. Can't failover to worker without EFS mount.
+- **FastAPI image shared with producer**: Both services use the same image (`docker/fastapi/Dockerfile`). Producer has all WS paths disabled due to Binance geofencing.
+- **binance-kline-rest CPU**: 54-67% CPU from polling 200 symbols every 30s. Expected.
+- **combined-stream OOM history**: Was 512M limit → OOM killed every ~1h. Now 1G, stable.
+- **spark-worker healthcheck**: Had wrong port (8081 vs 8084). Fixed by service update.
+- **Flink taskmanager healthcheck**: Uses `pgrep` workaround (TCP healthcheck on 6123 broken because TM uses dynamic RPC port).
+- **Registry accessible at 127.0.0.1**: `localhost:5000` hangs but `127.0.0.1:5000` works (Docker port forwarding nuance).

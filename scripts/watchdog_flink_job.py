@@ -26,9 +26,11 @@ import urllib.request
 
 FLINK_JM_URL = os.environ.get("FLINK_JM_URL", "http://localhost:8081")
 REDIS_HOST = os.environ.get("REDIS_HOST", "redis-master")
-PROJECT_DIR = os.environ.get("PROJECT_DIR", "/mnt/efs/LMView")
-FLINK_IMAGE = os.environ.get("FLINK_IMAGE", "localhost:5000/cryptoprice/flink:1.18.1")
-INTERVAL = int(os.environ.get("INTERVAL_SEC", "30"))
+PROJECT_DIR = os.environ.get("PROJECT_DIR", "/app")
+FLINK_IMAGE = os.environ.get("FLINK_IMAGE", "172.31.9.72:5000/cryptoprice/flink:1.18.1")
+INTERVAL = int(os.environ.get("JOB_WATCHDOG_INTERVAL_SEC", os.environ.get("INTERVAL_SEC", "30")))
+PIPELINE_SCRIPT = os.environ.get("PIPELINE_SCRIPT", f"{PROJECT_DIR}/src/processing/pipeline.py")
+KAFKA_SCAN_STARTUP_MODE = os.environ.get("KAFKA_SCAN_STARTUP_MODE", "latest-offset")
 
 
 def http_get_json(url: str, timeout: int = 5) -> dict | None:
@@ -57,26 +59,24 @@ def redis_hlen(key: str) -> int:
 
 
 def submit_job() -> bool:
-    """Submit Flink pipeline via subprocess (uses flink image's flink CLI)."""
-    # Extract host from FLINK_JM_URL for the -m argument
+    """Submit Flink pipeline via the Flink CLI (subprocess).
+
+    Runs `flink run` directly from the watchdog container (which uses the
+    Flink image), connecting to the JobManager on the Swarm overlay network.
+    No Docker-in-Docker or standalone container needed.
+    """
     flink_host = FLINK_JM_URL.replace("http://", "").replace("https://", "")
     cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{PROJECT_DIR}:{PROJECT_DIR}:ro",
-        FLINK_IMAGE,
-        "bash", "-c",
-        (
-            "cd /tmp && "
-            f"SRC_DIR={PROJECT_DIR}/src "
-            f"bash {PROJECT_DIR}/scripts/build_deps_zip.sh && "
-            f"flink run -m {flink_host} -d "
-            f"-pyfs {PROJECT_DIR}/src/processing "
-            f"--pyFiles {PROJECT_DIR}/deps.zip "
-            f"--python {PROJECT_DIR}/src/processing/pipeline.py"
-        ),
+        "/opt/flink/bin/flink", "run",
+        "-m", flink_host,
+        "-d",
+        "-py", PIPELINE_SCRIPT,
     ]
+    env = dict(os.environ)
+    env["PYTHONPATH"] = f"{PROJECT_DIR}/src/processing:{PROJECT_DIR}/src"
+    env["KAFKA_SCAN_STARTUP_MODE"] = KAFKA_SCAN_STARTUP_MODE
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env)
         if out.returncode == 0 and "Job has been submitted" in out.stdout:
             line = [l for l in out.stdout.strip().splitlines() if "Job has been submitted" in l]
             print(f"[watchdog] ✅ Flink job submitted: {line[-1] if line else out.stdout.strip()}")
@@ -89,8 +89,7 @@ def submit_job() -> bool:
         print("[watchdog] ⏱️  submit timed out")
         return False
     except FileNotFoundError:
-        # docker not on PATH (inside a container without docker CLI)
-        print("[watchdog] ⚠️  docker CLI not available — cannot submit")
+        print("[watchdog] ⚠️  flink CLI not found at /opt/flink/bin/flink")
         return False
 
 
@@ -114,9 +113,12 @@ def main() -> None:
             print(f"[watchdog] ⚠️  no jobs running but {slots_avail} slots free — resubmitting")
             submit_job()
 
-        solusdt_fields = redis_hlen("indicator:latest:binance:SOLUSDT")
-        if solusdt_fields > 0:
-            print(f"[watchdog] ✅ SOLUSDT indicator has {solusdt_fields} fields")
+        try:
+            solusdt_fields = redis_hlen("indicator:latest:binance:SOLUSDT")
+            if solusdt_fields > 0:
+                print(f"[watchdog] ✅ SOLUSDT indicator has {solusdt_fields} fields")
+        except OSError as exc:
+            print(f"[watchdog] ⚠️  Redis probe failed: {exc}")
 
         time.sleep(INTERVAL)
 

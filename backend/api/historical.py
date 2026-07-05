@@ -5,11 +5,11 @@ Thin route handler that delegates business logic to candle_service.
 """
 
 import asyncio
-import time
+import logging
 
 from fastapi import APIRouter, HTTPException, Query
 
-from backend.core.constants import INTERVAL_SECONDS, INFLUX_1M_RETENTION_DAYS, MAX_RAW_ROWS
+from backend.core.constants import INTERVAL_SECONDS, MAX_RAW_ROWS
 from backend.services.candle_service import (
     validate_symbol,
     validate_interval,
@@ -21,6 +21,7 @@ from backend.services.candle_service import (
 )
 
 router = APIRouter(prefix="/api", tags=["historical"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/klines/historical")
@@ -49,30 +50,42 @@ async def get_historical_klines(
     raw_limit = min((limit * mult) + mult, MAX_RAW_ROWS)
     candles: list[dict] = []
 
-    now_ms = int(time.time() * 1000)
-    influx_cutoff_ms = now_ms - (INFLUX_1M_RETENTION_DAYS * 24 * 3600 * 1000)
+    # InfluxDB is the first historical source even for old timestamps.
+    # Backfill jobs can load arbitrary dates into the `crypto_ticker` bucket;
+    # restricting Influx to the nominal 90d retention window caused 2025
+    # backfilled candles to be skipped, returning empty results despite data
+    # being available through the normal `/api/klines` fallback chain.
+    try:
+        influx_rows = await asyncio.to_thread(
+            query_influx_1m_range, symbol, startTime, endTime, raw_limit,
+        )
+        candles = merge_unique(candles, influx_rows)
+    except Exception as exc:
+        logger.warning(
+            "Historical Influx 1m query failed for %s [%s,%s): %s",
+            symbol,
+            startTime,
+            endTime,
+            exc,
+        )
 
-    # Recent overlap → InfluxDB 1m
-    influx_start = max(startTime, influx_cutoff_ms)
-    if endTime > influx_start:
-        try:
-            influx_rows = await asyncio.to_thread(
-                query_influx_1m_range, symbol, influx_start, endTime, raw_limit,
-            )
-            candles = merge_unique(candles, influx_rows)
-        except Exception:
-            pass
-
-    # Older overlap → Iceberg 1m via Trino
-    trino_end = min(endTime, influx_cutoff_ms)
-    if trino_end > startTime:
+    # Iceberg/S3 via Trino remains cold-storage fallback when Influx lacks
+    # requested rows or only partially covers the range.
+    required_raw = min(raw_limit, max(limit * mult, limit))
+    if len(candles) < required_raw:
         try:
             trino_rows = await asyncio.to_thread(
-                query_trino_1m, symbol, trino_end, raw_limit, start_ms=startTime,
+                query_trino_1m, symbol, endTime, raw_limit, start_ms=startTime,
             )
             candles = merge_unique(candles, trino_rows)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "Historical Trino 1m query failed for %s [%s,%s): %s",
+                symbol,
+                startTime,
+                endTime,
+                exc,
+            )
 
     # No 1m data → fallback to hourly cold table for 1h+
     if not candles:

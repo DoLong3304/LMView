@@ -18,11 +18,13 @@ class RAGChunkResult(BaseModel):
     document_title: str
     source_id: Optional[str] = None
     source_title: Optional[str] = None
+    source_type: Optional[str] = None
     heading: Optional[str] = None
     language: Optional[str] = None
     domain: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     credibility_level: Optional[str] = None
+    review_status: Optional[str] = None
     citation: Optional[Dict[str, Any]] = None
 
 

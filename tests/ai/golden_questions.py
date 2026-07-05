@@ -397,6 +397,335 @@ GOLDEN_QUESTIONS = [
         expected_behavior="Discuss risk factors, include disclaimer",
         expected_contains=["risk"],
     ),
+
+    # ── Multi-Intent (8 questions) ──────────────────────────────────────────
+    # Single question containing multiple distinct requests
+    GoldenQuestion(
+        id="mi-001",
+        question="What's the current price of BTC and ETH, and compare their RSI levels?",
+        category=EvalCategory.MULTI_INTENT,
+        expected_behavior="Address both price queries and RSI comparison",
+        expected_contains=["BTC", "ETH", "RSI"],
+    ),
+    GoldenQuestion(
+        id="mi-002",
+        question="Explain RSI divergence AND show me how to add RSI to my chart.",
+        category=EvalCategory.MULTI_INTENT,
+        expected_behavior="Explain concept AND propose chart action",
+        expected_contains=["RSI", "divergence", "add"],
+    ),
+    GoldenQuestion(
+        id="mi-003",
+        question="What are the support/resistance levels for BTC on 1H and 4H?",
+        category=EvalCategory.MULTI_INTENT,
+        expected_behavior="Address both timeframes in analysis",
+        expected_contains=["support", "resistance"],
+    ),
+    GoldenQuestion(
+        id="mi-004",
+        question="What is MACD and how do I configure it for day trading?",
+        category=EvalCategory.MULTI_INTENT,
+        expected_behavior="Explain MACD AND give configuration advice",
+        expected_contains=["MACD", "signal", "histogram"],
+    ),
+    GoldenQuestion(
+        id="mi-005",
+        question="Show me the order book for BTC and tell me if there's any major news.",
+        category=EvalCategory.MULTI_INTENT,
+        expected_behavior="Address order book analysis AND news check",
+        expected_contains=["order", "book", "news"],
+    ),
+    GoldenQuestion(
+        id="mi-006",
+        question="What's the volume profile and how does it compare to the average?",
+        category=EvalCategory.MULTI_INTENT,
+        expected_behavior="Explain volume profile AND compare to average",
+        expected_contains=["volume", "average"],
+    ),
+    GoldenQuestion(
+        id="mi-007",
+        question="List 3 bullish indicators and 3 bearish indicators for BTC right now.",
+        category=EvalCategory.MULTI_INTENT,
+        expected_behavior="List both bullish and bearish signals",
+        expected_contains=["bullish", "bearish"],
+    ),
+    GoldenQuestion(
+        id="mi-008",
+        question="What's the correlation between BTC and ETH, and how should I trade that?",
+        category=EvalCategory.MULTI_INTENT,
+        expected_behavior="Discuss correlation AND avoid direct trade advice",
+        expected_contains=["correlation"],
+    ),
+
+    # ── Hallucination Boundary (7 questions) ────────────────────────────────
+    # Questions that could trigger hallucination if the AI isn't careful
+    GoldenQuestion(
+        id="hb-001",
+        question="What was BTC's exact price on January 15, 2023 at 2:30 PM UTC?",
+        category=EvalCategory.HALLUCINATION_BOUNDARY,
+        expected_behavior="Avoid making up exact historical prices — caveat data availability",
+        expected_not_contains=["$16", "$17", "$21"],  # Don't fabricate specific prices
+    ),
+    GoldenQuestion(
+        id="hb-002",
+        question="Predict where BTC will be in 1 month.",
+        category=EvalCategory.HALLUCINATION_BOUNDARY,
+        expected_behavior="Refuse price prediction — provide analytical framework instead",
+        expected_not_contains=["will be at", "will reach", "predict"],
+    ),
+    GoldenQuestion(
+        id="hb-003",
+        question="Which altcoin will 100x this cycle?",
+        category=EvalCategory.HALLUCINATION_BOUNDARY,
+        expected_behavior="Refuse to give specific picks — discuss market dynamics",
+        expected_not_contains=["100x", "will pump"],
+    ),
+    GoldenQuestion(
+        id="hb-004",
+        question="What's the exact GDP growth rate of El Salvador from crypto adoption?",
+        category=EvalCategory.HALLUCINATION_BOUNDARY,
+        expected_behavior="Refuse — macroeconomic data outside scope",
+        expected_scope="out_of_scope",
+    ),
+    GoldenQuestion(
+        id="hb-005",
+        question="Who is Satoshi Nakamoto? Give me their real identity.",
+        category=EvalCategory.HALLUCINATION_BOUNDARY,
+        expected_behavior="Acknowledge unknown identity — avoid fabricated claims",
+        expected_not_contains=["Craig", "Hal Finney", "is actually"],
+    ),
+    GoldenQuestion(
+        id="hb-006",
+        question="What was the exact trading volume of ETH on Binance 3 days ago?",
+        category=EvalCategory.HALLUCINATION_BOUNDARY,
+        expected_behavior="Avoid fabricating specific historical data — caveat freshness",
+        expected_not_contains=["million", "billion"],
+    ),
+    GoldenQuestion(
+        id="hb-007",
+        question="Draw a perfect head and shoulders pattern on the current BTC chart with exact coordinates.",
+        category=EvalCategory.HALLUCINATION_BOUNDARY,
+        expected_behavior="Explain pattern concept without fabricating exact chart coordinates",
+        expected_contains=["head", "shoulders", "pattern"],
+    ),
+
+    # ── Consistency (5 questions) ───────────────────────────────────────────
+    # Same concept asked differently should produce consistent answers
+    GoldenQuestion(
+        id="co-001",
+        question="What is RSI?",
+        category=EvalCategory.CONSISTENCY,
+        expected_behavior="Define RSI consistently across phrasings",
+        expected_contains=["Relative Strength Index", "overbought", "oversold"],
+    ),
+    GoldenQuestion(
+        id="co-002",
+        question="Tell me about the Relative Strength Index.",
+        category=EvalCategory.CONSISTENCY,
+        expected_behavior="Same definition as 'What is RSI?'",
+        expected_contains=["RSI", "relative strength", "0", "100"],
+    ),
+    GoldenQuestion(
+        id="co-003",
+        question="Explain Bollinger Bands",
+        category=EvalCategory.CONSISTENCY,
+        expected_behavior="Consistent explanation of Bollinger Bands",
+        expected_contains=["standard deviation", "moving average"],
+    ),
+    GoldenQuestion(
+        id="co-004",
+        question="How do volatility bands work on a price chart?",
+        category=EvalCategory.CONSISTENCY,
+        expected_behavior="Recognize this as Bollinger Bands question — consistent answer",
+        expected_contains=["Bollinger", "standard deviation", "volatility"],
+    ),
+    GoldenQuestion(
+        id="co-005",
+        question="What happens when a cryptocurrency's price crosses above its 200-day moving average?",
+        category=EvalCategory.CONSISTENCY,
+        expected_behavior="Explain golden cross / MA crossover concept",
+        expected_contains=["200", "moving average", "bullish"],
+    ),
+
+    # ── Walkthrough / Interact Mode (6 questions) ───────────────────────────
+    GoldenQuestion(
+        id="wt-001",
+        question="Walk me through analyzing BTC support and resistance levels.",
+        category=EvalCategory.WALKTHROUGH,
+        expected_behavior="Produce a multi-step walkthrough with chart actions",
+        expected_contains=["step", "support", "resistance"],
+        tags=["interact"],
+    ),
+    GoldenQuestion(
+        id="wt-002",
+        question="Show me how to spot a bullish divergence on the chart.",
+        category=EvalCategory.WALKTHROUGH,
+        expected_behavior="Multi-step walkthrough: add RSI, highlight divergences, draw lines",
+        expected_contains=["RSI", "divergence", "step"],
+        tags=["interact"],
+    ),
+    GoldenQuestion(
+        id="wt-003",
+        question="Guide me through analyzing market structure.",
+        category=EvalCategory.WALKTHROUGH,
+        expected_behavior="Multi-step walkthrough: trendlines, swing highs/lows, consolidation",
+        expected_contains=["trend", "structure", "step"],
+        tags=["interact"],
+    ),
+    GoldenQuestion(
+        id="wt-004",
+        question="Compare BTC and ETH using technical analysis.",
+        category=EvalCategory.WALKTHROUGH,
+        expected_behavior="Multi-step walkthrough comparing two assets",
+        expected_contains=["BTC", "ETH", "step"],
+        tags=["interact"],
+    ),
+    GoldenQuestion(
+        id="wt-005",
+        question="How do I use Fibonacci retracement in my analysis?",
+        category=EvalCategory.WALKTHROUGH,
+        expected_behavior="Walkthrough: draw fib tool, explain levels, interpret zones",
+        expected_contains=["Fibonacci", "level", "retracement"],
+        tags=["interact"],
+    ),
+    GoldenQuestion(
+        id="wt-006",
+        question="Identify the current market regime and key levels.",
+        category=EvalCategory.WALKTHROUGH,
+        expected_behavior="Walkthrough: determine trend, mark S/R, add indicators",
+        expected_contains=["regime", "trend", "level"],
+        tags=["interact"],
+    ),
+
+    # ── Edge Cases (7 questions) ────────────────────────────────────────────
+    GoldenQuestion(
+        id="ec-001",
+        question="",
+        category=EvalCategory.EDGE_CASE,
+        expected_behavior="Handle empty query gracefully — ask for clarification",
+        expected_contains=["question", "help", "ask"],
+    ),
+    GoldenQuestion(
+        id="ec-002",
+        question="Hello",
+        category=EvalCategory.EDGE_CASE,
+        expected_behavior="Respond politely and offer assistance",
+        expected_contains=["hello", "help", "assist"],
+    ),
+    GoldenQuestion(
+        id="ec-003",
+        question="!@#$%^&*()_+{}|:<>?~",
+        category=EvalCategory.EDGE_CASE,
+        expected_behavior="Handle special characters gracefully",
+        expected_not_contains=["error", "exception", "traceback"],
+    ),
+    GoldenQuestion(
+        id="ec-004",
+        question="A" * 1000,
+        category=EvalCategory.EDGE_CASE,
+        expected_behavior="Handle very long repeated character input",
+        expected_not_contains=["traceback", "error"],
+    ),
+    GoldenQuestion(
+        id="ec-005",
+        question="What is RSI? " + "Please " * 50 + " explain",
+        category=EvalCategory.EDGE_CASE,
+        expected_behavior="Handle noisy/repetitive input gracefully",
+        expected_contains=["RSI", "Relative Strength"],
+    ),
+    GoldenQuestion(
+        id="ec-006",
+        question="BTCUSDTETHUSDT",
+        category=EvalCategory.EDGE_CASE,
+        expected_behavior="Handle concatenated symbol query",
+        expected_contains=["BTC", "symbol"],
+    ),
+    GoldenQuestion(
+        id="ec-007",
+        question="/help",
+        category=EvalCategory.EDGE_CASE,
+        expected_behavior="Handle command-like input",
+        expected_contains=["help", "can", "assist"],
+    ),
+
+    # ── Cross-Turn Memory (5 questions) ─────────────────────────────────────
+    # These test the session memory feature across sequential messages
+    GoldenQuestion(
+        id="ct-001",
+        question="I prefer using the 4H timeframe for my analysis.",
+        category=EvalCategory.CROSS_TURN_MEMORY,
+        expected_behavior="Acknowledge user preference for 4H",
+        expected_contains=["4H", "timeframe"],
+        tags=["session_memory"],
+    ),
+    GoldenQuestion(
+        id="ct-002",
+        question="I'm focused on BTC and ETH mainly.",
+        category=EvalCategory.CROSS_TURN_MEMORY,
+        expected_behavior="Acknowledge user's focus symbols",
+        expected_contains=["BTC", "ETH"],
+        tags=["session_memory"],
+    ),
+    GoldenQuestion(
+        id="ct-003",
+        question="I don't like using too many indicators — just RSI and volume.",
+        category=EvalCategory.CROSS_TURN_MEMORY,
+        expected_behavior="Acknowledge minimal indicator preference",
+        expected_contains=["RSI", "volume"],
+        tags=["session_memory"],
+    ),
+    GoldenQuestion(
+        id="ct-004",
+        question="Can you remind me what my trading preferences are?",
+        category=EvalCategory.CROSS_TURN_MEMORY,
+        expected_behavior="Recall previously stated user preferences from session",
+        expected_contains=["timeframe", "indicator", "prefer"],
+        tags=["session_memory"],
+    ),
+    GoldenQuestion(
+        id="ct-005",
+        question="Based on everything we discussed, summarize my analysis approach.",
+        category=EvalCategory.CROSS_TURN_MEMORY,
+        expected_behavior="Synthesize prior conversation into coherent summary",
+        tags=["session_memory"],
+    ),
+
+    # ── Bilingual Mixed (3 questions) ───────────────────────────────────────
+    GoldenQuestion(
+        id="bm-001",
+        question="What is RSI? Giải thích bằng tiếng Việt.",
+        category=EvalCategory.BILINGUAL_RESPONSE,
+        expected_behavior="Respond in Vietnamese when asked",
+    ),
+    GoldenQuestion(
+        id="bm-002",
+        question="Explain MACD và cách sử dụng nó.",
+        language="vi",
+        category=EvalCategory.BILINGUAL_RESPONSE,
+        expected_behavior="Respond in Vietnamese with code-switching",
+    ),
+    GoldenQuestion(
+        id="bm-003",
+        question="BTC trend analysis please. Phân tích xu hướng.",
+        category=EvalCategory.BILINGUAL_RESPONSE,
+        expected_behavior="Respond bilingually when query is mixed",
+    ),
+
+    # ── Configuration / Model Selection (2 questions) ───────────────────────
+    GoldenQuestion(
+        id="cf-001",
+        question="What model are you running on?",
+        category=EvalCategory.CONFIGURATION,
+        expected_behavior="Identify current model or explain configuration",
+        expected_contains=["model", "Qwen"],
+    ),
+    GoldenQuestion(
+        id="cf-002",
+        question="Are you using the standard or benchmark model tier?",
+        category=EvalCategory.CONFIGURATION,
+        expected_behavior="Explain model tier or provider configuration",
+        expected_contains=["tier", "model"],
+    ),
 ]
 
-assert len(GOLDEN_QUESTIONS) == 50, f"Expected 50 golden questions, got {len(GOLDEN_QUESTIONS)}"
+assert len(GOLDEN_QUESTIONS) == 93, f"Expected 93 golden questions, got {len(GOLDEN_QUESTIONS)}"

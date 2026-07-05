@@ -467,6 +467,8 @@ export const en = {
   actionConfirmation: "Require action confirmation",
   maxContextCandles: "Max context candles",
   memoryRetentionDays: "Memory retention days",
+  aiModel: "Model",
+  aiModelAuto: "Auto (Default)",
   aboutCapabilities: "Capabilities",
   appSettings: "App settings",
   chartActionTest: "Chart action test",
@@ -855,6 +857,79 @@ export const en = {
   // Watchlist empty states
   noStarredSymbols: "No starred symbols",
   noSymbols: "No symbols",
+
+  // ── Phase D+E: AI chat component i18n ────────────────────────────────
+  /** Action type labels for InteractBoard walkthrough */
+  actAddIndicator: "Add Indicator",
+  actRemoveIndicator: "Remove Indicator",
+  actToggleIndicator: "Toggle Indicator",
+  actToggleTimeframe: "Timeframe",
+  actToggleChart: "Chart",
+  actToggleMarket: "Market",
+  actPauseLiveStream: "Pause Live",
+  actResumeLiveStream: "Resume Live",
+  actSetVisibleRange: "Visible Range",
+  actMoveResizeChart: "Move/Resize",
+  actReplayChart: "Replay",
+  actAddNote: "Note",
+  actCaptureChartSnapshot: "Snapshot",
+  actViewSection: "View Section",
+  actDrawTool: "Draw",
+  actDrawTrendline: "Trendline",
+  actCreateAnnotation: "Note",
+  actHighlightSection: "Locate",
+  actHighlightRegion: "Region",
+  actHighlightArea: "Area",
+  actHighlightCandle: "Candle",
+  actHighlightIndicator: "Indicator",
+  actHighlightCandles: "Highlight",
+  actHighlightContextualZone: "Zone",
+  actSetTimeframe: "Timeframe",
+  actSetChartType: "Chart Type",
+  actSetSymbol: "Symbol",
+  actZoomChart: "Zoom",
+  actScrollChart: "Scroll",
+  actOpenPanel: "Open Panel",
+  actSwitchPanelTab: "Tab",
+  actSwitchAppView: "View",
+  actClearDrawings: "Clear",
+  actClearAiAnnotations: "Clear AI",
+  actFetchHistoricalPrices: "History",
+  actExportChart: "Export",
+  actResetChartView: "Reset",
+  actScrollChartToTime: "Scroll to",
+  actEnterReplay: "Replay",
+  actOpenNewsPopup: "News",
+  actNavigateTab: "Navigate",
+
+  /** Walkthrough / InteractBoard labels */
+  walkthroughTitle: "Guided Analysis",
+  walkthroughStep: "Step",
+  walkthroughStepOf: "of",
+  walkthroughProgress: "progress",
+  walkthroughResetAction: "Reset",
+  walkthroughKeepEffects: "Keep",
+  walkthroughInProgress: "Walkthrough in progress...",
+
+  /** Confidence labels */
+  confidenceHigh: "High",
+  confidenceMedium: "Medium",
+  confidenceLow: "Low",
+
+  /** Knowledge sources tooltip */
+  knowledgeSourcesUsed: "Knowledge sources used",
+
+  /** Rating tooltips */
+  ratingHelpful: "Helpful",
+  ratingNotHelpful: "Not helpful",
+
+  /** Suggested prompts (AiChatInput) */
+  suggestTrend: "Analyze recent trend direction",
+  suggestSupportResistance: "Find support and resistance levels",
+  suggestPatterns: "Detect candlestick patterns",
+  suggestMultiTimeframe: "Compare multiple timeframes",
+  suggestVolume: "Check volume confirmation",
+  suggestIndicators: "Explain current indicator signals",
 } as const;
 
 export type TranslationKey = keyof typeof en;

@@ -195,7 +195,7 @@ class MarketFetcherTask:
                 h24_price_change_pct,
                 h24_volume,
                 h24_quote_volume
-            FROM iceberg.crypto_lakehouse.coin_ticker
+            FROM iceberg_catalog.crypto_lakehouse.coin_ticker
             WHERE symbol LIKE '%USDT'
             ORDER BY h24_quote_volume DESC
             LIMIT 500

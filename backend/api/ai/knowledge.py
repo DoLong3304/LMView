@@ -162,6 +162,30 @@ async def knowledge_health_endpoint(
     return await knowledge_health()
 
 
+@router.post("/knowledge/reindex")
+async def reindex_knowledge(
+    current_user: dict = Depends(get_current_user),
+):
+    """Recompute all chunk embeddings using current embedding model.
+
+    Requires admin role. Run after an embedding model upgrade.
+    May take 1-2 minutes depending on KB size (CPU-dependent).
+    """
+    if current_user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Reindex requires admin privileges",
+        )
+    if not AI_ENABLE_RAG:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="RAG is not enabled (AI_ENABLE_RAG=false)",
+        )
+    from ai_service.rag.auto_ingest import reindex_all_embeddings
+    result = await reindex_all_embeddings()
+    return result
+
+
 @router.get("/knowledge/registry/validate")
 async def validate_knowledge_registry(
     current_user: dict = Depends(get_current_user),

@@ -11,7 +11,7 @@ networks:
 # VOLUMES
 # ─────────────────────────────────────────────────────────────────────────────
 volumes:
-  minio-data:
+#  minio-data:  # REMOVED — migrated to S3
   kafka-1-data:
   kafka-2-data:
   kafka-3-data:
@@ -37,12 +37,21 @@ volumes:
   loki-data:
   flink_deps:
 
+# ── Logging defaults (capped rotation to prevent disk fill) ──────
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
 services:
   # ══════════════════════════════════════════════════════════════════════════════
   # DATA LAYER
   # ══════════════════════════════════════════════════════════════════════════════
 
   zookeeper:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: confluentinc/cp-zookeeper:7.6.0
     container_name: zookeeper
@@ -68,6 +77,7 @@ services:
       retries: 5
 
   kafka-1:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: apache/kafka:3.9.0
     container_name: kafka-1
@@ -112,6 +122,7 @@ services:
       start_period: 30s
 
   kafka-2:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: apache/kafka:3.9.0
     container_name: kafka-2
@@ -156,6 +167,7 @@ services:
       start_period: 30s
 
   kafka-3:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: apache/kafka:3.9.0
     container_name: kafka-3
@@ -203,59 +215,13 @@ services:
   # SCHEMA REGISTRY  (Apicurio — Confluent-compatible API)
   # ═══════════════════════════════════════════════════════════════════════════════
 
-  minio:
-    profiles: ["dev", "prod"]
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
-    container_name: minio
-    hostname: minio
-    restart: unless-stopped
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_PROMETHEUS_AUTH_TYPE: public
-    command: server /data --console-address ":9001"
-    volumes:
-      - minio-data:/data
-    networks:
-      - crypto-net
-    deploy:
-      resources:
-        limits:
-          memory: 1G
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-
-  # MinIO bucket init - runs once then exits
-  minio-init:
-    profiles: ["dev", "prod"]
-    image: minio/mc:RELEASE.2025-08-13T08-35-41Z
-    container_name: minio-init
-    depends_on:
-      minio:
-        condition: service_healthy
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    entrypoint: >
-      /bin/sh -c "
-        mc alias set local http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD;
-        mc mb --ignore-existing local/cryptoprice;
-        mc mb --ignore-existing local/flink-checkpoints;
-        echo 'Buckets ready.';
-      "
-    networks:
-      - crypto-net
-    restart: "no"
+  # MINIO REMOVED — migrated to AWS S3 (lmview-iceberg-storage)
+  # minio-init REMOVED — bucket exists on S3
 
 
 
   schema-registry:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: apicurio/apicurio-registry-mem:2.6.2.Final
     container_name: schema-registry
@@ -282,6 +248,7 @@ services:
       start_period: 20s
 
   influxdb:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: influxdb:2.7
     container_name: influxdb
@@ -304,7 +271,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 8G
     healthcheck:
       test: ["CMD", "influx", "ping"]
       interval: 15s
@@ -312,6 +279,7 @@ services:
       retries: 5
 
   postgres:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: pgvector/pgvector:pg16
     container_name: postgres
@@ -343,6 +311,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   redis-master:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-master
@@ -350,88 +319,124 @@ services:
     restart: unless-stopped
     ports:
       - "16379:6379"
+    # Use startup script that forces master role on every restart
+    # Prevents split-brain where master starts as slave after OOM/Sentinel failover
+    entrypoint: ["/bin/sh", "/redis-master-start.sh"]
     command: >
-      redis-server
       --appendonly yes
       --appendfsync everysec
-      --maxmemory 2gb
+      --maxmemory 4gb
       --maxmemory-policy allkeys-lru
       --save 60 1000
       --hz 50
       --tcp-backlog 511
     volumes:
       - redis-master-data:/data
+      - ./docker/redis/redis.conf:/etc/redis/redis.conf:ro
+      - ./docker/redis/redis-master-start.sh:/redis-master-start.sh:ro
     networks:
       - crypto-net
     deploy:
       resources:
         limits:
-          memory: 2.5G
+          memory: 4G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Verify role is master, not just ping
+      test: ["CMD", "redis-cli", "info", "replication"]
       interval: 5s
       timeout: 3s
       retries: 3
+      start_period: 10s
 
   redis-replica-1:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-replica-1
     hostname: redis-replica-1
     restart: unless-stopped
     command: >
-      redis-server
+      redis-server /etc/redis/redis.conf
       --replicaof redis-master 6379
-      --replica-read-only yes
       --appendonly yes
       --appendfsync everysec
+      --maxmemory 4gb
+      --maxmemory-policy allkeys-lru
     depends_on:
       redis-master:
         condition: service_healthy
     volumes:
       - redis-replica-1-data:/data
+      - ./docker/redis/redis.conf:/etc/redis/redis.conf:ro
     networks:
       - crypto-net
     deploy:
       resources:
         limits:
-          memory: 2.5G
+          memory: 4G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
+      # Verify role is slave AND master_link_status is up.
+      # Large AOF/RDB loads + full resync can exceed 60s; keep start window wide
+      # so Swarm does not kill healthy replicas mid-sync.
+      test: ["CMD-SHELL", "redis-cli info replication | grep -q 'role:slave' && redis-cli info replication | grep -q 'master_link_status:up'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
 
   redis-replica-2:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-replica-2
     hostname: redis-replica-2
     restart: unless-stopped
     command: >
-      redis-server
+      redis-server /etc/redis/redis.conf
       --replicaof redis-master 6379
-      --replica-read-only yes
       --appendonly yes
       --appendfsync everysec
+      --maxmemory 4gb
+      --maxmemory-policy allkeys-lru
     depends_on:
       redis-master:
         condition: service_healthy
     volumes:
       - redis-replica-2-data:/data
+      - ./docker/redis/redis.conf:/etc/redis/redis.conf:ro
     networks:
       - crypto-net
     deploy:
       resources:
         limits:
-          memory: 2.5G
+          memory: 4G
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 3
+      # Verify role is slave AND master_link_status is up.
+      # Large AOF/RDB loads + full resync can exceed 60s; keep start window wide
+      # so Swarm does not kill healthy replicas mid-sync.
+      test: ["CMD-SHELL", "redis-cli info replication | grep -q 'role:slave' && redis-cli info replication | grep -q 'master_link_status:up'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 180s
 
   redis-sentinel-1:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-sentinel-1
@@ -444,18 +449,35 @@ services:
       - ./docker/redis/sentinel.conf:/etc/redis/sentinel.conf
       - ./docker/redis/sentinel-entrypoint.sh:/sentinel-entrypoint.sh
       - redis-sentinel-1-data:/data
+    # Wait for ALL redis data nodes to be healthy before starting
+    # Prevents sentinel from seeing partial cluster state during recovery
     depends_on:
       redis-master:
         condition: service_healthy
+      redis-replica-1:
+        condition: service_healthy
+      redis-replica-2:
+        condition: service_healthy
     networks:
       - crypto-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "26379", "ping"]
       interval: 5s
       timeout: 3s
       retries: 3
+      start_period: 10s
 
   redis-sentinel-2:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-sentinel-2
@@ -468,18 +490,34 @@ services:
       - ./docker/redis/sentinel.conf:/etc/redis/sentinel.conf
       - ./docker/redis/sentinel-entrypoint.sh:/sentinel-entrypoint.sh
       - redis-sentinel-2-data:/data
+    # Wait for ALL redis data nodes to be healthy before starting
     depends_on:
       redis-master:
         condition: service_healthy
+      redis-replica-1:
+        condition: service_healthy
+      redis-replica-2:
+        condition: service_healthy
     networks:
       - crypto-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "26379", "ping"]
       interval: 5s
       timeout: 3s
       retries: 3
+      start_period: 10s
 
   redis-sentinel-3:
+    <<: *logging
     profiles: ["dev", "prod"]
     image: redis:7.2-alpine
     container_name: redis-sentinel-3
@@ -492,22 +530,38 @@ services:
       - ./docker/redis/sentinel.conf:/etc/redis/sentinel.conf
       - ./docker/redis/sentinel-entrypoint.sh:/sentinel-entrypoint.sh
       - redis-sentinel-3-data:/data
+    # Wait for ALL redis data nodes to be healthy before starting
     depends_on:
       redis-master:
         condition: service_healthy
+      redis-replica-1:
+        condition: service_healthy
+      redis-replica-2:
+        condition: service_healthy
     networks:
       - crypto-net
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
     healthcheck:
       test: ["CMD", "redis-cli", "-p", "26379", "ping"]
       interval: 5s
       timeout: 3s
       retries: 3
+      start_period: 10s
 
   # ══════════════════════════════════════════════════════════════════════════════
   # COMPUTE LAYER
   # ══════════════════════════════════════════════════════════════════════════════
 
   flink-jobmanager:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -542,9 +596,12 @@ services:
       REDIS_PORT: 6379
       KEYDB_1S_RETENTION_DAYS: 1
       KEYDB_1M_RETENTION_DAYS: 7
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      S3_ENDPOINT: https://s3.ap-southeast-1.amazonaws.com
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+      KAFKA_SCAN_STARTUP_MODE: latest-offset
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8081/ >/dev/null 2>&1 || exit 1"]
       interval: 15s
@@ -570,6 +627,7 @@ services:
         condition: service_healthy
 
   flink-taskmanager:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -609,9 +667,12 @@ services:
       REDIS_PORT: 6379
       KEYDB_1S_RETENTION_DAYS: 1
       KEYDB_1M_RETENTION_DAYS: 7
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      S3_ENDPOINT: https://s3.ap-southeast-1.amazonaws.com
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
+      KAFKA_SCAN_STARTUP_MODE: latest-offset
     volumes:
       - ./:/app
       - ./docker/flink/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
@@ -631,6 +692,7 @@ services:
       start_period: 60s
 
   spark-master:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -650,8 +712,10 @@ services:
       SPARK_MASTER_WEBUI_PORT: 8080
       SPARK_HISTORY_OPTS: "-Dspark.history.fs.logDirectory=/opt/spark-events -Dspark.history.ui.port=18080 -Dspark.history.fs.cleaner.enabled=true -Dspark.history.fs.cleaner.interval=1d -Dspark.history.fs.cleaner.maxAge=3d"
       SPARK_CONF_DIR: /opt/spark/conf
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      S3_ENDPOINT: https://s3.ap-southeast-1.amazonaws.com
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       INFLUX_TOKEN: ${INFLUX_TOKEN}
@@ -681,6 +745,7 @@ services:
       retries: 3
 
   spark-submit:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -694,8 +759,15 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-lmview-iceberg-storage}
+      S3_ENDPOINT: ${S3_ENDPOINT:-https://s3.ap-southeast-1.amazonaws.com}
+      S3_SSL_ENABLED: ${S3_SSL_ENABLED:-true}
+      S3_PATH_STYLE: ${S3_PATH_STYLE:-false}
+      S3_PREFIX: ${S3_PREFIX:-}
+      KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
     volumes:
       - ./:/app:rw
       - spark-submit-logs:/var/log/spark-submit
@@ -711,9 +783,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 3G
         reservations:
-          memory: 512M
+          memory: 1G
     healthcheck:
       test: ["CMD-SHELL", "pgrep -f SparkSubmit > /dev/null || exit 1"]
       interval: 30s
@@ -722,6 +794,7 @@ services:
       start_period: 90s
 
   spark-worker:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -739,8 +812,10 @@ services:
       SPARK_CONF_DIR: /opt/spark/conf
       # ── Disk-bleed fix: auto-purge finished app work dirs older than 1h ──
       SPARK_WORKER_OPTS: "-Dspark.worker.cleanup.enabled=true -Dspark.worker.cleanup.interval=1800 -Dspark.worker.cleanup.appDataTtl=3600"
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      S3_ENDPOINT: https://s3.ap-southeast-1.amazonaws.com
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       INFLUX_TOKEN: ${INFLUX_TOKEN}
@@ -755,16 +830,17 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 8G
     depends_on:
       - spark-master
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8081"]
+      test: ["CMD", "curl", "-f", "http://localhost:8084"]
       interval: 15s
       timeout: 5s
       retries: 3
 
   spark-worker-2:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -782,8 +858,10 @@ services:
       SPARK_CONF_DIR: /opt/spark/conf
       # ── Disk-bleed fix: auto-purge finished app work dirs older than 1h ──
       SPARK_WORKER_OPTS: "-Dspark.worker.cleanup.enabled=true -Dspark.worker.cleanup.interval=1800 -Dspark.worker.cleanup.appDataTtl=3600"
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      S3_ENDPOINT: https://s3.ap-southeast-1.amazonaws.com
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       INFLUX_TOKEN: ${INFLUX_TOKEN}
@@ -798,7 +876,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 8G
     depends_on:
       - spark-master
     healthcheck:
@@ -808,31 +886,44 @@ services:
       retries: 3
 
   job-watchdog:
+    <<: *logging
     profiles: ["dev", "prod"]
-    image: docker:27.0-cli
+    build:
+      context: .
+      dockerfile: docker/flink/Dockerfile
+    image: cryptoprice/flink:1.18.1
     container_name: job-watchdog
     restart: unless-stopped
-    entrypoint:
-      - sh
-      - -c
-      - |
-        apk add --no-cache bash curl python3 >/dev/null && python3 /app/scripts/job_watchdog.py
+    entrypoint: ["python3", "/app/scripts/watchdog_flink_job.py"]
     environment:
-      FLINK_HEALTH_URL: http://flink-jobmanager:8081
-      SPARK_HEALTH_URL: http://spark-master:8080
+      FLINK_JM_URL: http://flink-jobmanager:8081
+      REDIS_HOST: redis-master
+      PIPELINE_SCRIPT: /app/src/processing/pipeline.py
+      KAFKA_SCAN_STARTUP_MODE: latest-offset
       JOB_WATCHDOG_INTERVAL_SEC: 300
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
+      SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
     volumes:
       - ./:/app:ro
-      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - crypto-net
     depends_on:
       flink-jobmanager:
         condition: service_started
-      spark-master:
-        condition: service_started
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+      restart_policy:
+        condition: any
+        delay: 30s
+        window: 120s
 
   auto-submit-jobs:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -840,8 +931,9 @@ services:
     image: cryptoprice/flink:1.18.1
     container_name: auto-submit-jobs
     restart: "no"
-    command: ["/bin/bash", "/app/scripts/auto_submit_jobs.sh"]
+    command: ["/bin/bash", "/app/scripts/submit_flink_job_direct.sh"]
     environment:
+      FLINK_JM_URL: http://flink-jobmanager:8081
       FLINK_HEALTH_URL: http://flink-jobmanager:8081
       SPARK_HEALTH_URL: http://spark-master:8080
       SCHEMA_REGISTRY_URL: http://schema-registry:8080/apis/ccompat/v7
@@ -854,8 +946,10 @@ services:
       REDIS_MASTER_NAME: mymaster
       REDIS_HOST: redis-master
       REDIS_PORT: 6379
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      S3_ENDPOINT: https://s3.ap-southeast-1.amazonaws.com
       FLINK_CHECKPOINT_DIR: s3a://flink-checkpoints/flink-checkpoints
       FLINK_PARALLELISM: 12
     volumes:
@@ -873,6 +967,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   trino:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -886,8 +981,10 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      S3_ENDPOINT: https://s3.ap-southeast-1.amazonaws.com
 
     volumes:
       - trino-data:/data/trino
@@ -900,7 +997,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 4G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/v1/info"]
       interval: 20s
@@ -909,6 +1006,7 @@ services:
       start_period: 30s
 
   dagster-webserver:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: ./docker/dagster
@@ -926,8 +1024,10 @@ services:
       KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      S3_ENDPOINT: https://s3.ap-southeast-1.amazonaws.com
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
@@ -951,6 +1051,7 @@ services:
       start_period: 15s
 
   dagster-daemon:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: ./docker/dagster
@@ -965,8 +1066,10 @@ services:
       KAFKA_BOOTSTRAP: kafka-1:9092,kafka-2:9092,kafka-3:9092
       INFLUX_URL: http://influxdb:8086
       INFLUX_TOKEN: ${INFLUX_TOKEN}
-      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
-      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION}
+      S3_ENDPOINT: https://s3.ap-southeast-1.amazonaws.com
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       RETENTION_1M_DAYS: 90
@@ -993,6 +1096,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   x-fastapi:
+    <<: *logging
     profiles: ["dont-start"]
     build:
       context: .
@@ -1057,6 +1161,7 @@ services:
 
   fastapi-dev:
     extends: x-fastapi
+    <<: *logging
     profiles: ["dev"]
     container_name: fastapi-dev
     hostname: fastapi-dev
@@ -1080,6 +1185,7 @@ services:
 
   fastapi-prod:
     extends: x-fastapi
+    <<: *logging
     profiles: ["prod"]
     container_name: fastapi-prod
     hostname: fastapi-prod
@@ -1111,6 +1217,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   x-nginx:
+    <<: *logging
     profiles: ["dont-start"]
     build:
       context: .
@@ -1138,6 +1245,7 @@ services:
 
   nginx-dev:
     extends: x-nginx
+    <<: *logging
     profiles: ["dev"]
     container_name: nginx-dev
     hostname: nginx-dev
@@ -1158,6 +1266,7 @@ services:
 
   nginx-prod:
     extends: x-nginx
+    <<: *logging
     profiles: ["prod"]
     container_name: nginx-prod
     hostname: nginx-prod
@@ -1183,6 +1292,7 @@ services:
       - MONITORING_PASSWORD=${MONITORING_PASSWORD:-admin}
 
   certbot-auto:
+    <<: *logging
     profiles: ["prod"]
     image: certbot/certbot:v5.6.0
     container_name: certbot-auto
@@ -1201,6 +1311,7 @@ services:
         condition: service_started
 
   duckdns-auto:
+    <<: *logging
     profiles: ["prod"]
     image: curlimages/curl:8.7.1
     container_name: duckdns-auto
@@ -1218,6 +1329,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   influx-backfill:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -1241,6 +1353,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   producer:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -1270,12 +1383,17 @@ services:
       # The new combined-stream-producer service uses Binance's
       # combined-stream endpoint (single connection, no 403) and
       # publishes to the same Kafka topics with the same message
-      # format.  The binance-ticker-ws shard pool still writes live
+      # Iceberg/future queries via Kafka -> Spark streaming -> S3.
+      # The binance-ticker-ws shard pool still writes live
       # ticker directly to Redis for low-latency forming candles.
-      ENABLE_TICKER_WS: "false"
-      ENABLE_TRADES_WS: "false"
+      ENABLE_TICKER_WS: "true"
+      ENABLE_TRADES_WS: "true"
       ENABLE_DEPTH_WS: "false"
       ENABLE_KLINE_WS: "false"
+      REDIS_SENTINELS: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      REDIS_MASTER_NAME: mymaster
+      REDIS_HOST: redis-master
+      REDIS_PORT: "6379"
     volumes:
       - ./:/app
     networks:
@@ -1295,6 +1413,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   binance-ticker-ws:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -1347,6 +1466,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   combined-stream-producer:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -1374,7 +1494,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512M
+          memory: 1G
 
   # ══════════════════════════════════════════════════════════════════════════════
   # BINANCE REST KLINE FEED (Phase 5 — replaces dead producer's kline path)
@@ -1388,6 +1508,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   binance-kline-rest:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -1431,6 +1552,63 @@ services:
     deploy:
       resources:
         limits:
+          memory: 1G
+      restart_policy:
+        condition: any
+        delay: 10s
+        window: 120s
+
+  # ══════════════════════════════════════════════════════════════════════════════
+  # BINANCE 1S KLINE WEBSOCKET FEED (8 SHARDS)
+  #
+  # Low-latency path for 1s klines. Uses 8 parallel WebSocket connections,
+  # each subscribing to ~25 symbols' @kline_1s stream. Writes directly to
+  # Redis sorted set ``candle:1s:binance:{symbol}``, bypassing Kafka/Flink.
+  # Latency target: <200ms from Binance emit → Redis write.
+  # ══════════════════════════════════════════════════════════════════════════════
+
+  binance-kline-ws:
+    profiles: ["dev", "prod"]
+    build:
+      context: .
+      dockerfile: docker/kline-ws/Dockerfile
+    image: cryptoprice/binance-kline-ws:0.1.0
+    container_name: binance-kline-ws
+    hostname: binance-kline-ws
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: redis-master
+      REDIS_PORT: "6379"
+      REDIS_DB: "0"
+      REDIS_SENTINELS: redis-sentinel-1:26379,redis-sentinel-2:26379,redis-sentinel-3:26379
+      REDIS_MASTER_NAME: mymaster
+      KLINE_WS_TOP_N: "200"
+      KLINE_WS_SHARDS: "8"
+      KLINE_WS_SYMBOLS_PER_SHARD: "100"
+      KLINE_WS_PING_INTERVAL_S: "30"
+      KLINE_WS_PING_TIMEOUT_S: "10"
+      KLINE_WS_TTL_S: "86400"
+      KLINE_WS_REDIS_FLUSH_MS: "50"
+      KLINE_WS_REDIS_BUFFER_MAX: "2000"
+      KLINE_WS_RECONNECT_BASE_MS: "1000"
+      KLINE_WS_RECONNECT_MAX_MS: "30000"
+      METRICS_HOST: "0.0.0.0"
+      METRICS_PORT: "9102"
+      LOG_LEVEL: "INFO"
+    networks:
+      - crypto-net
+    depends_on:
+      redis-master:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; r=urllib.request.urlopen('http://localhost:9102/healthz', timeout=3); sys.exit(0 if r.status==200 else 1)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    deploy:
+      resources:
+        limits:
           memory: 512M
 
   # ══════════════════════════════════════════════════════════════════════════════
@@ -1445,6 +1623,7 @@ services:
   # ══════════════════════════════════════════════════════════════════════════════
 
   binance-depth-trades-rest:
+    <<: *logging
     profiles: ["dev", "prod"]
     build:
       context: .
@@ -1514,6 +1693,7 @@ services:
       resources:
         limits:
           memory: 128M
+    <<: *logging
     profiles:
       - monitoring
     # NOTE: oliver006/redis_exporter is a minimal FROM-scratch Go image
@@ -1534,7 +1714,7 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-      - --storage.tsdb.retention.time=30d
+      - --storage.tsdb.retention.time=7d
       - --web.console.libraries=/usr/share/prometheus/console_libraries
       - --web.console.templates=/usr/share/prometheus/consoles
       - --web.external-url=/prometheus/
@@ -1557,6 +1737,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+    <<: *logging
     profiles:
       - monitoring
 
@@ -1577,6 +1758,7 @@ services:
       resources:
         limits:
           memory: 128M
+    <<: *logging
     profiles:
       - monitoring
 
@@ -1597,6 +1779,7 @@ services:
       resources:
         limits:
           memory: 64M
+    <<: *logging
     profiles:
       - monitoring
 
@@ -1639,6 +1822,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+    <<: *logging
     profiles:
       - monitoring
 
@@ -1668,6 +1852,7 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+    <<: *logging
     profiles:
       - logging
 
@@ -1690,5 +1875,6 @@ services:
       resources:
         limits:
           memory: 256M
+    <<: *logging
     profiles:
       - logging

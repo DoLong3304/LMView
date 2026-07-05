@@ -3,7 +3,7 @@
 > **Document Type**: Internal System Documentation
 > **Audience**: AI Assistant (for understanding system capabilities and limitations)
 > **Classification**: Internal Only — Not for end-user consumption
-> **Version**: 0.25.42+
+> **Version**: 0.32.0+
 
 ---
 
@@ -20,7 +20,7 @@ LMView is a Lambda Architecture cryptocurrency market data platform. This docume
 │                         LMView Lambda Architecture                       │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│  Exchanges (Binance, OKX)                                              │
+│  Exchanges (Binance primary, OKX opt-in)                              │
 │         ↓ WebSocket                                                    │
 │  Producer (Kafka serialization)                                        │
 │         ↓ Avro messages                                                │
@@ -28,12 +28,15 @@ LMView is a Lambda Architecture cryptocurrency market data platform. This docume
 │         ↓                                                              │
 │  ├─────────────────┬──────────────────────────────────────┐             │
 │  │   SPEED LAYER   │    BATCH/LAKEHOUSE LAYER            │             │
-│  │   Flink         │    Spark + Iceberg + MinIO + Trino │             │
-│  │   ↓ Redis       │    ↓ MinIO/Iceberg                 │             │
-│  │   ↓ InfluxDB    │    ↓ PostgreSQL (catalog)          │             │
+│  │   Flink         │    Spark + Iceberg + AWS S3 + Trino │             │
+│  │   ↓ Redis       │    ↓ S3/Iceberg                     │             │
+│  │   ↓ InfluxDB    │    ↓ PostgreSQL (iceberg_catalog)   │             │
 │  └─────────────────┴──────────────────────────────────────┘             │
 │         ↓                                                              │
 │  FastAPI (REST + WebSocket)                                            │
+│  ├──────────────────────┐                                              │
+│  │ ai-service (port 8100)│ — LangGraph AI pipeline via HTTP proxy      │
+│  └──────────────────────┘                                              │
 │         ↓                                                              │
 │  React Frontend                                                        │
 │                                                                         │
@@ -134,8 +137,23 @@ key = {
 - **Known gap**: Ticker dedup logic omits `exchange` field, merging all exchanges together.
 
 **Iceberg Catalog**:
-- Hadoop catalog: `s3://cryptoprice/iceberg` (used by Spark)
-- JDBC catalog: `iceberg_catalog.gold` (used by Dagster/Trino)
+- JDBC catalog backed by **separate PostgreSQL database** (`iceberg_catalog`), not app `cryptoprice` DB
+- Catalog name: `iceberg_catalog` (must match Trino catalog name for cross-engine queries)
+- Tables created in `iceberg_catalog.crypto_lakehouse.*` namespace
+- Three active tables: `coin_klines` (Oct 2022 → today, 685K+ records), `coin_trades` (852K+ records), `coin_ticker`
+
+**S3 Object Storage** (production):
+- Bucket: `lmview-iceberg-storage` (ap-southeast-1)
+- Prefix: `warehouse/crypto_lakehouse/`
+- IAM user: `lmviews3` with full S3 permissions
+- Warehouse path: `s3a://lmview-iceberg-storage/warehouse/`
+- SSL + path-style access: controlled by env vars (`S3_SSL_ENABLED`, `S3_PATH_STYLE`)
+- Dual profile: MinIO (`S3_PREFIX=cryptoprice`, local) and AWS S3 (production) switchable via `.env`
+
+**Trino Integration**:
+- Trino catalog file: `iceberg_catalog.properties` (must match Spark catalog name)
+- Backend queries Iceberg via Trino as warm-storage fallback when InfluxDB data is insufficient
+- Supports all three Iceberg tables for analytical queries
 
 #### Backfill Jobs
 - `backfill_klines.py` — Historical kline backfill from Binance REST API
@@ -309,7 +327,40 @@ key = {
 #### AIAssistantPanel
 - Ask Mode: Chat interface with context awareness
 - Interact Mode: Action proposal cards with approve/reject
+- Walkthrough Mode: Multi-step guided analysis with auto-execution
 - Bilingual (i18n: en/vi)
+
+---
+
+### 9. AI Service (`ai_service/`)
+
+**Purpose**: Standalone AI container (port 8100) handling all LLM interactions. Separated from backend to keep heavy ML dependencies out of the API container.
+
+**Architecture**: LangGraph-based pipeline:
+1. **Scope Gate** — Checks if query is in-domain (crypto/TA/LMView features). Blocks off-topic queries fast (~10ms sync).
+2. **Intent Router** — Classifies query intent, extracts symbol/timeframe/indicator context. Uses LLM with JSON structured output. Falls back to keyword-based extraction on failure.
+3. **Context Build** — Fetches chart candles, market data, news, indicator values, support/resistance levels. Customized per query needs.
+4. **Parallel Experts** — Market Data, Technical Analysis, News/Sentiment, RAG Knowledge, Chart Interaction/Tour Planning (for Interact mode). Each expert gets targeted context. Runs in parallel with per-expert timeout (20s).
+5. **Synthesis** — Combines expert outputs, produces final response. For Interact mode, generates structured walkthrough plan (N steps with actions). Uses reserved/higher-quality LLM tier.
+6. **Reflection** — Validates response: checks safety, adds disclaimers, ensures no prohibited content.
+7. **Output Guard** — Sanitizes response, enforces knowledge boundary, applies bilingual formatting.
+
+**LLM Provider**: DashScope (Alibaba Cloud, Singapore region) via LiteLLM library. Three tiers:
+- Standard: Qwen3.7-Plus (daily), Qwen3.6-Plus → Flash → 3.5-Plus fallback
+- Reserved: Qwen3.7-Max → QwQ-32B → DeepSeek-R1
+- Benchmark: Qwen3.6-Max-Preview → Qwen3.5-Flash → Qwen2.5-72B-Instruct
+
+**Caching (4 layers)**:
+1. Provider dict (50 entries, 15s TTL)
+2. LiteLLM cache (in-memory/disk, 60s TTL)
+3. Application normalized cache (500 entries, 30-600s TTL)
+4. DashScope server-side context caching (~80% first-token latency reduction)
+
+**RAG**: pgvector (BAAI/bge-small-en-v1.5, 384-dim) with hybrid search (60% vector + 40% BM25 keyword). Cross-encoder reranker (ms-marco-MiniLM-L-6-v2). 23 sources, 1500+ chunks.
+
+**Security**: Output guard validates all responses; knowledge boundary prevents off-topic answers; financial disclaimers always included.
+
+**Integration**: Backend proxies AI requests via HTTP (`AI_SERVICE_EMBEDDED=false`). Backend never imports `ai_service` modules directly.
 
 ---
 

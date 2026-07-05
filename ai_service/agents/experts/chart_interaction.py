@@ -18,18 +18,51 @@ logger = logging.getLogger("ai_service.agents.experts.chart_interaction")
 
 # ── Typed Tool Definitions ────────────────────────────────────────────────────
 # Every frontend action must map to one of these. No arbitrary code execution.
+# Phase E: Comprehensive action catalog that mirrors the frontend handler
+# registry. Any action added to the frontend handlerRegistry should also be
+# defined here so the LLM can propose it.
 
 CHART_TOOLS: Dict[str, Dict[str, Any]] = {
+    # ── Chart configuration ────────────────────────────────────────────
+    "set_timeframe": {
+        "description": "Switch the chart timeframe for multi-timeframe analysis. Use this to zoom in/out: 1s/1m for detail, 4h/1d for broader trend.",
+        "parameters": {
+            "timeframe": {
+                "type": "string",
+                "enum": ["1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"],
+            },
+        },
+        "required": ["timeframe"],
+    },
+    "set_chart_type": {
+        "description": "Change the chart type for better visualization. heikinAshi smooths noise, renko ignores time, line shows trend clearly.",
+        "parameters": {
+            "chart_type": {
+                "type": "string",
+                "enum": ["candles", "bars", "line", "area", "heikinAshi", "renko"],
+            },
+        },
+        "required": ["chart_type"],
+    },
+    "set_symbol": {
+        "description": "Switch the selected market symbol (e.g., BTCUSDT, ETHUSDT, SOLUSDT). Used for cross-market analysis or when query involves a different symbol.",
+        "parameters": {
+            "symbol": {"type": "string", "description": "Trading pair symbol like BTCUSDT, ETHUSDT"},
+        },
+        "required": ["symbol"],
+    },
     "set_visible_range": {
-        "description": "Set the visible time range on the chart",
+        "description": "Set the visible time range on the chart to zoom/pan to a specific time window.",
         "parameters": {
             "from_timestamp": {"type": "integer", "description": "Start time (epoch ms)"},
             "to_timestamp": {"type": "integer", "description": "End time (epoch ms)"},
         },
         "required": ["from_timestamp", "to_timestamp"],
     },
+
+    # ── Indicators ─────────────────────────────────────────────────────
     "add_indicator": {
-        "description": "Add a technical indicator to the chart",
+        "description": "Add a technical indicator to the chart. Used to display RSI, MACD, Bollinger Bands, etc.",
         "parameters": {
             "indicator": {
                 "type": "string",
@@ -47,12 +80,12 @@ CHART_TOOLS: Dict[str, Dict[str, Any]] = {
                     "stochastic", "mfi", "ichimoku", "supertrend", "psar",
                 ],
             },
-            "params": {"type": "object", "description": "Indicator-specific parameters"},
+            "params": {"type": "object", "description": "Indicator-specific parameters like period"},
         },
-        "required": [],  # Validated dynamically to allow either indicator or indicator_name
+        "required": [],
     },
     "remove_indicator": {
-        "description": "Remove a technical indicator from the chart",
+        "description": "Remove a technical indicator from the chart to declutter.",
         "parameters": {
             "indicator": {"type": "string"},
             "indicator_name": {"type": "string"},
@@ -60,36 +93,88 @@ CHART_TOOLS: Dict[str, Dict[str, Any]] = {
         "required": [],
     },
     "toggle_indicator": {
-        "description": "Toggle a technical indicator on the chart",
+        "description": "Toggle a technical indicator on/off.",
         "parameters": {
             "indicator": {"type": "string"},
             "indicator_name": {"type": "string"},
         },
         "required": [],
     },
-    "draw_tool": {
-        "description": "Select or place a drawing tool on the chart.",
+    "configure_indicator": {
+        "description": "Update indicator parameters (period, colors, thresholds).",
         "parameters": {
-            "tool": {"type": "string", "enum": ["trendline", "fibonacci", "rectangle", "cursor"]},
-            "points": {"type": "array", "items": {"type": "object"}},
-            "text": {"type": "string"},
+            "indicator": {"type": "string", "description": "Indicator key"},
+            "settings": {"type": "object", "description": "Settings to override (e.g. {period: 14, color: '#f00'})"},
+        },
+        "required": ["indicator", "settings"],
+    },
+
+    # ── Drawing tools ──────────────────────────────────────────────────
+    "draw_tool": {
+        "description": "Select or place a drawing tool on the chart. Supports all tools (trendline, fibonacci, rectangle, ellipse, channel, etc.). Use `points` array with {time, price} coordinates and optional `text` for labels.",
+        "parameters": {
+            "tool": {"type": "string", "enum": [
+                "trendline", "fibonacci", "rectangle", "ellipse", "cursor",
+                "horizontal", "vertical", "ray", "extendedLine",
+                "parallelChannel", "disjointChannel",
+                "fibRetracement", "fibExtension", "fibChannel",
+                "gannBox", "gannFan",
+                "pitchfork", "schiffPitchfork",
+            ]},
+            "points": {"type": "array", "items": {"type": "object"}, "description": "Array of {time: epoch_ms, price: number} coordinates"},
+            "text": {"type": "string", "description": "Optional label/text for the drawing"},
+            "color": {"type": "string", "description": "CSS color hex"},
+            "lineWidth": {"type": "integer", "default": 2},
+            "lineStyle": {"type": "string", "enum": ["solid", "dashed", "dotted"], "default": "solid"},
         },
         "required": ["tool"],
     },
     "draw_trendline": {
-        "description": "Draw a trendline between two points",
+        "description": "Draw a trendline between two price/time points. Use for trend identification, channel lines.",
         "parameters": {
             "from_time": {"type": "integer", "description": "Start time (epoch ms)"},
             "from_price": {"type": "number", "description": "Start price"},
             "to_time": {"type": "integer", "description": "End time (epoch ms)"},
             "to_price": {"type": "number", "description": "End price"},
-            "color": {"type": "string", "description": "CSS color"},
-            "style": {"type": "string", "enum": ["solid", "dashed", "dotted"]},
+            "color": {"type": "string", "description": "CSS color hex"},
+            "style": {"type": "string", "enum": ["solid", "dashed", "dotted"], "default": "solid"},
         },
         "required": ["from_time", "from_price", "to_time", "to_price"],
     },
+    "create_annotation": {
+        "description": "Add a text annotation at a specific chart point. Used to mark key levels, patterns, or notes.",
+        "parameters": {
+            "time": {"type": "integer", "description": "Timestamp (epoch ms)"},
+            "price": {"type": "number", "description": "Price level for the annotation"},
+            "text": {"type": "string", "maxLength": 200, "description": "Annotation text"},
+            "color": {"type": "string", "description": "CSS color hex", "default": "#fbbf24"},
+        },
+        "required": ["time", "text"],
+    },
+    "clear_drawings": {
+        "description": "Remove all AI-placed drawings from the chart. Use between walkthrough steps when keep_effects=false.",
+        "parameters": {},
+        "required": [],
+    },
+    "delete_drawing": {
+        "description": "Delete a specific drawing by its id.",
+        "parameters": {
+            "drawing_id": {"type": "string"},
+        },
+        "required": ["drawing_id"],
+    },
+    "set_drawing_color": {
+        "description": "Recolor an existing drawing.",
+        "parameters": {
+            "drawing_id": {"type": "string"},
+            "color": {"type": "string", "description": "CSS color hex"},
+        },
+        "required": ["drawing_id", "color"],
+    },
+
+    # ── Highlight actions ──────────────────────────────────────────────
     "highlight_region": {
-        "description": "Highlight a time/price region on the chart",
+        "description": "Highlight a time/price region on the chart. Best for marking support/resistance zones, supply/demand areas.",
         "parameters": {
             "from_time": {"type": "integer"},
             "to_time": {"type": "integer"},
@@ -101,7 +186,7 @@ CHART_TOOLS: Dict[str, Dict[str, Any]] = {
         "required": ["from_time", "to_time"],
     },
     "highlight_chart_area": {
-        "description": "Highlight a rectangular area inside the chart by percentages.",
+        "description": "Highlight a rectangular area inside the chart by percentages. More abstract than coordinates.",
         "parameters": {
             "left_pct": {"type": "number", "minimum": 0, "maximum": 100, "default": 20},
             "top_pct": {"type": "number", "minimum": 0, "maximum": 100, "default": 20},
@@ -113,7 +198,7 @@ CHART_TOOLS: Dict[str, Dict[str, Any]] = {
         "required": [],
     },
     "highlight_candles": {
-        "description": "Highlight candles by index range or timestamp range.",
+        "description": "Highlight candles by index range or timestamp range. Use to point out specific candle patterns.",
         "parameters": {
             "from_index": {"type": "integer", "minimum": 0},
             "to_index": {"type": "integer", "minimum": 0},
@@ -124,52 +209,164 @@ CHART_TOOLS: Dict[str, Dict[str, Any]] = {
         },
         "required": [],
     },
-    "create_annotation": {
-        "description": "Add a text annotation at a specific chart point",
+    "highlight_contextual_zone": {
+        "description": "Highlight a chart zone based on analysis context. Use when AI identifies a pattern, breakout, S/R test, or notable zone. Frontend maps zone_type + candle_count to actual chart coordinates.",
         "parameters": {
-            "time": {"type": "integer", "description": "Timestamp (epoch ms)"},
-            "price": {"type": "number"},
-            "text": {"type": "string", "maxLength": 200},
-        },
-        "required": ["time", "text"],
-    },
-    "set_timeframe": {
-        "description": "Switch the chart timeframe",
-        "parameters": {
-            "timeframe": {
+            "zone_type": {
                 "type": "string",
-                "enum": ["1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"],
+                "enum": [
+                    "breakout", "breakdown", "support_test", "resistance_test",
+                    "bullish_divergence", "bearish_divergence", "consolidation",
+                    "reversal_candles", "volume_spike", "trend_push",
+                    "accumulation", "distribution", "recent_action",
+                ],
             },
+            "label": {"type": "string", "description": "Short label shown on the highlight"},
+            "message": {"type": "string", "maxLength": 200, "description": "What to look for in this zone"},
+            "direction": {"type": "string", "enum": ["bullish", "bearish", "neutral"], "description": "Color bias for the highlight"},
+            "candle_count": {"type": "integer", "minimum": 2, "maximum": 50, "default": 5},
         },
-        "required": ["timeframe"],
+        "required": ["zone_type", "label"],
     },
-    "set_chart_type": {
-        "description": "Change the chart type",
-        "parameters": {
-            "chart_type": {
-                "type": "string",
-                "enum": ["candles", "bars", "line", "area", "heikinAshi", "renko"],
-            },
-        },
-        "required": ["chart_type"],
-    },
-    # NOTE: `start_tour` is intentionally not registered here. Tour
-    # queries are now handled by the `tour_planner` expert which
-    # produces a `tour_plan` in the assistant message metadata. The
-    # legacy `start_tour` tool call was dead code that surfaced
-    # confusing "▶ start_tour" buttons to admins while the dynamic
-    # tour ran in parallel.
     "highlight_section": {
-        "description": "Highlight a UI section for user guidance",
+        "description": "Highlight a UI section for user guidance (dim everything except target). Use to guide user attention to a specific panel.",
         "parameters": {
-            "target": {"type": "string"},
+            "target": {"type": "string", "description": "Section name: chart, orderBook, watchlist, ai, overview, news, settings, etc."},
             "section_id": {"type": "string"},
             "message": {"type": "string", "maxLength": 200},
         },
         "required": [],
     },
-}
 
+    # ── Chart navigation ───────────────────────────────────────────────
+    "zoom_chart": {
+        "description": "Zoom chart in or out. Useful to get a broader view or focus on recent price action.",
+        "parameters": {
+            "direction": {"type": "string", "enum": ["in", "out"]},
+            "anchor_ratio": {"type": "number", "default": 0.5, "description": "0=left edge, 1=right edge"},
+        },
+        "required": ["direction"],
+    },
+    "scroll_chart": {
+        "description": "Scroll chart horizontally to see older data or return to live.",
+        "parameters": {
+            "target": {"type": "string", "enum": ["start", "end", "left", "right"]},
+            "bars": {"type": "integer", "default": 20},
+        },
+        "required": ["target"],
+    },
+    "scroll_chart_to_time": {
+        "description": "Scroll chart to a specific timestamp. Use to jump to a known event or pattern.",
+        "parameters": {
+            "time": {"type": "integer", "description": "Unix seconds or milliseconds"},
+        },
+        "required": ["time"],
+    },
+    "reset_chart_view": {
+        "description": "Reset chart zoom and scroll to default (latest live candles).",
+        "parameters": {},
+        "required": [],
+    },
+
+    # ── Panel / view management ────────────────────────────────────────
+    "open_panel": {
+        "description": "Open a right-panel target (watchlist, order book, trades, AI helper).",
+        "parameters": {
+            "target": {"type": "string", "enum": ["ai", "overview", "watchlist", "orderBook", "recentTrades"]},
+            "highlight": {"type": "boolean", "default": True},
+        },
+        "required": ["target"],
+    },
+    "close_panel": {
+        "description": "Close the right panel.",
+        "parameters": {},
+        "required": [],
+    },
+    "switch_panel_tab": {
+        "description": "Switch the right panel tab between watchlist, order book, or recent trades.",
+        "parameters": {
+            "tab": {"type": "string", "enum": ["watchlist", "orderBook", "recentTrades"]},
+        },
+        "required": ["tab"],
+    },
+    "switch_app_view": {
+        "description": "Switch between main app views: charts, markets/news, or screener.",
+        "parameters": {
+            "view": {"type": "string", "enum": ["charts", "marketsNews", "screener"]},
+        },
+        "required": ["view"],
+    },
+    "view_section": {
+        "description": "Open and highlight a major app section. Navigates to the section and dims everything else.",
+        "parameters": {
+            "target": {"type": "string", "description": "Section name"},
+        },
+        "required": ["target"],
+    },
+    "open_settings": {
+        "description": "Open the settings modal.",
+        "parameters": {},
+        "required": [],
+    },
+    "close_settings": {
+        "description": "Close the settings modal.",
+        "parameters": {},
+        "required": [],
+    },
+
+    # ── Historical data ────────────────────────────────────────────────
+    "fetch_historical_prices": {
+        "description": "Fetch historical candles for analysis. Returns OHLCV data for a symbol/timeframe range.",
+        "parameters": {
+            "symbol": {"type": "string", "default": "BTCUSDT"},
+            "timeframe": {"type": "string", "enum": ["1m", "5m", "15m", "1h", "4h", "1d", "1w"], "default": "1h"},
+            "start_ms": {"type": "integer"},
+            "end_ms": {"type": "integer"},
+            "limit": {"type": "integer", "default": 100},
+        },
+        "required": ["start_ms", "end_ms"],
+    },
+
+    # ── Walkthrough-specific actions ───────────────────────────────────
+    "open_news_popup": {
+        "description": "Open a draggable news article popup with the article URL. Use to show relevant news during analysis.",
+        "parameters": {
+            "url": {"type": "string", "description": "News article URL"},
+            "title": {"type": "string", "description": "Display title"},
+        },
+        "required": ["url"],
+    },
+    "navigate_tab": {
+        "description": "Navigate to a specific tab panel in the UI (chart, overview, watchlist, orderbook, trades, news, screener, ai, settings).",
+        "parameters": {
+            "tab": {"type": "string", "description": "Target tab name"},
+        },
+        "required": ["tab"],
+    },
+    "enter_replay": {
+        "description": "Enter replay mode for a specific time range. Useful to demonstrate how price action evolved over a period.",
+        "parameters": {
+            "from_time": {"type": "integer", "description": "Start time (unix seconds)"},
+            "to_time": {"type": "integer", "description": "End time (unix seconds)"},
+        },
+        "required": ["from_time", "to_time"],
+    },
+    "export_chart": {
+        "description": "Export current chart view as PNG or CSV for saving or sharing.",
+        "parameters": {
+            "format": {"type": "string", "enum": ["png", "csv"], "default": "png"},
+            "filename": {"type": "string"},
+        },
+        "required": [],
+    },
+
+    # ── Utility ────────────────────────────────────────────────────────
+    "clear_ai_annotations": {
+        "description": "Clear all AI highlights, action overlays, and tour annotations from the UI.",
+        "parameters": {},
+        "required": [],
+    },
+}
 
 class ChartInteractionExpert(BaseExpert):
     """Proposes validated chart actions from user requests."""
@@ -229,7 +426,6 @@ class ChartInteractionExpert(BaseExpert):
             data_sources=data_sources,
             warnings=warnings,
         )
-
 
 def _propose_actions(
     query: str,
@@ -294,14 +490,7 @@ def _propose_actions(
             })
             break
 
-    # NOTE: tour / guided-demo requests are handled by the dedicated
-    # `tour_planner` expert, which produces a `tour_plan` in the
-    # assistant message metadata. Emitting a `start_tour` action
-    # here would race with the dynamic tour and surface a dead
-    # "start_tour" tool call to the user.
-
     return actions
-
 
 def _validate_action(action: Dict[str, Any]) -> Dict[str, Any]:
     """Validate a proposed action against the tool definitions.
@@ -368,7 +557,6 @@ def _validate_action(action: Dict[str, Any]) -> Dict[str, Any]:
             )
 
     return {"valid": len(errors) == 0, "errors": errors}
-
 
 def get_tool_catalog() -> Dict[str, Dict[str, Any]]:
     """Return the full tool catalog for API/debug endpoints."""

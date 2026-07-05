@@ -10,6 +10,7 @@ import re
 from typing import Any, Dict, List, Optional, TypedDict
 
 from ai_service.agents.types import (
+    ContextNeeds,
     ExpertOutput,
     IntentClassification,
     ValidationResult,
@@ -30,6 +31,9 @@ class AgentState(TypedDict, total=False):
     user_id: str
     mode: str                                   # "ask" | "interact"
     language: Optional[str]
+    selected_model: Optional[str]               # Model override from user settings/request
+    selected_tier: Optional[str]                # Tier filter ('standard'|'reserved'|'benchmark')
+    user_timezone: Optional[str]                # User's local timezone (e.g. "Asia/Ho_Chi_Minh")
 
     # ── Context (set at entry or by context-gathering nodes) ──────────────
     chat_history: List[Dict[str, str]]
@@ -48,6 +52,7 @@ class AgentState(TypedDict, total=False):
     # ── Intent routing ────────────────────────────────────────────────────
     intent: Optional[IntentClassification]
     activated_experts: List[str]
+    context_needs: Optional[ContextNeeds]  # LLM-identified data requirements
 
     # ── Expert outputs (keyed by ExpertName.value) ────────────────────────
     expert_outputs: Dict[str, ExpertOutput]
@@ -116,6 +121,8 @@ def initial_state(
     chart_context: Optional[Dict[str, Any]] = None,
     chat_history: Optional[List[Dict[str, str]]] = None,
     rag_enabled: Optional[bool] = None,
+    selected_model: Optional[str] = None,
+    selected_tier: Optional[str] = None,
 ) -> AgentState:
     """Build the initial graph state from a chat request.
 
@@ -178,4 +185,7 @@ def initial_state(
         estimated_cost_usd=None,
         execution_id=None,
         rag_enabled=rag_enabled,
+        selected_model=selected_model,
+        selected_tier=selected_tier,
+        user_timezone=chart_context.get("user_timezone") if chart_context else None,
     )

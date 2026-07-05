@@ -6,7 +6,7 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: [['html', { outputFolder: 'full-suite-report' }], ['list']],
-  timeout: 180_000,
+  timeout: 240_000,
   use: {
     baseURL: process.env.E2E_BASE_URL || 'https://lmview.duckdns.org',
     ignoreHTTPSErrors: true,

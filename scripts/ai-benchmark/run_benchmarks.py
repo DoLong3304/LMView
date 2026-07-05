@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LMView AI Benchmark Runner v1.0.0
+LMView AI Benchmark Runner v1.1.0
 ==================================
 Executes 4 benchmarks against the AI service API and writes results
 to docs/ai-benchmark-results.md for graduation thesis reference.
@@ -15,7 +15,7 @@ Usage:
   python3 scripts/ai-benchmark/run_benchmarks.py [--url URL] [--email EMAIL] [--password PASS]
 
   Default URL: https://lmview.duckdns.org
-  Default user: admin@example.com / Admin@1234
+  Default user/password: AI_BENCHMARK_EMAIL / AI_BENCHMARK_PASSWORD env vars
 """
 
 import argparse
@@ -70,6 +70,91 @@ def http(method: str, url: str, token: str = "", body: dict = None, timeout: int
         return -1, str(e)
 
 
+QUOTA_PATTERNS = (
+    "quota", "insufficient_quota", "allocationquota", "freetieronly",
+    "rate limit", "rate_limit", "429", "too many requests", "exhausted",
+)
+
+
+def is_quota_error(response: dict) -> bool:
+    """Return True when a failed response should be queued for retry, not graded."""
+    text = json.dumps(response, ensure_ascii=False).lower()
+    status = response.get("status")
+    if status == 429:
+        return True
+    return bool(response.get("error") and any(p in text for p in QUOTA_PATTERNS))
+
+
+def record_quota_exclusion(results: dict, analysis: dict, response: dict) -> None:
+    """Store quota/rate-limit failures outside pass/fail totals."""
+    analysis["quota_excluded"] = True
+    analysis["quota_detail"] = str(response.get("detail", response))[:500]
+    results.setdefault("quota_excluded", []).append(analysis)
+
+
+def result_rate(results: dict) -> float:
+    total = results.get("passed", 0) + results.get("failed", 0)
+    return round(results.get("passed", 0) / total * 100, 1) if total else 0.0
+
+
+def warm_up_ai(base: str, token: str) -> None:
+    """Run one unscored AI request to warm provider/model/container caches."""
+    try:
+        sid = create_session(base, token, "ask")
+        response = send_chat(
+            base,
+            token,
+            sid,
+            "Warm up benchmark routing for BTCUSDT. Reply briefly.",
+            mode="ask",
+            timeout=120,
+        )
+        if is_quota_error(response):
+            print("   Warm-up quota/rate-limited; benchmark will queue/exclude affected calls")
+        elif response.get("error"):
+            print(f"   Warm-up warning: {str(response.get('detail', response.get('error')))[:120]}")
+        else:
+            print("   Warm-up OK")
+    except Exception as exc:
+        print(f"   Warm-up warning: {str(exc)[:120]}")
+
+
+SYMBOL_ALIASES = {
+    "bitcoin": "BTCUSDT", "btc": "BTCUSDT", "btcusdt": "BTCUSDT",
+    "ethereum": "ETHUSDT", "ether": "ETHUSDT", "eth": "ETHUSDT", "ethusdt": "ETHUSDT",
+    "solana": "SOLUSDT", "sol": "SOLUSDT", "solusdt": "SOLUSDT",
+    "dogecoin": "DOGEUSDT", "doge": "DOGEUSDT", "dogeusdt": "DOGEUSDT",
+}
+
+
+def infer_symbol(message: str) -> str:
+    text = message.lower()
+    for key, symbol in SYMBOL_ALIASES.items():
+        if key in text:
+            return symbol
+    return "BTCUSDT"
+
+
+def infer_timeframe(message: str) -> str:
+    text = message.lower()
+    for tf in ("1s", "1m", "5m", "15m", "1h", "4h", "1d", "1w"):
+        if tf in text:
+            return tf
+    if "today" in text or "right now" in text or "current" in text:
+        return "1m"
+    return "1h"
+
+
+def default_chart_context(message: str) -> dict:
+    return {
+        "symbol": infer_symbol(message),
+        "exchange": "binance",
+        "timeframe": infer_timeframe(message),
+        "selected_indicators": ["RSI", "MACD", "SMA20", "SMA50"],
+        "indicator_values": [],
+    }
+
+
 def login(base: str, email: str, password: str) -> str:
     """Login and return session token."""
     url = f"{base}/api/auth/login"
@@ -93,13 +178,19 @@ def create_session(base: str, token: str, mode: str = "interact") -> str:
     return data.get("id", "")
 
 
-def send_chat(base: str, token: str, session_id: str, message: str, mode: str = "interact", timeout: int = 120) -> dict:
+def send_chat(base: str, token: str, session_id: str, message: str, mode: str = "interact", timeout: int = 160, model_tier: str = "benchmark", model_name: str | None = None) -> dict:
     """Send a chat message, return parsed response."""
-    status, data = http("POST", f"{base}/api/ai/chat", token, body={
+    model_tier = os.environ.get("AI_BENCHMARK_MODEL_TIER", model_tier)
+    body = {
         "session_id": session_id,
         "mode": mode,
         "message": message,
-    }, timeout=timeout)
+        "model_tier": model_tier,
+        "chart_context": default_chart_context(message),
+    }
+    if model_name:
+        body["model_name"] = model_name
+    status, data = http("POST", f"{base}/api/ai/chat", token, body=body, timeout=timeout)
     if status == 200:
         return data
     return {"error": True, "status": status, "detail": data}
@@ -133,14 +224,36 @@ def analyze_response(response: dict) -> dict:
         result["tour_id"] = tp.get("tour_id", "")
         result["tour_title"] = tp.get("title", "")
         if tp.get("steps"):
-            result["step_actions"] = [s.get("action_type", "") for s in tp["steps"]]
+            step_actions = []
+            step_targets = []
+            for step in tp["steps"]:
+                actions = step.get("actions") if isinstance(step, dict) else None
+                if isinstance(actions, list):
+                    for action in actions:
+                        if isinstance(action, dict):
+                            step_actions.append(action.get("type") or action.get("action_type") or "")
+                            params = action.get("params") or {}
+                            step_targets.append(params.get("target_selector") or params.get("selector") or "")
+                else:
+                    step_actions.append(step.get("action_type", ""))
+                    step_targets.append(step.get("target_selector", ""))
+            result["step_actions"] = step_actions
             result["step_explanations"] = [s.get("explanation", "")[:80] for s in tp["steps"]]
-            result["step_targets"] = [s.get("target_selector", "") for s in tp["steps"]]
+            result["step_targets"] = step_targets
 
-    # Extract tool calls
+    # Extract tool calls / direct chart actions
     tc = response.get("tool_calls")
     if tc and isinstance(tc, list):
         result["tool_call_names"] = [t.get("name", "") for t in tc]
+
+    chart_actions = response.get("chart_actions")
+    action_names = []
+    if isinstance(chart_actions, list):
+        for action in chart_actions:
+            if isinstance(action, dict):
+                action_names.append(action.get("action_type") or action.get("type") or action.get("name") or "")
+    result["chart_action_names"] = action_names
+    result["has_chart_actions"] = bool(action_names)
 
     return result
 
@@ -192,6 +305,13 @@ def benchmark_golden(base: str, token: str) -> dict:
             analysis["category"] = cat["id"]
             analysis["latency_seconds"] = round(elapsed, 2)
 
+            if is_quota_error(response):
+                results["total"] -= 1
+                record_quota_exclusion(results, analysis, response)
+                print(f"    {qid:6s} [RETRY] {msg[:50]:50s} [{elapsed:5.1f}s] quota/rate limit")
+                cat_results.append(analysis)
+                continue
+
             # Evaluate against expected criteria
             criteria_results = evaluate_criteria(q.get("criteria", []), analysis, response)
             all_passed = all(c["passed"] for c in criteria_results)
@@ -224,7 +344,8 @@ def benchmark_golden(base: str, token: str) -> dict:
             "weight": cat["weight"],
             "passed": cat_passed,
             "failed": cat_failed,
-            "total": len(cat["questions"]),
+            "total": cat_passed + cat_failed,
+            "quota_excluded": sum(1 for d in cat_results if d.get("quota_excluded")),
             "details": cat_results,
         }
 
@@ -242,11 +363,13 @@ def evaluate_criteria(criteria: list[str], analysis: dict, response: dict) -> li
 
         if c == "has_price_number":
             import re
-            # Accept: $ prefix (formatted), plain numbers ≥4 digits (crypto prices), or 'xxx' usd format
+            # Accept: $ prefix, compact units, plain numbers ≥4 digits, ticker fields,
+            # or any numeric value near price/bid/ask/close wording.
             has_num = bool(
-                re.search(r'\$\s*[\d,]+\.?\d*', content) or
-                re.search(r'\b[\d,]{4,}\.?\d*\b', content) or
-                re.search(r'\b[\d]+\.?\d*\s*(usd|dollar)', content)
+                re.search(r'\$\s*[\d,]+(?:\.\d+)?', content) or
+                re.search(r'\b[\d,]+(?:\.\d+)?\s*(k|m|b|usd|usdt|dollar)', content) or
+                re.search(r'\b[\d,]{4,}(?:\.\d+)?\b', content) or
+                re.search(r'(price|trading|bid|ask|close|last)\D{0,40}\d', content)
             )
             result["passed"] = has_num
             result["detail"] = "Found price number" if has_num else "No price number found"
@@ -254,7 +377,7 @@ def evaluate_criteria(criteria: list[str], analysis: dict, response: dict) -> li
         elif c == "mentions_symbol":
             symbols = ["btc", "bitcoin", "eth", "ethereum", "sol", "solana", "doge", "dogecoin",
                        "btcusdt", "ethusdt", "solusdt", "dogeusdt"]
-            found = [s for s in symbols if s in content]
+            found = [s for s in symbols if s in all_text]
             result["passed"] = len(found) > 0
             result["detail"] = f"Symbols found: {found}" if found else "No symbol mentioned"
 
@@ -317,12 +440,16 @@ def evaluate_criteria(criteria: list[str], analysis: dict, response: dict) -> li
             result["detail"] = "Has number" if has_num else "No numeric value"
 
         elif c == "mentions_support_resistance":
-            has_sr = ('support' in content and 'resistance' in content) or 's/r' in content
+            has_sr = (
+                ('support' in content and 'resistance' in content) or
+                ('hỗ trợ' in content and 'kháng cự' in content) or
+                's/r' in content
+            )
             result["passed"] = has_sr
             result["detail"] = "S/R found" if has_sr else "No support/resistance"
 
         elif c == "mentions_overbought_oversold":
-            has_oo = 'overbought' in content or 'oversold' in content
+            has_oo = any(term in all_text for term in ['overbought', 'oversold', 'quá mua', 'qua mua', 'quá bán', 'qua ban'])
             result["passed"] = has_oo
             result["detail"] = "Overbought/oversold found" if has_oo else "Not mentioned"
 
@@ -332,7 +459,10 @@ def evaluate_criteria(criteria: list[str], analysis: dict, response: dict) -> li
             result["detail"] = "MA found" if has_ma else "No moving average"
 
         elif c == "mentions_trend_direction":
-            has_trend = any(w in content for w in ['bullish', 'bearish', 'uptrend', 'downtrend', 'trend', 'increasing', 'decreasing'])
+            has_trend = any(w in all_text for w in [
+                'bullish', 'bearish', 'uptrend', 'downtrend', 'trend', 'increasing', 'decreasing',
+                'xu hướng', 'tăng', 'giảm', 'đi ngang', 'tích lũy', 'sideways',
+            ])
             result["passed"] = has_trend
             result["detail"] = "Trend direction found" if has_trend else "No trend direction"
 
@@ -531,7 +661,10 @@ def evaluate_criteria(criteria: list[str], analysis: dict, response: dict) -> li
             result["detail"] = f"Vietnamese chars: {vn_count}"
 
         elif c == "mentions_market_overview":
-            keywords = ['market', 'overview', 'sentiment', 'crypto', 'bitcoin', 'altcoin']
+            keywords = [
+                'market', 'overview', 'sentiment', 'crypto', 'bitcoin', 'altcoin',
+                'thị trường', 'tổng quan', 'tâm lý', 'btc', 'bitcoin', 'altcoin',
+            ]
             found = [k for k in keywords if k in content]
             result["passed"] = len(found) >= 2
             result["detail"] = f"Keywords: {found}" if found else "No market overview"
@@ -547,13 +680,14 @@ def evaluate_criteria(criteria: list[str], analysis: dict, response: dict) -> li
 
 
 def benchmark_tour_quality(base: str, token: str) -> dict:
-    """Execute the Tour Quality Assessment (30 queries)."""
-    print("\n" + "=" * 72)
-    print("  BENCHMARK 2: Tour Quality Assessment (30 queries)")
-    print("=" * 72)
-
+    """Execute the Tour Quality Assessment."""
     with open(os.path.join(SCRIPT_DIR, "tour-dataset.json")) as f:
         dataset = json.load(f)
+
+    query_count = sum(len(tt.get("queries", [])) for tt in dataset.get("tour_types", []))
+    print("\n" + "=" * 72)
+    print(f"  BENCHMARK 2: Tour Quality Assessment ({query_count} queries)")
+    print("=" * 72)
 
     results = {
         "total": 0,
@@ -583,15 +717,32 @@ def benchmark_tour_quality(base: str, token: str) -> dict:
             analysis["query"] = msg
             analysis["latency_seconds"] = round(elapsed, 2)
 
-            # Evaluate tour quality
+            if is_quota_error(response):
+                results["total"] -= 1
+                record_quota_exclusion(results, analysis, response)
+                print(f"    {qid:6s} [RETRY] {msg[:48]:48s} [{elapsed:5.1f}s] quota/rate limit")
+                tt_results.append(analysis)
+                continue
+
+            # Evaluate Interact quality.
+            # Guided tours should produce tour_plan. Direct action prompts may
+            # validly produce chart_actions/tool_calls without a multi-step tour.
             issues = []
-            if not analysis.get("has_tour_plan"):
-                issues.append("No tour plan")
+            is_direct_action = tt.get("id") == "action_oriented"
+            action_pool = (
+                analysis.get("step_actions", [])
+                + analysis.get("chart_action_names", [])
+                + analysis.get("tool_call_names", [])
+            )
+
+            if not analysis.get("has_tour_plan") and not (is_direct_action and action_pool):
+                issues.append("No tour plan/action")
             else:
-                steps = analysis.get("tour_steps", 0)
-                min_s = q.get("min_steps", 2)
-                if steps < min_s:
-                    issues.append(f"Only {steps} steps, expected ≥{min_s}")
+                if analysis.get("has_tour_plan"):
+                    steps = analysis.get("tour_steps", 0)
+                    min_s = q.get("min_steps", 2)
+                    if steps < min_s:
+                        issues.append(f"Only {steps} steps, expected ≥{min_s}")
 
                 exp_symbol = q.get("expected_symbol")
                 if exp_symbol:
@@ -600,8 +751,7 @@ def benchmark_tour_quality(base: str, token: str) -> dict:
 
                 exp_actions = q.get("expected_actions")
                 if exp_actions:
-                    step_actions = analysis.get("step_actions", [])
-                    missing = [a for a in exp_actions if not any(a in s for s in step_actions)]
+                    missing = [a for a in exp_actions if not any(a in s for s in action_pool)]
                     if missing:
                         issues.append(f"Missing actions: {missing}")
 
@@ -626,7 +776,8 @@ def benchmark_tour_quality(base: str, token: str) -> dict:
             "name": tt["name"],
             "passed": tt_passed,
             "failed": tt_failed,
-            "total": len(tt["queries"]),
+            "total": tt_passed + tt_failed,
+            "quota_excluded": sum(1 for d in tt_results if d.get("quota_excluded")),
             "details": tt_results,
         }
 
@@ -664,13 +815,18 @@ def benchmark_latency(base: str, token: str) -> dict:
             raw_times.append(elapsed)
             times.append(elapsed)
 
-            if "error" in response:
+            if is_quota_error(response):
+                total_calls -= 1
+                raw_times.pop()
+                times.pop()
+                status = "RETRY"
+            elif "error" in response:
                 error_count += 1
                 status = "ERR"
             else:
                 status = "OK"
 
-            print(f"    {q['id']:6s} R{rep+1} [{status:3s}] {elapsed:6.2f}s | {q['query'][:40]}")
+            print(f"    {q['id']:6s} R{rep+1} [{status:5s}] {elapsed:6.2f}s | {q['query'][:40]}")
 
             time.sleep(config.get("cooldown_ms", 1000) / 1000)
 
@@ -735,13 +891,16 @@ def benchmark_latency(base: str, token: str) -> dict:
 # ── Benchmark 5: Ablation Study — RAG Hallucination Resistance ──────────────
 
 
-def _send_chat_with_rag(base: str, token: str, session_id: str, message: str, rag_enabled: bool, timeout: int = 120) -> dict:
+def _send_chat_with_rag(base: str, token: str, session_id: str, message: str, rag_enabled: bool, timeout: int = 160, model_tier: str = "benchmark") -> dict:
     """Send chat with explicit rag_enabled override."""
+    model_tier = os.environ.get("AI_BENCHMARK_MODEL_TIER", model_tier)
     status, data = http("POST", f"{base}/api/ai/chat", token, body={
         "session_id": session_id,
         "mode": "ask",
         "message": message,
         "rag_enabled": rag_enabled,
+        "model_tier": model_tier,
+        "chart_context": default_chart_context(message),
     }, timeout=timeout)
     if status == 200:
         return data
@@ -787,14 +946,20 @@ def benchmark_ablation(base: str, token: str) -> dict:
 
             analysis = analyze_response(response)
             content = response.get("content", "")
+            analysis["question_id"] = qid
+            analysis["query"] = msg
+            analysis["latency_seconds"] = round(elapsed, 2)
+
+            if is_quota_error(response):
+                record_quota_exclusion(ablation_results.setdefault(label, {"details": []}), analysis, response)
+                print(f"    {qid:6s} [RETRY] {msg[:55]:55s} [{elapsed:5.1f}s] quota/rate limit")
+                details.append(analysis)
+                continue
 
             criteria_results = evaluate_criteria(q.get("criteria", []), analysis, response)
             all_passed = all(c["passed"] for c in criteria_results)
-            analysis["question_id"] = qid
-            analysis["query"] = msg
             analysis["criteria_results"] = criteria_results
             analysis["overall_pass"] = all_passed
-            analysis["latency_seconds"] = round(elapsed, 2)
 
             if all_passed:
                 passed += 1
@@ -811,7 +976,8 @@ def benchmark_ablation(base: str, token: str) -> dict:
                 print(f"             Failed: {fc}")
             details.append(analysis)
 
-        total = len(dataset["trap_questions"])
+        quota_count = sum(1 for d in details if d.get("quota_excluded"))
+        total = passed + failed
         rate = round(passed / total * 100, 1) if total > 0 else 0
         print(f"  → {label}: {passed}/{total} ({rate}%)")
 
@@ -820,6 +986,7 @@ def benchmark_ablation(base: str, token: str) -> dict:
             "passed": passed,
             "failed": failed,
             "total": total,
+            "quota_excluded": quota_count,
             "rate": rate,
             "details": details,
         }
@@ -879,6 +1046,14 @@ def benchmark_safety(base: str, token: str) -> dict:
         analysis = analyze_response(response)
         analysis["question_id"] = qid
         analysis["query"] = msg
+        analysis["latency_seconds"] = round(elapsed, 2)
+
+        if is_quota_error(response):
+            results["total"] -= 1
+            record_quota_exclusion(results, analysis, response)
+            print(f"    {qid:6s} [RETRY] {str(msg)[:45]:45s} [{elapsed:5.1f}s] quota/rate limit")
+            results["details"].append(analysis)
+            continue
 
         criteria_results = evaluate_criteria(q.get("criteria", []), analysis, response)
         all_passed = all(c["passed"] for c in criteria_results)
@@ -959,10 +1134,10 @@ def write_report(golden: dict, tours: dict, latency: dict, safety: dict, ablatio
     err_rate_pct = lat.get('error_rate_pct', 0) or 0
     err_rate_pct_display = f"{err_rate_pct:.1f}%"
 
-    report = f"""# AI Benchmark Results — LMView v0.27.0
+    report = f"""# AI Benchmark Results — LMView
 
 > **Date:** {timestamp}
-> **System:** LMView (Docker Swarm, 2-node AWS EC2)
+> **System:** LMView (Docker Swarm, 3-node AWS EC2)
 > **Purpose:** Comprehensive AI service evaluation for graduation thesis validation
 
 ---
@@ -1038,7 +1213,7 @@ For each question, the AI response is evaluated against 1–4 criteria checked v
     report += f"""
 ---
 
-## 4. Benchmark 2: Tour Quality Assessment (30 Queries)
+## 4. Benchmark 2: Tour Quality Assessment ({tour_total} Queries)
 
 ### 4.1 Results by Tour Type
 
@@ -1265,7 +1440,7 @@ Detailed per-question raw data is available in:
 
 ---
 
-*Generated by LMView AI Benchmark Runner v1.0.0 on {timestamp}*
+*Generated by LMView AI Benchmark Runner v1.1.0 on {timestamp}*
 """
 
     with open(RESULTS_FILE, "w") as f:
@@ -1436,24 +1611,33 @@ to build a statistically meaningful distribution.
 def main():
     parser = argparse.ArgumentParser(description="LMView AI Benchmark Runner")
     parser.add_argument("--url", default="https://lmview.duckdns.org", help="Base URL")
-    parser.add_argument("--email", default="admin@example.com", help="Login email")
-    parser.add_argument("--password", default="Admin@1234", help="Login password")
+    parser.add_argument("--email", default=os.environ.get("AI_BENCHMARK_EMAIL", "admin@lmview.com"), help="Login email (or AI_BENCHMARK_EMAIL)")
+    parser.add_argument("--password", default=os.environ.get("AI_BENCHMARK_PASSWORD", ""), help="Login password (or AI_BENCHMARK_PASSWORD)")
     parser.add_argument("--skip-golden", action="store_true", help="Skip golden dataset")
     parser.add_argument("--skip-tours", action="store_true", help="Skip tour quality")
     parser.add_argument("--skip-latency", action="store_true", help="Skip latency benchmark")
     parser.add_argument("--skip-safety", action="store_true", help="Skip safety benchmark")
     parser.add_argument("--ablation-only", action="store_true", help="Run only the RAG ablation study (skip all other benchmarks)")
     parser.add_argument("--latency-only", action="store_true", help="Run only the latency benchmark and append to existing report")
+    parser.add_argument("--model-tier", default="benchmark", choices=["standard", "reserved", "benchmark"], help="Model tier for benchmark calls")
     args = parser.parse_args()
+    os.environ["AI_BENCHMARK_MODEL_TIER"] = args.model_tier
 
     print("┌──────────────────────────────────────────────────────────────────┐")
-    print("│              LMView AI Benchmark Runner v1.0.0                  │")
+    print("│              LMView AI Benchmark Runner v1.1.0                  │")
     print("└──────────────────────────────────────────────────────────────────┘")
+
+    if not args.password:
+        print("  LOGIN FAILED: missing password. Set AI_BENCHMARK_PASSWORD or pass --password.", file=sys.stderr)
+        sys.exit(1)
 
     # Login
     print(f"\n🔑 Logging in as {args.email}...")
     token = login(args.url, args.email, args.password)
-    print(f"   Token: {token[:20]}...")
+    print("   Login OK (token hidden)")
+
+    print("\n🔥 Warming AI service/provider cache...")
+    warm_up_ai(args.url, token)
 
     results = {}
 

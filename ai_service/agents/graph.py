@@ -13,7 +13,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from ai_service.agents.state import AgentState
-from ai_service.agents.types import ExpertName, ExpertOutput, Timer
+from ai_service.agents.types import ContextNeeds, ExpertName, ExpertOutput, IntentCategory, IntentClassification, RoutingMethod, Timer
 
 logger = logging.getLogger("ai_service.agents.graph")
 
@@ -21,6 +21,51 @@ logger = logging.getLogger("ai_service.agents.graph")
 # Incremented/observed by _track_node_execution below.
 _NODE_COUNTERS = {"scope_gate": 0, "intent_router": 0, "expert_execution": 0, "synthesis": 0, "reflection": 0}
 _NODE_LATENCIES: dict = {}
+
+# Timeout event counters for monitoring
+_TIMEOUT_EVENTS = {"intent_router": 0, "expert_execution": 0, "synthesis": 0}
+
+
+def get_timeout_stats() -> dict:
+    """Return timeout event counts for observability."""
+    return dict(_TIMEOUT_EVENTS)
+
+
+def _get_adaptive_timeout(base_seconds: float, multiplier: float = 1.5) -> float:
+    """Calculate adaptive timeout based on provider health monitor.
+
+    Uses the max recent latency from the health monitor to extend
+    the base timeout during slow periods. This prevents the pipeline
+    from hard-failing when the API provider is experiencing high traffic
+    but still producing valid responses.
+
+    Formula: max(base_seconds, max_recent_latency_ms / 1000 * multiplier)
+
+    Args:
+        base_seconds: Minimum timeout in seconds.
+        multiplier: Safety margin over observed latency (default 1.5x).
+    """
+    try:
+        from ai_service.providers.health import get_health_monitor
+        monitor = get_health_monitor()
+        all_health = monitor.get_all_health()
+        max_latency = 0.0
+        for _, info in all_health.items():
+            lat = info.get("last_latency_ms")
+            if lat and lat > max_latency:
+                max_latency = float(lat)
+        if max_latency > 0:
+            proposed = max_latency / 1000 * multiplier
+            timeout = max(base_seconds, proposed)
+            if timeout > base_seconds:
+                logger.info(
+                    "Adaptive timeout extended: %.0fs (base=%.0fs, max_latency=%.0fms)",
+                    timeout, base_seconds, max_latency,
+                )
+            return timeout
+    except Exception as exc:
+        logger.debug("Adaptive timeout calculation failed: %s", exc)
+    return base_seconds
 
 
 def get_node_stats() -> dict:
@@ -139,13 +184,33 @@ async def expert_execution_node(state: AgentState) -> AgentState:
                 error=f"Expert {name} not found.",
                 warnings=[f"Expert {name} not registered."],
             )
-        output = await expert.safe_execute(state)
-        return name, output
+        try:
+            output = await asyncio.wait_for(
+                expert.safe_execute(state),
+                timeout=20.0,
+            )
+            return name, output
+        except asyncio.TimeoutError:
+            _TIMEOUT_EVENTS["expert_execution"] += 1
+            logger.warning("Expert '%s' timed out after 20s", name)
+            return name, ExpertOutput(
+                expert_name=name,
+                error=f"Expert {name} timed out after 20s",
+                warnings=[f"Expert {name} timed out — partial data available."],
+            )
 
-    results = await asyncio.gather(
-        *(run_expert(name) for name in activated),
-        return_exceptions=True,
-    )
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(run_expert(name) for name in activated),
+                return_exceptions=True,
+            ),
+            timeout=40.0,
+        )
+    except asyncio.TimeoutError:
+        _TIMEOUT_EVENTS["expert_execution"] += 1
+        logger.warning("Expert gather timed out after 40s")
+        results = [TimeoutError(f"Expert {name} timed out") for name in activated]
 
     expert_outputs: Dict[str, ExpertOutput] = {}
     rag_chunks = []
@@ -215,6 +280,18 @@ def route_after_scope(state: AgentState) -> str:
     return "in_scope"
 
 
+def route_after_intent(state: AgentState) -> str:
+    """Conditional edge after first LLM pass.
+
+    The intent router now also runs LLM scope classification. If it detects
+    out-of-scope content missed by the rule gate, stop before expert execution
+    and synthesis to save tokens/resources.
+    """
+    if state.get("scope_response") is not None:
+        return "out_of_scope"
+    return "in_scope"
+
+
 # ── Graph compilation ─────────────────────────────────────────────────────────
 
 _compiled_graph = None
@@ -241,17 +318,114 @@ def get_compiled_graph():
             "Install with: pip install langgraph langchain-core"
         )
 
-    from ai_service.agents.intent_router import classify_intent
-    from ai_service.agents.synthesis import synthesize_response
     from ai_service.agents.reflection import validate_response, route_after_reflection
+
+    async def intent_router_node(state: AgentState) -> AgentState:
+        """Intent router with 60s timeout for LLM fallback calls.
+
+        Extended from 8s to 60s because:
+        - DashScope workspace keys need per-key base URLs (fixed)
+        - Each LLM call takes 1-3s with correct keys
+        - Key rotation may try 2 keys × several models
+        - We prefer accurate classification over fast fallback
+        """
+        timer = Timer().start()
+        _track_node_execution("intent_router", 0)
+        from ai_service.agents.intent_router import classify_intent
+        try:
+            result = await asyncio.wait_for(classify_intent(state), timeout=60.0)
+        except asyncio.TimeoutError:
+            _TIMEOUT_EVENTS["intent_router"] += 1
+            logger.warning("Intent router timed out after 60s — using rule/context fallback")
+            from ai_service.agents.intent_router import _default_context_needs, _rule_based_classify
+
+            fallback_intent = _rule_based_classify(
+                state.get("user_query", ""),
+                state.get("mode", "ask"),
+                state.get("chart_context"),
+            )
+            if state.get("mode") == "interact" and ExpertName.CHART_INTERACTION not in fallback_intent.activated_experts:
+                fallback_intent.activated_experts.append(ExpertName.CHART_INTERACTION)
+            fallback_context = _default_context_needs(
+                state.get("user_query", ""),
+                fallback_intent,
+                state.get("chart_context"),
+            )
+            result = {
+                "intent": fallback_intent,
+                "activated_experts": [e.value for e in fallback_intent.activated_experts],
+                "context_needs": fallback_context,
+                "warning": ["Intent classification timed out — using rule/context fallback."],
+            }
+        elapsed_ms = timer.elapsed_ms()
+        timing = dict(state.get("timing", {}))
+        timing["intent_router"] = elapsed_ms
+        _track_node_execution("intent_router", elapsed_ms)
+        return result
+
+    async def synthesis_node(state: AgentState) -> AgentState:
+        """Synthesis with adaptive timeout (90s base, extends if provider slow).
+
+        Timeout adapts to recent provider latency via health monitor.
+        On timeout, assembles a best-effort response from expert outputs
+        instead of returning a hard failure message.
+        """
+        timer = Timer().start()
+        _track_node_execution("synthesis", 0)
+        from ai_service.agents.synthesis import synthesize_response
+
+        timeout = _get_adaptive_timeout(base_seconds=90.0, multiplier=1.5)
+        try:
+            result = await asyncio.wait_for(
+                synthesize_response(state), timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            _TIMEOUT_EVENTS["synthesis"] += 1
+            logger.warning(
+                "Synthesis timed out after %.0fs (adaptive). Building best-effort response.",
+                timeout,
+            )
+            # Build best-effort response from expert outputs
+            expert_outputs = state.get("expert_outputs", {})
+            content_parts = []
+            for name, output in expert_outputs.items():
+                if output and output.content and not output.error:
+                    # Extract first sentence of each expert as summary
+                    first_sentence = output.content.split(".")[0]
+                    if first_sentence:
+                        content_parts.append(f"**{name.replace('_', ' ').title()}**: {first_sentence}.")
+            if content_parts:
+                response_content = (
+                    "The analysis took longer than expected. Here's what I gathered so far:\n\n"
+                    + "\n\n".join(content_parts)
+                    + "\n\n---\n*Note: The full LLM synthesis timed out. "
+                    "Please try asking a simpler or more specific question for a complete analysis.*"
+                )
+            else:
+                response_content = (
+                    "The analysis took longer than expected. "
+                    "Please try asking a simpler or more specific question."
+                )
+            warnings = list(state.get("warnings", []))
+            warnings.append(f"LLM response generation timed out after {timeout:.0f}s.")
+            result = {
+                "response_content": response_content,
+                "warnings": warnings,
+                "response_generated": True,
+            }
+        elapsed_ms = timer.elapsed_ms()
+        timing = dict(state.get("timing", {}))
+        timing["synthesis"] = elapsed_ms
+        _track_node_execution("synthesis", elapsed_ms)
+        return result
 
     graph = StateGraph(AgentState)
 
     # Register nodes
     graph.add_node("scope_gate", scope_gate_node)
-    graph.add_node("intent_router", classify_intent)
+    graph.add_node("intent_router", intent_router_node)
     graph.add_node("expert_execution", expert_execution_node)
-    graph.add_node("synthesis", synthesize_response)
+    graph.add_node("synthesis", synthesis_node)
     graph.add_node("reflection", validate_response)
 
     # Entry point
@@ -263,8 +437,11 @@ def get_compiled_graph():
         "in_scope": "intent_router",
     })
 
-    # Intent router → expert execution
-    graph.add_edge("intent_router", "expert_execution")
+    # Intent router → expert execution or early exit if first LLM pass found OOS
+    graph.add_conditional_edges("intent_router", route_after_intent, {
+        "out_of_scope": END,
+        "in_scope": "expert_execution",
+    })
 
     # Expert execution → synthesis
     graph.add_edge("expert_execution", "synthesis")

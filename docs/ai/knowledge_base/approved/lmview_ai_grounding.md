@@ -1,7 +1,7 @@
 # LMView AI Grounding — Platform Architecture & Capabilities
 
 > **Metadata**: `review_status: approved` | `allowed_for_rag: true` | `internal_only: false`
-> **Version scope**: 0.25.x | **Last reviewed**: 2026-06-16
+> **Version scope**: 0.32.0+ | **Last reviewed**: 2026-07-01
 
 ---
 
@@ -14,7 +14,7 @@ LMView is a real-time cryptocurrency technical analysis platform. It provides li
 LMView follows a Lambda Architecture with three layers:
 
 - **Speed Layer** — Live exchange data flows through Kafka, Apache Flink, Redis Sentinel, and InfluxDB for sub-second updates.
-- **Batch/Lakehouse Layer** — Historical and analytical data is processed by Apache Spark, stored in Apache Iceberg tables on MinIO, and queried through Trino.
+- **Batch/Lakehouse Layer** — Historical and analytical data is processed by Apache Spark, stored in Apache Iceberg tables on AWS S3 (`lmview-iceberg-storage`), and queried through Trino.
 - **Serving Layer** — FastAPI provides REST and WebSocket APIs; React 19 frontend renders the trading dashboard.
 
 ## Supported Exchanges
@@ -55,13 +55,14 @@ LMView follows a Lambda Architecture with three layers:
 
 ### AI Assistant (Interact Mode)
 - Same analysis capabilities as Ask Mode
-- Can propose safe UI actions (indicator toggles, drawing tools, navigation, tours)
+- Can propose safe UI actions (indicator toggles, drawing tools, navigation, walkthroughs)
+- Walkthrough mode: multi-step auto-executed analysis plans with step reset and recap
 - All actions require user approval before execution
 - Never executes trades or modifies positions
 
 ## Data Freshness
 
-- **Redis candle data**: Updated in real-time via Flink (sub-second for 1s candles)
+- **Redis candle data**: Updated in real-time via Flink (sub-second for 1s candles). 1s klines are also written directly to Redis by the producer, bypassing Kafka/Flink for maximum freshness.
 - **Indicator data**: Flink precomputed indicators are live; Redis-derived fallback when precomputed is unavailable
 - **Order book data**: Streamed through Flink; REST fallback may be 30+ seconds stale
 - **Trade tape**: True exchange trades cached in Redis with 1-hour TTL; falls back to ticker-derived data

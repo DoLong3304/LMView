@@ -103,6 +103,8 @@ health, ticker, klines, historical, orderbook, trades, symbols, indicators, webs
 4. **`collect_base_1m_candles()` paging logic** — Pages backward from `end_ms`. If `limit` is small but `target_sec` large (e.g., 1w), computes `raw_target = min((limit * mult) + mult, MAX_RAW_CANDLES)` which can be 60000 for `limit=1000, mult=10080`. The loop may never hit the `len(aggregate(candles, ...)) >= limit` break condition because 100k+ raw candles needed for 1000 weekly bars.
 5. **Redis candle keys use `{exchange}` prefix** — But `collect_base_1m_candles()` doesn't pass exchange. InfluxDB/Trino queries filter by `symbol` only. A symbol present on both Binance and OKX gets double-counted.
 
+**v0.28.3 Fix — BB-9**: `get_merged_klines()` fallthrough when Redis `candle:1s:*` empty caused 1m data return for 1s timeframe. Fixed by excluding `"1s"` from the fallthrough branch plus WS synthetic candle (BB-10).
+
 ### `/api/websocket` — websocket.py
 
 **Endpoints**:
@@ -121,6 +123,8 @@ health, ticker, klines, historical, orderbook, trades, symbols, indicators, webs
 2. **No heartbeat/ping** — Lightweight-charts expects periodic pings. Without them, browser may close idle connections after 30-60s.
 3. **All-timeframe route combines streams** — One client subscribes to all candles (1s, 1m, 5m, 15m, 1h, 4h, 1d, 1w) in a single connection. If candle count is large, JSON payload can exceed 1MB per push.
 4. **No client disconnect detection on stale sockets** — If client hard-closes without WebSocket close frame, the server task runs forever until TCP timeout.
+
+**v0.28.3 Fix — BB-10**: `_get_stream_candle("1s")` now returns synthetic candle from ticker when Redis empty, keeping WS alive until real @kline_1s data arrives.
 
 ---
 

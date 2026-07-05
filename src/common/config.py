@@ -34,9 +34,41 @@ INFLUX_ORG    = os.environ.get("INFLUX_ORG",    "vi")
 INFLUX_BUCKET = os.environ.get("INFLUX_BUCKET", "crypto")
 
 # ── MinIO / S3 ───────────────────────────────────────────────────────────────
-MINIO_ENDPOINT   = os.environ.get("MINIO_ENDPOINT",   "http://minio:9000")
-MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY", "")
-MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY", "")
+#
+# Two profiles — switch via env vars:
+#
+#   AWS S3 (default):
+#     S3_PROVIDER=aws
+#     S3_ENDPOINT=https://s3.ap-southeast-1.amazonaws.com
+#     S3_SSL_ENABLED=true
+#     S3_PATH_STYLE=false
+#     AWS_S3_BUCKET=lmview-iceberg-storage
+#
+#   MinIO (local Docker):
+#     S3_PROVIDER=minio
+#     S3_ENDPOINT=http://minio:9000
+#     S3_SSL_ENABLED=false
+#     S3_PATH_STYLE=true
+#     AWS_S3_BUCKET=cryptoprice
+#     # Also set AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY to minioadmin creds
+#
+# ── credentials (shared) ────────────────────────────────────────────────────
+AWS_ACCESS_KEY_ID = os.environ.get("AWS_ACCESS_KEY_ID", "")
+AWS_SECRET_ACCESS_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
+
+# ── bucket & endpoint ───────────────────────────────────────────────────────
+AWS_S3_BUCKET  = os.environ.get("AWS_S3_BUCKET", "lmview-iceberg-storage")
+AWS_REGION     = os.environ.get("AWS_REGION", "ap-southeast-1")
+S3_ENDPOINT    = os.environ.get("S3_ENDPOINT", "https://s3.ap-southeast-1.amazonaws.com")
+
+# ── connectivity toggles (true for AWS S3, flip for MinIO) ──────────────────
+S3_SSL_ENABLED = os.environ.get("S3_SSL_ENABLED", "true").lower() == "true"
+S3_PATH_STYLE  = os.environ.get("S3_PATH_STYLE", "false").lower() == "true"
+
+# ── object key prefix (e.g. "data/" for lmview-lakehouse migration doc) ────
+S3_PREFIX      = os.environ.get("S3_PREFIX", "").strip("/")
+if S3_PREFIX:
+    S3_PREFIX += "/"
 
 # ── Iceberg ──────────────────────────────────────────────────────────────────
 ICEBERG_CATALOG      = "iceberg_catalog"

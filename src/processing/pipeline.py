@@ -41,9 +41,9 @@ JOB_NAME = "crypto_multistream_kafka_to_keydb_influxdb"
 
 # ── Config (read at module level for Flink compatibility) ────────────────────
 KAFKA_BOOTSTRAP  = os.environ.get("KAFKA_BOOTSTRAP",   "kafka-1:9092,kafka-2:9092,kafka-3:9092")
-MINIO_ENDPOINT   = os.environ.get("MINIO_ENDPOINT",    "http://minio:9000")
-MINIO_ACCESS_KEY = os.environ.get("MINIO_ACCESS_KEY",  "")
-MINIO_SECRET_KEY = os.environ.get("MINIO_SECRET_KEY",  "")
+S3_ENDPOINT   = os.environ.get("S3_ENDPOINT",    "https://s3.ap-southeast-1.amazonaws.com")
+S3_ACCESS_KEY = os.environ.get("AWS_ACCESS_KEY_ID", "")
+S3_SECRET_KEY = os.environ.get("AWS_SECRET_ACCESS_KEY", "")
 # Phase 2: reduced from 12→8. With 2 TM × 4 slots, per-slot load is
 # ~4 symbols/s at 1s klines — well within a single core for string
 # buffering and state update.
@@ -52,6 +52,10 @@ SCHEMA_REGISTRY_URL = os.environ.get(
     "SCHEMA_REGISTRY_URL",
     "http://schema-registry:8080/apis/ccompat/v7",
 )
+# Kafka consumer startup mode: 'latest-offset' (default, real-time) or
+# 'earliest-offset' (replay/backfill). Set KAFKA_SCAN_STARTUP_MODE=earliest-offset
+# only for deliberate gap-filling; huge backlogs make earliest-offset impractical.
+KAFKA_SCAN_STARTUP_MODE = os.environ.get("KAFKA_SCAN_STARTUP_MODE", "latest-offset")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -68,16 +72,14 @@ def run():
     env.set_parallelism(FLINK_PARALLELISM)
 
     s3_config = Configuration()
-    s3_config.set_string("s3.endpoint",          MINIO_ENDPOINT)
-    s3_config.set_string("s3.access-key",        MINIO_ACCESS_KEY)
-    s3_config.set_string("s3.secret-key",        MINIO_SECRET_KEY)
-    s3_config.set_string("fs.s3a.endpoint",           MINIO_ENDPOINT)
-    s3_config.set_string("fs.s3a.access.key",         MINIO_ACCESS_KEY)
-    s3_config.set_string("fs.s3a.secret.key",         MINIO_SECRET_KEY)
+    s3_config.set_string("s3.endpoint",          S3_ENDPOINT)
+    s3_config.set_string("s3.access-key",        S3_ACCESS_KEY)
+    s3_config.set_string("s3.secret-key",        S3_SECRET_KEY)
+    s3_config.set_string("fs.s3a.endpoint",           S3_ENDPOINT)
+    s3_config.set_string("fs.s3a.access.key",         S3_ACCESS_KEY)
+    s3_config.set_string("fs.s3a.secret.key",         S3_SECRET_KEY)
     s3_config.set_string("fs.s3a.impl",               "org.apache.hadoop.fs.s3a.S3AFileSystem")
-    s3_config.set_string("fs.s3a.path.style.access",  "true")
-    s3_config.set_string("fs.s3a.impl",               "org.apache.hadoop.fs.s3a.S3AFileSystem")
-    s3_config.set_string("fs.s3a.path.style.access",  "true")
+    s3_config.set_string("fs.s3a.path.style.access",  "false")
 
     env.get_checkpoint_config().set_checkpoint_storage_dir(
         "file:///tmp/flink-checkpoints"
@@ -172,7 +174,7 @@ def run():
             'topic'                        = 'crypto_ticker',
             'properties.bootstrap.servers' = '{KAFKA_BOOTSTRAP}',
             'properties.group.id'          = 'flink_crypto_ticker_v1',
-            'scan.startup.mode'            = 'latest-offset',
+            'scan.startup.mode'            = '{KAFKA_SCAN_STARTUP_MODE}',
             'format'                       = 'avro-confluent',
             'avro-confluent.url'           = '{SCHEMA_REGISTRY_URL}'
         )
@@ -229,7 +231,7 @@ def run():
             'topic'                        = 'crypto_klines',
             'properties.bootstrap.servers' = '{KAFKA_BOOTSTRAP}',
             'properties.group.id'          = 'flink_crypto_klines_v1',
-            'scan.startup.mode'            = 'latest-offset',
+            'scan.startup.mode'            = '{KAFKA_SCAN_STARTUP_MODE}',
             'format'                       = 'avro-confluent',
             'avro-confluent.url'           = '{SCHEMA_REGISTRY_URL}'
         )
@@ -299,7 +301,7 @@ def run():
             'topic'                        = 'crypto_depth',
             'properties.bootstrap.servers' = '{KAFKA_BOOTSTRAP}',
             'properties.group.id'          = 'flink_crypto_depth_v1',
-            'scan.startup.mode'            = 'latest-offset',
+            'scan.startup.mode'            = '{KAFKA_SCAN_STARTUP_MODE}',
             'format'                       = 'avro-confluent',
             'avro-confluent.url'           = '{SCHEMA_REGISTRY_URL}'
         )
@@ -368,7 +370,7 @@ def run():
             'topic'                        = 'crypto_trades',
             'properties.bootstrap.servers' = '{KAFKA_BOOTSTRAP}',
             'properties.group.id'          = 'flink_crypto_trades_v1',
-            'scan.startup.mode'            = 'latest-offset',
+            'scan.startup.mode'            = '{KAFKA_SCAN_STARTUP_MODE}',
             'format'                       = 'avro-confluent',
             'avro-confluent.url'           = '{SCHEMA_REGISTRY_URL}'
         )

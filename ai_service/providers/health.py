@@ -17,8 +17,8 @@ logger = logging.getLogger("ai_service.providers.health")
 
 # Circuit breaker defaults
 DEFAULT_FAILURE_THRESHOLD = 3
-DEFAULT_RECOVERY_TIMEOUT_S = 60
-DEFAULT_HEALTH_CHECK_INTERVAL_S = 15
+DEFAULT_RECOVERY_TIMEOUT_S = 15
+DEFAULT_HEALTH_CHECK_INTERVAL_S = 30
 
 
 class CircuitState(str, Enum):

@@ -38,11 +38,11 @@ docker cp "${SCRIPT}" "${CID}:/tmp/refresh_redis_klines.py" >/dev/null
 echo "$(date -Is) refresh start (cid=${CID:0:12} top=${TOP} limit=${LIMIT})"
 if [[ -n "${SYMBOLS}" ]]; then
   docker exec -e LOG_LEVEL=WARNING "${CID}" \
-    python /tmp/refresh_redis_klines.py --symbols "${SYMBOLS}" --limit "${LIMIT}" \
+    python /tmp/refresh_redis_klines.py --symbols "${SYMBOLS}" --limit "${LIMIT}" --with-1s --limit-1s 60 \
     || echo "$(date -Is) WARN: refresh exited non-zero"
 else
   docker exec -e LOG_LEVEL=WARNING "${CID}" \
-    python /tmp/refresh_redis_klines.py --top "${TOP}" --limit "${LIMIT}" \
+    python /tmp/refresh_redis_klines.py --top "${TOP}" --limit "${LIMIT}" --with-1s --limit-1s 60 \
     || echo "$(date -Is) WARN: refresh exited non-zero"
 fi
 echo "$(date -Is) refresh done"

@@ -9,5 +9,6 @@ RUN pip install --no-cache-dir \
 COPY src/common /app/src/common
 COPY src/exchanges /app/src/exchanges
 COPY src/batch /app/src/batch
+COPY scripts /app/scripts
 
 CMD ["python", "src/batch/backfill.py", "--mode", "influx"]

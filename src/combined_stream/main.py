@@ -44,6 +44,7 @@ from exchanges.binance.mappers import (
     map_depth,
     map_kline,
     map_ticker,
+    map_ticker_rest,
 )
 
 log = logging.getLogger("combined_stream")
@@ -273,6 +274,48 @@ async def health_server():
     async with server:
         await server.serve_forever()
 
+# ── REST ticker poller ───────────────────────────────────────────────────────
+# Binance !ticker@arr WebSocket stream is geo-blocked from AWS (returns 403)
+# just like aggTrade and depth. The combined stream works for klines but not
+# ticker. This REST poller provides 24hr ticker data via Binance REST API
+# which is NOT blocked, published to the same crypto_ticker Kafka topic.
+# Polls every 60 seconds (same frequency as !ticker@arr updates).
+
+REST_TICKER_URL = "https://api.binance.com/api/v3/ticker/24hr"
+
+async def rest_ticker_poller():
+    """Poll REST 24hr ticker and publish to crypto_ticker Kafka topic."""
+    import aiohttp
+    log.info("[REST-Ticker] Starting REST 24hr ticker poller (60s interval)")
+    delay = 60.0
+    while True:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(REST_TICKER_URL, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+                    if resp.status != 200:
+                        log.warning("[REST-Ticker] HTTP %d, retrying in %.0fs", resp.status, delay)
+                        await asyncio.sleep(delay)
+                        continue
+                    items = await resp.json()
+        except Exception as e:
+            log.warning("[REST-Ticker] Fetch error: %s, retrying in %.0fs", e, delay)
+            await asyncio.sleep(delay)
+            continue
+
+        count = 0
+        for raw in items:
+            # REST API uses 'symbol' field, not 's' (WebSocket convention)
+            symbol = raw.get("symbol", "")
+            if not symbol.endswith("USDT"):
+                continue
+            try:
+                await send(KAFKA_TOPIC_TICKER, map_ticker_rest(raw))
+                count += 1
+            except Exception as e:
+                log.error("[REST-Ticker] send error for %s: %s", symbol, e)
+        log.info("[REST-Ticker] Published %d tickers to %s", count, KAFKA_TOPIC_TICKER)
+        await asyncio.sleep(delay)
+
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
@@ -286,6 +329,7 @@ async def amain():
     await asyncio.gather(
         health_server(),
         ws_loop(symbols),
+        rest_ticker_poller(),
         periodic_status(),
         return_exceptions=True,
     )

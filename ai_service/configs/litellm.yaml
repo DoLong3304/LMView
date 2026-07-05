@@ -1,16 +1,250 @@
 # LiteLLM proxy catalog for LMView AI.
 # Unified LLM routing with health checks, retries, and auto-fallback.
+#
+# Model list mirrors ai.api.yaml providers. Each model includes
+# caching headers to enable DashScope server-side context caching
+# (reduces first-token latency by ~80% for repeated system prompts).
 
 model_list:
   # ── DashScope API (Qwen cloud) ───────────────────────────────────────────
-  - model_name: qwen-api
+  - model_name: qwen3.7-plus
+    litellm_params:
+      model: openai/qwen3.7-plus
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+        X-DashScope-SSE: enable
+    model_info:
+      mode: chat
+      tier: standard
+      notes: "Primary: June 2026, best quality/price ratio"
+
+  - model_name: qwen3.7-max-preview
+    litellm_params:
+      model: openai/qwen3.7-max-preview
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+        X-DashScope-SSE: enable
+    model_info:
+      mode: chat
+      tier: standard
+      notes: "July 2026 preview, best upcoming quality in standard tier"
+
+  - model_name: qwen3-coder-plus
+    litellm_params:
+      model: openai/qwen3-coder-plus
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+        X-DashScope-SSE: enable
+    model_info:
+      mode: chat
+      tier: standard
+      notes: "Best for tool-calling heavy tasks"
+
+  - model_name: qwen3-coder-flash
+    litellm_params:
+      model: openai/qwen3-coder-flash
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+        X-DashScope-SSE: enable
+    model_info:
+      mode: chat
+      tier: standard
+      notes: "Fast tool calling, lightweight"
+
+  - model_name: qwen3.6-plus
+    litellm_params:
+      model: openai/qwen3.6-plus
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+        X-DashScope-SSE: enable
+    model_info:
+      mode: chat
+      tier: standard
+      notes: "Fallback 1: Well-tested previous gen"
+
+  - model_name: qwen3.6-flash
+    litellm_params:
+      model: openai/qwen3.6-flash
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+        X-DashScope-SE: enable
+    model_info:
+      mode: chat
+      tier: standard
+      notes: "Fast/cheap for simple queries"
+
+  - model_name: qwen-plus-latest
+    litellm_params:
+      model: openai/qwen-plus-latest
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+        X-DashScope-SSE: enable
+    model_info:
+      mode: chat
+      tier: standard
+      notes: "Maintained legacy, widest compatibility"
+
+  - model_name: qwen3.5-plus
     litellm_params:
       model: openai/qwen3.5-plus
       api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
       api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+        X-DashScope-SSE: enable
     model_info:
       mode: chat
-      notes: OpenAI-compatible usage uses prompt_tokens/completion_tokens/total_tokens.
+      tier: standard
+      notes: "Widest compatibility"
+
+  - model_name: qwen3.7-max
+    litellm_params:
+      model: openai/qwen3.7-max
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+        X-DashScope-SSE: enable
+    model_info:
+      mode: chat
+      tier: reserved
+      notes: "Highest quality, expensive"
+
+  - model_name: qwen3-next-80b-a3b-thinking
+    litellm_params:
+      model: openai/qwen3-next-80b-a3b-thinking
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+    model_info:
+      mode: chat
+      tier: reserved
+      notes: "Next-gen MoE thinking model, best for complex reasoning"
+
+  - model_name: qwq-plus
+    litellm_params:
+      model: openai/qwq-plus
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+    model_info:
+      mode: chat
+      tier: reserved
+      notes: "Reasoning model, best for complex multi-step analysis"
+
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: openai/deepseek-v4-pro
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+    model_info:
+      mode: chat
+      tier: reserved
+      notes: "Latest DeepSeek reasoning, via DashScope"
+
+  - model_name: deepseek-r1
+    litellm_params:
+      model: openai/deepseek-r1
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+    model_info:
+      mode: chat
+      tier: reserved
+      notes: "Legacy reasoning, kept for compatibility"
+
+  - model_name: qwq-32b
+    litellm_params:
+      model: openai/qwq-32b
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+    model_info:
+      mode: chat
+      tier: reserved
+      notes: "Legacy reasoning, kept for compatibility"
+
+  # ── BENCHMARK TIER ────────────────────────────────────────────────────────
+  - model_name: qwen3.6-max-preview
+    litellm_params:
+      model: openai/qwen3.6-max-preview
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+        X-DashScope-SSE: enable
+    model_info:
+      mode: chat
+      tier: benchmark
+      notes: "Next-gen preview, good for eval"
+
+  - model_name: qwen3.6-35b-a3b
+    litellm_params:
+      model: openai/qwen3.6-35b-a3b
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+    model_info:
+      mode: chat
+      tier: benchmark
+      notes: "MoE efficiency comparison"
+
+  - model_name: deepseek-v4-flash
+    litellm_params:
+      model: openai/deepseek-v4-flash
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+    model_info:
+      mode: chat
+      tier: benchmark
+      notes: "Comparison baseline via DashScope"
+
+  - model_name: qwen3.5-flash
+    litellm_params:
+      model: openai/qwen3.5-flash
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+    model_info:
+      mode: chat
+      tier: benchmark
+      notes: "Budget, fast benchmark baseline"
+
+  - model_name: qwen2.5-72b-instruct
+    litellm_params:
+      model: openai/qwen2.5-72b-instruct
+      api_base: https://dashscope-intl.aliyuncs.com/compatible-mode/v1
+      api_key: os.environ/DASHSCOPE_API_KEY
+      extra_headers:
+        X-DashScope-Cache: enable
+    model_info:
+      mode: chat
+      tier: benchmark
+      notes: "Broad knowledge, good baseline"
 
 litellm_settings:
   drop_params: true
@@ -19,8 +253,10 @@ litellm_settings:
   request_timeout: 60
 
 router_settings:
-  routing_strategy: simple-shuffle
+  routing_strategy: latency-based-routing
   num_retries: 2
+  allowed_fails: 3
+  enable_loadbalancing: true
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

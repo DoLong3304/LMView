@@ -40,6 +40,17 @@ Consumes all 4 Kafka topics → processes → writes to Redis + InfluxDB.
 - **3 sentinels** (redis-sentinel-1/2/3, ports 26379-26381)
 - Monitor name: `lmview_redis`
 
+### Writers
+
+| Writer | Source | Data | Frequency |
+|---|---|---|---|
+| `binance-kline-ws` | Binance WS (@kline_1s) | `candle:1s:*` | Real-time (~50ms batches) |
+| `binance-ticker-ws` | Binance WS (@ticker) | `ticker:latest:*` | Real-time (~50ms batches) |
+| `binance-kline-rest` | Binance REST /klines | `candle:1m:*` | Every 30s per symbol |
+| `binance-depth-trades-rest` | Binance REST /depth, /trades | `orderbook:*`, `trade:latest:*` | Every 3s per symbol |
+| Flink sinks | Kafka streams | All candle/ticker/trade/depth | ~500ms batch flushes |
+| Producer DirectRedisWriter | Binance WS (failover) | All types (when Kafka down) | Real-time (bypass) |
+
 ### Key Sets
 
 | Key Type | Examples | Purpose |

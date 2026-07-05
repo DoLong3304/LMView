@@ -1,0 +1,98 @@
+version: "3.8"
+
+services:
+  # ── CORE NODE ─────────────────────────────────────────────
+  nginx-prod:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == core
+
+  fastapi-prod:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == core
+
+  ai-service:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == core
+
+  # ── DATA NODE ─────────────────────────────────────────────
+  postgres:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == data
+    volumes:
+      - /mnt/local/postgres-data:/var/lib/postgresql/data
+
+  redis-master:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == data
+    volumes:
+      - /mnt/local/redis-data:/data
+
+  kafka-1:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == data
+    volumes:
+      - /mnt/local/kafka-data:/var/lib/kafka/data
+
+  influxdb:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == data
+    volumes:
+      - /mnt/local/influxdb-data:/var/lib/influxdb2
+
+  minio:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == data
+    volumes:
+      - /mnt/local/minio-data:/data
+
+  # ── COMPUTE NODE ──────────────────────────────────────────
+  flink-jobmanager:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == compute
+
+  flink-taskmanager:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == compute
+      replicas: 2
+    volumes:
+      - /mnt/local/flink-checkpoints:/opt/flink/checkpoints
+
+  spark-master:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == compute
+
+  trino:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == compute
+    volumes:
+      - /mnt/local/trino-data:/data/trino
+
+  prometheus:
+    deploy:
+      placement:
+        constraints:
+          - node.labels.role == compute

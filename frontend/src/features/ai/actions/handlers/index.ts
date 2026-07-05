@@ -81,6 +81,7 @@ import {
   handleHighlightSection,
   handleHighlightChartArea,
   handleHighlightCandles,
+  handleHighlightContextualZone,
 } from "./highlightHandler";
 import { handleSetTimeframe, handleSetChartType, handleSetSymbol } from "./chartTypeHandler";
 import {
@@ -111,6 +112,7 @@ import {
 import { handleFetchHistoricalPrices } from "./historicalHandler";
 import { handleClearAiAnnotations, handleExportChart } from "./miscHandler";
 import { handleStartTour, handleEndTour } from "./tourHandler";
+import { handleOpenNewsPopup, handleNavigateTab, handleEnterReplay } from "./walkthroughHandler";
 
 export const handlerRegistry: Record<string, ActionHandler> = {
   // Indicators
@@ -136,6 +138,7 @@ export const handlerRegistry: Record<string, ActionHandler> = {
   highlight_section: handleHighlightSection,
   highlight_chart_area: handleHighlightChartArea,
   highlight_candles: handleHighlightCandles,
+  highlight_contextual_zone: handleHighlightContextualZone,
 
   // Chart core
   set_chart_type: handleSetChartType,
@@ -159,6 +162,11 @@ export const handlerRegistry: Record<string, ActionHandler> = {
 
   // Historical data
   fetch_historical_prices: handleFetchHistoricalPrices,
+
+  // Walkthrough-specific
+  open_news_popup: handleOpenNewsPopup,
+  navigate_tab: handleNavigateTab,
+  enter_replay: handleEnterReplay,
 
   // Tours + cleanup
   start_tour: handleStartTour,

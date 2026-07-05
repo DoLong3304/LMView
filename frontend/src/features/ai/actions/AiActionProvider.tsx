@@ -260,6 +260,24 @@ function actionDefinitions(): AiActionDefinition[] {
       },
     },
     {
+      name: "highlight_contextual_zone",
+      description: "Highlight a chart zone based on analysis context (breakout, support test, divergence, etc.). Use zone_type + candle_count instead of explicit coordinates. The chart maps it to actual candle range.",
+      parameters: {
+        type: "object",
+        properties: {
+          zone_type: {
+            type: "string",
+            enum: ["breakout", "breakdown", "support_test", "resistance_test", "bullish_divergence", "bearish_divergence", "consolidation", "reversal_candles", "volume_spike", "trend_push", "accumulation", "distribution", "recent_action"],
+          },
+          label: { type: "string" },
+          message: { type: "string" },
+          direction: { type: "string", enum: ["bullish", "bearish", "neutral"] },
+          candle_count: { type: "integer", default: 5, description: "Approx candles for zone width estimation." },
+        },
+        required: ["zone_type", "label"],
+      },
+    },
+    {
       name: "set_chart_type",
       description: "Switch chart type.",
       parameters: {
@@ -629,6 +647,7 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
       }
     };
     window.addEventListener("lmview:ai-clear-highlights", clearHighlights);
+    window.addEventListener("lmview:clear-ai-annotations", clearHighlights);
     window.addEventListener("lmview:ai-tour-start", onTourStart);
     window.addEventListener("lmview:ai-tour-end", onTourEnd);
     return () => {
@@ -636,6 +655,7 @@ export function AiActionProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("lmview:ai-tour-capture-ui", captureUi);
       window.removeEventListener("lmview:ai-tour-restore-ui", restoreUi);
       window.removeEventListener("lmview:ai-clear-highlights", clearHighlights);
+      window.removeEventListener("lmview:clear-ai-annotations", clearHighlights);
       window.removeEventListener("lmview:ai-tour-start", onTourStart);
       window.removeEventListener("lmview:ai-tour-end", onTourEnd);
     };

@@ -121,7 +121,7 @@ def send_to_kafka(topic: str, record: dict, avro_serializer=None) -> None:
             if avro_serializer
             else json.dumps(record).encode("utf-8")
         )
-        future = producer.send(topic, key=key, value=value_bytes, partition=partition)
+        future = producer.send(topic, key=key, value=value_bytes)
         future.add_errback(_on_send_error, topic, key)
     except (KafkaError, RuntimeError) as e:
         err_str = str(e)

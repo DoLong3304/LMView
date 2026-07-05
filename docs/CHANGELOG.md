@@ -14,6 +14,502 @@
 
 ─── TEMPLATE END ───────────────────────────────────────────────────────── -->
 
+
+## [0.35.3] — 2026-07-04
+
+### Fixed — Frontend AI integration audit
+
+- **AI chat transport** (`frontend/src/features/ai/hooks/useAiChat.ts`): Uses structured batch responses for Ask and Interact so backend metadata (`response_sections`, `knowledge_chunks`, `tour_plan`, `chart_actions`, `tool_calls`) is preserved for rendering. Streaming remains in code as fallback path but is not used for structured UI responses.
+- **Direct chart actions** (`frontend/src/features/ai/hooks/useAiChat.ts`): Converts direct `chart_actions` / `tool_calls` into a one-step tour when no `tour_plan` is returned, ensuring Interact actions still execute instead of being silently ignored.
+- **Formatted AI rendering** (`frontend/src/features/ai/components/AiChatMessage.tsx`): Added expandable structured response sections below markdown content; existing knowledge-source cards and confidence badges continue to render.
+- **Tour cleanup** (`frontend/src/features/ai/components/AiAssistantPanel.tsx`): Normal tour completion now emits `lmview:ai-tour-end`, allowing overlays to clear and restore-UI banner to appear after completion.
+- **AI service contracts** (`frontend/src/services/aiService.ts`): Updated tour plan TypeScript shape to support current `steps[].actions[].type` schema and legacy flat `action_type` steps.
+- **Walkthrough simulation fixes** (`frontend/src/features/ai/components/InteractBoard.tsx`, `frontend/src/i18n/locales/en.ts`, `frontend/src/i18n/locales/vi.ts`): Standard structured walkthrough simulation now renders backend action chips as human labels (`View Section`, `Market`, `Timeframe`, `Area`, `Candle`, `Indicator`) instead of raw action IDs, and final step uses the existing `tourFinalChoiceLabel` translation instead of leaking `tourVerifyLabel`.
+- **Real walkthrough lifecycle fixes** (`frontend/src/features/ai/components/AiAssistantPanel.tsx`, `frontend/src/features/ai/components/AiChatMessage.tsx`): Real `Analyze BTC on 1h timeframe` Interact test produced a valid 6-step/action tour, but exposed two UI bugs: duplicate `response_sections` repeated the full answer, and final `switch_app_view` actions could navigate away/unmount the AI panel mid-tour leaving the chart frozen and input disabled. Duplicate sections are now filtered, `walkthroughInProgress` is translated, and disruptive `switch_app_view` auto-execution is skipped during tours so users can finish/Keep/Replay safely.
+- **E2E helper alignment** (`frontend/e2e/full-suite/utils.ts`): Updated AI send helper to click the Send button / use Ctrl+Enter fallback because plain Enter intentionally inserts a newline in `AiChatInput`.
+- **Verification**: `cd frontend && npm run typecheck` and `npm run build` pass. Rebuilt/pushed/deployed `nginx-prod`; root page, AI health, mocked structured walkthrough, and real `Analyze BTC on 1h timeframe` lifecycle passed (6 steps, 6 actions, meaningful explanations, Replay works, Cancel interruption restores normal input).
+
+## [0.35.2] — 2026-07-04
+
+### Changed — AI benchmark refresh
+
+- **Benchmark datasets** (`scripts/ai-benchmark/*.json`): Updated golden, tour, ablation, and latency datasets for current LMView AI capabilities, current timeframe/action taxonomy, and unsupported-feature traps. Reduced latency repeat count to protect benchmark quota.
+- **Benchmark runner** (`scripts/ai-benchmark/run_benchmarks.py`): Added benchmark-tier request routing (`model_tier=benchmark`), default chart context injection, quota/rate-limit exclusion queue, safer env-based credentials, hidden token logging, dynamic tour counts, and 160s per-call timeout to avoid false 120s boundary failures.
+- **Benchmark model priority** (`ai_service/configs/ai.api.yaml`, `tests/ai/run_benchmark.py`): Reordered benchmark tier to fast-first (`qwen3.5-flash`, `deepseek-v4-flash`, `qwen3.6-35b-a3b`) with `qwen3.6-max-preview` as fallback. Deployed `ai-service` image.
+- **Benchmark report** (`docs/ai-benchmark-results.md`): Updated final validated benchmark report from separate post-fix runs: Golden 50/50, Tour 25/25, Safety 10/10, RAG ablation 14/14 with and without RAG, latency P50 17.5s / P95 43.3s / 0% errors.
+
+### Fixed — AI benchmark, routing, and safety issues
+
+- **Provider rotation** (`ai_service/providers/litellm_provider.py`): Treats DashScope access/model-denied and invalid-key errors as retriable across key/model rotation, preventing one denied workspace key from aborting benchmark requests.
+- **First-pass planner** (`ai_service/agents/intent_router.py`, `ai_service/agents/graph.py`): Combines scope, intent, context needs, and expert activation in first LLM pass; out-of-scope responses exit before expert/synthesis work.
+- **Tour planner** (`ai_service/core/orchestrator.py`, `ai_service/agents/experts/tour_planner.py`): Deterministic known-intent tours now take precedence over stochastic LLM walkthroughs; current `tour_plan.steps[].actions[].type` schema is emitted; legacy drawing aliases normalize to `draw_tool`; recent-trades and SOL/trend intents produce stable tours.
+- **Knowledge boundary** (`ai_service/safety/knowledge_boundary.py`): Added deterministic refusals for unsupported LMView feature inventory and harmful hacking/credential-theft requests before LLM/RAG execution. This prevents hallucinated feature paths and restores safety benchmark pass rate. Added Satoshi identity uncertainty boundary.
+- **RAG retrieval** (`ai_service/rag/retrieval_service.py`, `ai_service/agents/experts/rag_knowledge.py`): Fixed `RAGChunkResult.score` access, empty/gibberish query guards, and source-title hint boosting with credibility-filter awareness. `tests/ai/test_rag_quality.py` passes 26/26 inside `ai-service`.
+- **Reflection node** (`ai_service/agents/reflection.py`): Handles `None` synthesized responses without crashing when upstream synthesis/provider fallback returns no content.
+- **Benchmark evaluator** (`scripts/ai-benchmark/run_benchmarks.py`): Evaluates Interact metadata from full response JSON and supports Vietnamese terms for trend, support/resistance, market overview, and overbought/oversold criteria.
+
+### Fixed — AI test/runtime issues
+
+- **PostgreSQL pool** (`backend/core/postgres.py`): Made asyncpg pool event-loop aware to prevent `RuntimeError: Event loop is closed` when tests/services switch event loops.
+- **AI test DB fixture** (`tests/ai/conftest.py`): Replaced `get_pg_pool()` availability probe with one-off `asyncpg.connect()` and registered `requires_db` marker.
+- **AI experts** (`ai_service/agents/experts/technical_analysis.py`, `ai_service/agents/experts/market_data.py`): No-context requests now return low-confidence results instead of crashing on `None.upper()` or defaulting to BTC.
+- **Chart safety tests** (`tests/ai/test_chart_safety.py`): Updated allowed chart/UI action prefixes to match current action registry (`configure_`, `open_`, `switch_`, `scroll_`, etc.).
+
+## [0.35.1] — 2026-07-03
+
+### Fixed — Production Stability Follow-Up
+- **Trino catalog** (`backend/core/database.py`, `backend/api/market_overview.py`, `backend/tasks/market_fetcher.py`): Corrected remaining runtime Trino references from `iceberg.crypto_lakehouse` / `catalog="iceberg"` to `iceberg_catalog.crypto_lakehouse` / `catalog="iceberg_catalog"`. Eliminates recurring `CATALOG_NOT_FOUND: Catalog 'iceberg' not found` errors.
+- **Redis replicas** (`docker-compose.yml`): Increased replica healthcheck window to `start_period: 180s`, `interval: 10s`, `timeout: 5s`, `retries: 30` so Swarm does not kill replicas during 2GB AOF/RDB load + full sync. Applied live Swarm limits: Redis data nodes `4G`, sentinels `256M`, Trino `4G`. Verified Redis master with 2 online replicas and all API health checks passing.
+- **Binance kline REST poller** (`docker-compose.yml`): Added explicit Swarm `restart_policy.condition: any` for the long-running poller and applied live `1G` memory limit. Prevents clean SIGTERM exits from leaving service stuck at `Complete 0/1`; verified service back to `1/1` with Redis Sentinel + Kafka ready and 20k-candle sweeps completing.
+- **Frontend 1m candle reconciliation** (`frontend/src/features/chart/CandlestickChart.tsx`, `frontend/src/services/marketDataService.ts`): Added no-cache latest-candle fetch and scheduled closed-bucket reconciliation after live ticker rollover. The chart now replaces synthetic/provisional ticker-built 1m candles with authoritative `/api/klines` OHLCV without requiring page reload.
+- **Historical candle API** (`backend/api/historical.py`): Fixed `/api/klines/historical` returning empty for far-back BTCUSDT 1m ranges (e.g., 2025) by querying exact-range InfluxDB backfill data before Trino cold fallback. Previous logic skipped Influx outside the nominal 90-day window, even though backfill jobs store old timestamps there.
+- **Swarm stability overlay** (`docker-compose.swarm.yml`, `scripts/watchdog_flink_job.py`): Persisted Redis/Trino runtime limits in the Swarm overlay (`4G` Redis data nodes, `256M` sentinels, `4G` Trino) so future stack deploys do not revert them. Made Flink watchdog Redis probe non-fatal and aligned `JOB_WATCHDOG_INTERVAL_SEC`, restoring `job-watchdog` to `1/1`.
+
+### Fixed — Critical AI Service Bugs
+- **General Expert**: Fixed NameError crash in [general.py](file:///mnt/efs/LMView/ai_service/agents/experts/general.py#L63) where non-existent `analysis_parts` was referenced. Corrected to `parts`.
+- **Tour Planner**: Removed duplicate `plan_tour()` function in [tour_planner.py](file:///mnt/efs/LMView/ai_service/agents/experts/tour_planner.py) L78-184.
+- **Context Needs Router**: Fixed missing propagation of `needs_market_data` in [intent_router.py](file:///mnt/efs/LMView/ai_service/agents/intent_router.py#L553) inside the primary LLM classification path.
+- **Deploy Script**: Fixed build profile file reference inside [deploy_aws_swarm.sh](file:///mnt/efs/LMView/scripts/deploy_aws_swarm.sh) which caused `no such service: ai-service` errors. Added `-f docker-compose.yml -f docker-compose.ai.yml` args to compose build.
+- **Makefile**: Corrected targeted services deployment flag syntax from `--services "svc"` to `--services="svc"` to match shell parser constraints.
+
+### Added — Context Timezone & Multi-Chart Support
+- **Temporal Timezone Context**: Injecting user local IANA timezone (`Intl.DateTimeFormat`) from frontend [AiAssistantPanel.tsx](file:///mnt/efs/LMView/frontend/src/features/ai/components/AiAssistantPanel.tsx) to backend [synthesis.py](file:///mnt/efs/LMView/ai_service/agents/synthesis.py) context prompt, resolving queries referencing localized periods (e.g. yesterday, today, this morning).
+- **Multi-Chart Analytics**: Enabled concurrent multi-symbol technical analysis ([technical_analysis.py](file:///mnt/efs/LMView/ai_service/agents/experts/technical_analysis.py)) and market data structured analysis ([market_data.py](file:///mnt/efs/LMView/ai_service/agents/experts/market_data.py)), empowering comparison queries ("compare BTC vs ETH", "correlation check").
+- **Candle Compaction Strategy**: Added statistical OHLCV compaction (pivots, endpoints, extrema, quartiles, and standard deviation) in `compact_candles` helper for long charts (>15 candles) to maintain analytical precision while saving context token budget.
+- **Priority Context Budgeting**: Rewrote `_build_context_sections` in `synthesis.py` to support priority-based budgeting and raised cap to 8000 characters, safeguarding indicator data, S/R levels, and caveats from naive truncation.
+- **Timeframe Alignment (Case 1)**: Added automatic timeframe check in [tour_planner.py](file:///mnt/efs/LMView/ai_service/agents/experts/tour_planner.py#L284) that prepends a chart timeframe synchronization step if the current workspace timeframe differs from the expert's computation timeframe.
+- **Intelligent Step Capping (Case 3)**: Rewrote `_cap_steps` in `tour_planner.py` to preserve crucial setup (first) and concluding (last) steps while proportionally sampling the middle steps.
+- **Concurrent Session Lock (Case 4)**: Integrated Redis Sentinel distributed locks in [orchestrator.py](file:///mnt/efs/LMView/ai_service/core/orchestrator.py#L318) to serialize concurrent requests on the same session, preventing database race conditions.
+- **Tab Focus Reconnection (Case 5)**: Added browser `visibilitychange` listener in frontend [marketDataService.ts](file:///mnt/efs/LMView/frontend/src/services/marketDataService.ts#L240) to instantly reconnect backgrounded/idle WebSockets upon focusing the tab.
+
+### Changed — Confidence Ensemble Audit
+- **Cross-Validation Bonus**: Scaled agreement bonus based on active expert count in [ensemble.py](file:///mnt/efs/LMView/ai_service/agents/ensemble.py).
+- **Conflict Detection**: Extended checks to find contradictions between Technical Analysis direction and News Sentiment polarity.
+- **Staleness Penalty**: Applied automatic confidence deduction if warnings contain stale data indicators.
+
+## [0.35.0] — 2026-07-03
+
+### Fixed — Redis Sentinel split-brain + real-time data recovery
+
+- **Redis**: Fixed split-brain where both Redis nodes were slaves → no writable master. Applied `SLAVEOF NO ONE` + `CONFIG SET replica-read-only no`. Added `docker/redis/redis.conf` with `replica-read-only no` for persistent fix, mounted into all 3 Redis services. Removed `--replica-read-only yes` from replica commands (config file supersedes).
+- **Flink pipeline**: Replaced hardcoded `'scan.startup.mode' = 'earliest-offset'` with env-var `{KAFKA_SCAN_STARTUP_MODE}` (default `latest-offset`) in all 4 Kafka source DDLs (`src/processing/pipeline.py`). Added `KAFKA_SCAN_STARTUP_MODE: latest-offset` to flink-jobmanager and flink-taskmanager environments in `docker-compose.yml`. 114M backlog from `earliest-offset` made real-time catch-up impossible.
+- **Job watchdog**: Rewrote `scripts/watchdog_flink_job.py` `submit_job()` from `docker run` → direct `/opt/flink/bin/flink run` CLI. Changed watchdog image from `docker:27.0-cli` → `cryptoprice/flink:1.18.1`, removed docker.sock mount, added pipeline env vars. Previous approach failed because Swarm overlay networks can't be attached to standalone `docker run` containers.
+
+### Changed
+
+- `redis:7.2-alpine`: all 3 Redis services now load `docker/redis/redis.conf` via `redis-server /etc/redis/redis.conf` command prefix
+- `cryptoprice/flink:1.18.1`: watchdog now uses Flink image instead of `docker:27.0-cli`
+- `src/processing/pipeline.py`: `KAFKA_SCAN_STARTUP_MODE` env-var replaces 4 hardcoded `earliest-offset` values
+- `docker-compose.yml`: added `KAFKA_SCAN_STARTUP_MODE: latest-offset` to Flink JM/TM + watchdog
+
+### Added — Phase G: Testing + Benchmarking
+
+- **`tests/ai/test_ai_graded.py`**: NEW — AI-graded RAG evaluation using BENCHMARK-tier models (qwen3.6-max-preview, qwen3.5-flash). Tests grade responses on relevance/accuracy/completeness/safety (0-4 each, pass >=10/16). Covers single and session-chained evaluation patterns.
+- **`tests/ai/run_benchmark.py`**: NEW — CLI benchmark runner. Invokes AI pipeline with benchmark models only. Supports `--model`, `--set`, `--full`, `--list`, `--output`. Combines basic heuristics + LLM grading for pass/fail.
+- **`frontend/e2e/full-suite/ai-helper-advanced.spec.ts`**: NEW — 12 Playwright tests covering:
+  - Settings AI Helper tab visibility & model selector
+  - Debug tab health checks (system + AI) with model tier inspection
+  - Cross-turn session memory (preference persistence across messages)
+  - Interact walkthrough completion + new chat recovery
+  - Chained TA questions in single session (G3 multi-intent)
+  - User opinion + follow-up analysis request
+  - Out-of-scope refusal + crypto topic recovery
+  - Ask↔Interact mode switching
+- **`frontend/e2e/full-suite/utils.ts`**: Fixed admin credentials to match actual deployment (admin@lmview.com). Updated login flow to match current UI (Escape-dismiss overlays).
+- **`frontend/e2e/full-suite/ai-helper-ask.spec.ts`**, **`ai-helper-interact.spec.ts`**: Existing tests continue to work with fixed credentials.
+- **`frontend/src/features/ai/hooks/useAiChat.ts`**: Fixed missing `model_tier` propagation. All 3 chat paths (interact batch, streaming fallback, ask streaming) now send `model_tier` from user settings to backend. Previously only `model_name` was sent.
+
+### Changed
+- AI tests now use BENCHMARK-tier models exclusively (qwen3.6-max-preview, qwen3.5-flash, qwen2.5-72b-instruct). Standard/reserved models reserved for normal user traffic.
+- Phases G2+G4 strategy: Shared sessions per group (3-4 questions) → single model invocation → multiple assertions = token savings.
+
+## [0.33.0] — 2026-06-29
+
+### Changed — Phase F: RAG embedding model upgrade + quality tests + KB docs
+
+- **`ai_service/configs/ai.api.yaml`**: Embedding model changed from `all-MiniLM-L6-v2` to `BAAI/bge-small-en-v1.5` — better retrieval quality (~33MB, same 384-dim, compatible with existing vector schema).
+- **`backend/core/config.py`**: Default `AI_EMBEDDING_MODEL` changed to `BAAI/bge-small-en-v1.5`.
+- **`docker-compose.ai.yml`**: Fixed `AI_RERANKER_MODEL` default — added missing `cross-encoder/` prefix.
+- **`ai_service/rag/auto_ingest.py`**: Added `reindex_all_embeddings()` — recomputes embeddings for all active chunks. Batch upsert via `unnest()` (50-chunk batches, ~2× faster). Fixed `ON CONFLICT` target from `(chunk_id, model_name)` to `(chunk_id)` to match actual unique constraint. Added `model_name` to `DO UPDATE SET` so upgraded model name propagates.
+- **`ai_service/app/routes.py`**: Added `POST /knowledge/reindex` endpoint — triggers full embedding reindex (auth-protected).
+- **`backend/api/ai/knowledge.py`**: Added `POST /knowledge/reindex` — admin-only, proxies to ai-service reindex function.
+- **`tests/ai/conftest.py`**: NEW — `db_available` fixture + `requires_db` marker. Auto-skips RAG tests when DB unavailable.
+- **`tests/ai/test_rag_quality.py`**: Updated golden query expected patterns to match actual DB document titles. Added `@pytest.mark.requires_db`.
+- **`docker/ai-service/Dockerfile`**: Pre-cache BAAI/bge-small-en-v1.5 + cross-encoder models during build — eliminates cold-start download.
+
+### Added — RAG quality scoring tests
+
+- **`tests/ai/test_rag_quality.py`**: NEW — 14 tests covering:
+  - `test_golden_queries_retrieve_expected_docs` — parameterized 13 golden queries with expected document patterns
+  - `test_pure_vector_vs_hybrid` — comparison of search modes
+  - `test_multilingual_retrieval` — Vietnamese queries
+  - `test_edge_case_empty_query`, `test_edge_case_gibberish`, `test_edge_case_sql_injection` — edge case coverage
+  - `test_precision_at_1` — top result relevance
+  - `test_score_ordering`, `test_top_k_respected`, `test_min_score_filter` — sorting and filtering
+  - `test_credibility_filter` — source credibility filtering
+  - `test_chunks_have_citations`, `test_scores_in_range`, `test_no_missing_chunk_text` — metadata correctness
+
+### Changed — KB docs updated for 0.32.0+ features
+
+- **`docs/ai/knowledge_base/approved/LMView_AI_Usage.md`**:
+  - Added §2.1 Session Memory — cross-turn context retention, automatic compaction at 10 turns
+  - Added §4.5 Walkthrough Mode — multi-action steps, auto-execution, step reset, recap, replay/keep/revert
+  - Expanded action catalog to 35+ tools with full category table
+  - Updated §5 model tiers to reflect actual 5-tier system (Auto, Standard, Reserved, Benchmark, None)
+  - Updated model catalog with Qwen3.x series
+- **`docs/ai/knowledge_base/approved/lmview_data_caveats.md`**:
+  - Added AI Knowledge Base section (embedding model, chunk count, hybrid search, reranker)
+  - Updated session memory and walkthrough capability notes
+- **`docs/ai/knowledge_base/registry.yml`**: Updated lmview-data-caveats entry to 0.32.0+, added tags.
+
+## [0.32.0] — 2026-06-29
+
+### Added — Phase B: structured response sections + knowledge chunks (backend)
+
+- **`backend/models/ai/chat.py`**: `AIChatResponse` gains `response_sections`
+  (parsed markdown sections for expandable rendering) and `knowledge_chunks`
+  (full KB chunk data with text, source, score for expandable knowledge cards).
+- **`ai_service/core/orchestrator.py`**: Added `_parse_response_sections()` —
+  splits LLM markdown output on `##` headings into `{title, content}` pairs.
+  Extracts `rag_chunks` from graph state and passes both as structured fields
+  in API response and assistant message metadata.
+
+### Added — Phase D: frontend AI Helper full rewrite
+
+- **`frontend/src/features/ai/components/ThinkingIndicator.tsx`**: NEW —
+  animated "Thinking…" with 20 cycling educational facts about TA and LMView.
+  Fades out when answer arrives.
+- **`frontend/src/features/ai/components/InteractBoard.tsx`**: NEW —
+  draggable popup (portal to body, z-9999) for Interact mode step control.
+  Progress meter, step name, formatted explanation with key data chips,
+  prev/next/finish/cancel buttons.
+- **`frontend/src/features/ai/components/DisclaimerSection.tsx`**: NEW —
+  collapsible dropdown with general trading disclaimer + Interact-specific
+  warning + response-specific caveats.
+- **`frontend/src/features/ai/components/AiChatMessage.tsx`**: Rewritten —
+  proper chat bubbles (user=blue rounded-2xl, Ask=gray, Interact=amber,
+  Recap=emerald). Knowledge hat icon expand/collapse. Confidence badge
+  (High/Medium/Low with color). Expandable sections list. Admin debug panel.
+- **`frontend/src/features/ai/components/AiChatInput.tsx`**: Rewritten —
+  suggested prompts only when user is typing (not persistent dropdown).
+  Unsent input cached in localStorage. Error recovery with revert-to-input.
+- **`frontend/src/features/ai/components/AiAssistantPanel.tsx`**: Rewritten —
+  full restructure with ThinkingIndicator, InteractBoard integration, error
+  banner (not saved as message), chart freeze indicator bar, proper tour
+  lifecycle with auto-start/cancel/replay/complete.
+- **`frontend/src/features/ai/hooks/useAiChat.ts`**: Added `flushOldApiSessions()` —
+  deletes API sessions without `response_sections`/`knowledge_chunks` metadata
+  on first post-update load (guarded by localStorage flag).
+- **`frontend/src/features/chart/CandlestickChart.tsx`**: Chart freeze badge
+  inline with OHLCV bar — pulsing amber "Frozen" indicator during Interact tours.
+- **`docs/ai/knowledge_base/approved/LMView_AI_Usage.md`**: Added Appendix A —
+  JSON Tool Call Blueprints with 12 tool blueprints (add_indicator, draw_trendline,
+  draw_tool, highlight_candles, highlight_contextual_zone, set_timeframe,
+  highlight_section, set_visible_range, set_chart_type, remove_indicator,
+  create_annotation, switch_panel_tab). Each with JSON example, valid enums,
+  usage scenarios.
+- **`docs/ai/knowledge_base/registry.yml`**: Updated LMView_AI_Usage entry with
+  new tags (tool-blueprints, json-schema) and max_document_version 0.32.0.
+
+### Fixed — Pipeline hardening (output guard, stream mode, reflection, timeout)
+
+- **`ai_service/core/orchestrator.py`**: Wired `guard_output()` from `output_guard.py` into
+  response pipeline — disclaimer appended server-side, unsafe claims flagged, code patterns
+  stripped. LLM no longer wastes tokens generating its own disclaimer.
+  Also fixed stream mode (`run_chat_stream`) to propagate `context_needs` from
+  `classify_intent()` result into graph state — previously missing, streaming users got
+  no context analysis.
+- **`ai_service/agents/synthesis.py`**: Removed disclaimer requirement from LLM system prompt
+  ("⚠️ Disclaimer — Educational purposes only"). Output guard handles it server-side
+  instead. Added instruction telling LLM to focus output tokens on analysis.
+- **`ai_service/agents/reflection.py`**: Removed disclaimer presence check from
+  `validate_response()` — it was redundant with output_guard and triggered costly
+  re-LLM revision loops for a missing disclaimer that output_guard would add anyway.
+  Removed unused `_DISCLAIMER_PATTERNS` constant and `intent` extraction.
+- **`ai_service/agents/graph.py`**: `expert_execution_node` — wrapped `asyncio.gather()`
+  in `asyncio.wait_for()` with 60s timeout. Prevents hanging requests when an expert
+  (Redis, network) stalls. Timeout produces `TimeoutError` for each expert.
+
+## [0.31.0] - 2026-06-29
+
+### Added — LLM context needs analysis in Intent Router
+
+- **`ai_service/agents/types.py`**: Added `ContextNeeds` dataclass — identifies
+  what data/contexts a query requires (symbols, timeframes, indicators,
+  news, orderbook, historical prices, drawings, RAG). Includes
+  `unretrievable` and `fallback_description` fields for graceful degradation.
+- **`ai_service/agents/state.py`**: Added `context_needs: Optional[ContextNeeds]`
+  to `AgentState` TypedDict.
+- **`ai_service/agents/intent_router.py`**: Added `analyze_context_needs()` —
+  LLM-based analysis that runs after intent classification to determine
+  what data the query actually needs. Falls back to `_default_context_needs()`
+  (heuristic based on chart_context + intent) when LLM is unreachable.
+  Integrated into `classify_intent()` graph node — result stored in state.
+- **`ai_service/agents/synthesis.py`**: `synthesize_response()` now reads
+  `context_needs` from state and injects a "Data Requirements" section into
+  the LLM prompt. Communicates which data was requested, what was retrieved,
+  and what was unavailable — prevents hallucination of unavailable data.
+- **`ai_service/core/orchestrator.py`**: `context_needs` persisted in assistant
+  message metadata alongside intent, experts, and execution trace.
+
+
+
+- **`ai_service/agents/experts/tour_planner.py`**: Major rewrite of tour planning.
+  Added `_extract_analysis_data()` to parse synthesis output for prices, indicators,
+  S/R levels, patterns, and conclusion. Added `_fmt_explanation()` to inject analytical
+  data into step explanations. Each tour step now carries actual findings (e.g., "RSI at
+  28.3 — oversold") instead of generic boilerplate. Summary/recap uses the analysis
+  conclusion, not a hardcoded placeholder.
+
+### Fixed — Tour step dedup + indicator extraction
+
+- **`ai_service/agents/experts/tour_planner.py`**: `_dedupe_consecutive_steps` now keeps
+  both support AND resistance `draw_horizontal_line` steps (label-aware dedup). Analyze
+  steps reordered to avoid consecutive same action types. Indicator patterns handle
+  markdown `**bold**` around values and comma-separated numbers. Fixed `float()`
+  conversion to strip commas (BB/EMA/SMA values with thousands separators).
+
+### Fixed — Interact mode 500 errors
+
+- **`backend/models/ai/chat.py`**: `AIChatRequest` was missing `model_name` and `model_tier`
+  fields. Container had stale image. Copied updated model file, committed & pushed,
+  forced service rollout.
+- **`ai_service/persistence/chat_store.py`**: Added defensive `None` checks before UUID
+  conversion in `store_message()`, `get_session_messages()`, `delete_session()`. Invalid
+  or null `session_id` values no longer crash with `ValueError`.
+- **`ai_service/core/orchestrator.py`**: `_ensure_session()` now validates `body.session_id`
+  UUID format before accepting it. Malformed values trigger session creation fallback.
+
+
+
+- **ai_service/configs/ai.api.yaml**: Models now tagged with tiers (`standard` | `reserved` | `benchmark`).
+  Standard models (qwen3.7-plus, qwen3.6-plus, qwen3.6-flash, qwen3.5-plus) form default rotation.
+  Reserved models (qwen3.7-max, qwq-32b, deepseek-r1) for manual/admin use. Benchmark models
+  (qwen3.6-max-preview, qwen3.5-flash, qwen2.5-72b) for automated testing. Added `tier` and
+  `cutoff` metadata to `AIProviderConfig`.
+
+### Added — Frontend model selector
+
+- **frontend/src/features/settings/SettingsModal.tsx**: Model dropdown in AI Helper settings.
+  Fetches available models from `GET /ai/health` (`models_by_tier` field). "Auto (Default)"
+  uses standard rotation; specific model pins to that model. Selection persists via
+  `AiHelperSettings.selected_model`/`model_tier`.
+
+### Added — `selected_model` and `model_tier` to request pipeline
+
+- **backend/models/ai/chat.py**: `AIChatRequest` gains `model_name` and `model_tier`.
+- **backend/models/settings.py**: `AiHelperSettings` gains `selected_model`, `model_tier`.
+- **backend/models/ai/common.py**: `AIHealthResponse` gains `models_by_tier` dict.
+- **frontend/src/services/settingsService.ts**: Updated `AiHelperSettings` interface.
+- **frontend/src/services/aiService.ts**: `AIChatRequest`, `AIHealthResponse` types updated.
+  Added `setSelectedModel()`/`getSelectedModel()` module-level state.
+
+### Fixed — Pipeline hardening (output guard, stream mode, reflection, timeout)
+
+- **`ai_service/core/orchestrator.py`**: Wired `guard_output()` from `output_guard.py` into
+  response pipeline — disclaimer appended server-side, unsafe claims flagged, code patterns
+  stripped. LLM no longer wastes tokens generating its own disclaimer.
+  Also fixed stream mode (`run_chat_stream`) to propagate `context_needs` from
+  `classify_intent()` result into graph state — previously missing, streaming users got
+  no context analysis.
+- **`ai_service/agents/synthesis.py`**: Removed disclaimer requirement from LLM system prompt
+  ("⚠️ Disclaimer — Educational purposes only"). Output guard handles it server-side
+  instead. Added instruction telling LLM to focus output tokens on analysis.
+- **`ai_service/agents/reflection.py`**: Removed disclaimer presence check from
+  `validate_response()` — it was redundant with output_guard and triggered costly
+  re-LLM revision loops for a missing disclaimer that output_guard would add anyway.
+  Removed unused `_DISCLAIMER_PATTERNS` constant and `intent` extraction.
+- **`ai_service/agents/graph.py`**: `expert_execution_node` — wrapped `asyncio.gather()`
+  in `asyncio.wait_for()` with 60s timeout. Prevents hanging requests when an expert
+  (Redis, network) stalls. Timeout produces `TimeoutError` for each expert.
+
+### Added — Provider router model override
+
+- **ai_service/providers/router.py**: `route_completion()` and `route_completion_stream()` accept
+  `selected_model` / `selected_tier`. When set, builds single-model `LiteLLMProvider` bypassing
+  rotation. Falls back on failure. Added `_build_model_provider()`, tier-filtered model listing.
+- **ai_service/agents/state.py**: `AgentState` + `initial_state()` accept `selected_model`/`selected_tier`.
+- **ai_service/agents/synthesis.py**: Synthesis nodes pass model overrides to provider router.
+- **ai_service/core/orchestrator.py**: Both batch and streaming paths pass `body.model_name`/`model_tier`.
+- **frontend/src/features/ai/hooks/useAiChat.ts**: Reads `getSelectedModel()` on each request.
+
+### Added — Multi-key rotation
+
+- **ai_service/config.py**: `list_available_models()` accepts tier filter. Added `list_models_by_tier()`.
+- **docker-compose.ai.yml**: `DASHSCOPE_API_KEYS` env var passthrough.
+- **.env**: Fixed config path (`ai.api.yaml`). Documented `DASHSCOPE_API_KEYS`.
+- **.env.example**: Updated config path, key documentation.
+- **scripts/setup_ai_keys.sh**: Setup helper for single/multi-key rotation.
+
+### Added — Phase 2: Expert pipeline, tour planner LLM elimination, Interact reasoning chain
+
+- **ai_service/agents/experts/tour_planner.py**: Removed `TOUR_PLANNER_SYSTEM_PROMPT` (~140-line LLM prompt),
+  `_build_tour_context()`, `_llm_plan_tour()`, `_parse_json_response()`. `plan_tour()` now uses
+  `_intent_fallback_tour()` as primary path — no separate LLM call for tour planning. File reduced from
+  1000→679 lines. Eliminates ~5s+ latency per Interact request.
+- **ai_service/agents/synthesis.py**: Added step-by-step reasoning chain to Interact mode policy
+  (`## Step-by-Step Reasoning Chain` with WHY→WHAT shows→WHAT means→LOOK FOR). Added concrete
+  good/bad examples to enforce explanation quality over action description.
+- **ai_service/agents/intent_router.py**: Skip RAG expert for simple price queries (≤2 meaningful
+  words beyond "price", "current"). Reduces unnecessary pgvector calls for basic price lookups.
+
+### Added — Phase 3: Highlight contextual zone
+
+- **ai_service/agents/experts/chart_interaction.py**: Added `highlight_contextual_zone` to
+  `CHART_TOOLS` — new highlight tool that takes zone_type (13 types: breakout, breakdown,
+  support_test, resistance_test, divergence variants, consolidation, reversal_candles, volume_spike,
+  trend_push, accumulation, distribution, recent_action) + direction + candle_count instead of
+  explicit chart coordinates. Frontend maps zone_type→color-coded highlight region.
+- **frontend/src/features/ai/actions/handlers/highlightHandler.ts**: Added
+  `handleHighlightContextualZone` handler — registers zone_type→label/emoji/color map, estimates
+  chart region from candle_count relative to visible candles (~40 visible). Direction determines
+  color coding (bullish→green, bearish→red, neutral→yellow).
+- **frontend/src/features/ai/actions/AiActionProvider.tsx**: Registered `highlight_contextual_zone`
+  definition with zone_type enum, direction enum, candle_count default.
+- **frontend/src/features/ai/actions/handlers/index.ts**: Registered handler in `handlerRegistry`.
+- **ai_service/agents/experts/tour_planner.py**: Enhanced `_augment_tour_with_visual_steps` to read
+  structured TA expert data (signals, patterns) for precise contextual highlights:
+  - Maps RSI oversold/overbought → reversal_candles zone
+  - Maps MACD crossovers → trend_push zone
+  - Maps volume spikes → volume_spike zone
+  - Maps candlestick patterns → reversal_candles zone
+
+### Added — Phase 4: Knowledge base overhaul (10 docs rewritten, SQL param_idx fix)
+
+- **docs/ai/knowledge_base/approved/**: Rewrote 10 thin knowledge base docs to comprehensive reference guides (~2000% content increase average):
+  - `Order_Flow_Analysis.md`: 26→~550 lines — CVD, footprint, absorption, delta divergence, icebregs, OI, volume profile, playbook
+  - `Correlation_Analysis.md`: 30→~600 lines — BTC.D cycles, cross-asset matrix, stablecoin flows, sector rotation, pair trading
+  - `Market_Regime_Detection.md`: 30→~500 lines — ADX, Chop, ATR regimes, Band Width squeeze, regime scorecard
+  - `Multi_Timeframe_Analysis.md`: 30→~500 lines — Top-down pyramid, 1:4 ratio, alignment signals, confluency scoring
+  - `DeFi_Analysis.md`: 31→~450 lines — TVL, DEX metrics, lending, IL math, liquidations, governance, security
+  - `On_Chain_Analytics.md`: 33→~400 lines — Exchange flows, NVT/MVRV/SOPR, HODL waves, miner behavior
+  - `Risk_Management_Frameworks.md`: 39→~450 lines — Kelly, fixed fractional, drawdown, circuit breakers
+  - `Chart_Pattern_Encyclopedia.md`: 73→~600 lines — 30+ patterns, Bulkowski stats, harmonic, candlestick, Elliott Wave
+  - `Bilingual_Glossary.md`: 52→~400 lines — 150+ EN/VI terms, A-Z + LMView-specific
+  - `LMView_AI_Usage.md`: 26→~450 lines — Ask/Interact mode, model tiers, caching, safety
+- **docs/ai/knowledge_base/approved/**: Removed duplicate `LMView_Drawing_Tools_Usage.md` (superseded by `LMView_Drawing_Tools.md` at 28.4K)
+- **docs/ai/knowledge_base/approved/lmview_ai_grounding.md, lmview_data_caveats.md**: Updated versions to 0.27.0+
+- **docs/ai/knowledge_base/registry.yml**: Updated all entries with new descriptions, tags, version scopes, source URLs. Added 2 new entries (Bilingual_Glossary.md, LMView_AI_Usage.md).
+- **ai_service/rag/retrieval_service.py**: Fixed SQL param_idx bug in pure vector search path. `score_filter` and `order_expr` now built at USE time (not definition time), so parameter indices stay correct when metadata filters precede them. Changed `LIMIT ${param_idx + 6}` to `LIMIT ${param_idx + 1}`.
+- **docs/ai/AI_ROADMAP.md**: Marked Phase 4 as ✅ complete with assessment notes.
+  More precise than keyword matching on synthesis text.
+
+## [0.28.3] - 2026-06-26
+
+### Fixed — 1s kline fallthrough to 1m in merged endpoint
+
+- **backend/api/klines.py**: `elif interval != "1m"` → `elif interval not in ("1m", "1s")`.
+  When Redis `candle:1s:*` was empty, the fallthrough branch fetched 1m candles
+  from InfluxDB for 1s timeframe — chart showed 1m candles. Now correctly returns
+  empty array for 1s, letting frontend build synthetic candles from WS ticker.
+
+### Fixed — WebSocket synthetic 1s candle from ticker
+
+- **backend/api/websocket.py**: When Redis `candle:1s:*` empty, build synthetic
+  1s candle from ticker price (`ticker:latest:binance:{symbol}`) instead of
+  returning `None`. WS pushes ticker-derived candle to frontend, keeping chart
+  alive until real `@kline_1s` data arrives.
+
+### Fixed — Frontend gap defense too strict for 1s
+
+- **frontend/src/features/chart/CandlestickChart.tsx**: `MAX_BRIDGE_BUCKETS`
+  changed from blanket `5` to `timeframeSec === 1 ? 30 : 5`. Initial 1m data
+  loaded for 1s timeframe was minutes old → gap ≫5s → all ticker-driven updates
+  dropped. 30 buckets (30s) gives enough slack for 1s synthetic candle bridging.
+
+### Fixed — Cache TTL too aggressive for 1s
+
+- **frontend/src/services/marketDataService.ts**: `fetchMergedCandles` uses
+  `minTimeframeSec === 1 ? 500 : 3000`ms TTL. Prevents stale 1m data being
+  served when 1s timeframe is active.
+
+### Fixed — Left toolbar price lag (_livePriceMap + 500ms interval)
+
+- **frontend/src/features/chart/CandlestickChart.tsx**: Left toolbar price used
+  `lastCandle.close` from `candles` state updated via `startTransition` — React
+  deferred low-priority updates, causing stale display. Fixed by:
+  - Importing `getLivePrice` from `marketDataService`
+  - Replacing `lastCandle.close` with `getLivePrice(symbol)?.price ?? lastCandle?.close`
+  - Adding 500ms `setLiveTick` interval to force periodic re-renders
+  - Replacing total-return `pricePct` with `change24h` from live ticker
+  - RightPanel already used `_livePriceMap` via `getLivePrice()` with 2s interval
+
+### Changed — Deployed binance-kline-ws to production Swarm
+
+- **docker-compose.swarm.yml**: Placed `binance-kline-ws` on `role=core`
+- **Image built & pushed**: `cryptoprice/binance-kline-ws:0.1.0` → registry
+- **Swarm service**: `cryptoprice_binance-kline-ws` running 8/8 shards,
+  confirmed Redis `candle:1s:binance:*` populated for 131+ symbols.
+
+### Changed — Rebuilt and deployed frontend (nginx 1.44.1 → 1.44.5)
+
+- `cryptoprice/nginx:1.44.5` — includes all frontend fixes (gap defense,
+  cache TTL, _livePriceMap, 500ms interval)
+- Pushed to registry, `docker service update` → converged
+
+## [0.28.2] - 2026-06-26
+
+### Fixed — spark-worker healthcheck port
+
+- **docker-compose.yml**: Changed healthcheck from `localhost:8081` to
+  `localhost:8084` (spark-worker WebUI port). Was causing 15s restart loop
+  (exit 143) for 4+ hours. Now 1/1 stable.
+
+### Fixed — combined-stream-producer OOM
+
+- **docker-compose.yml**: Memory limit 512M → 1G. Service was OOM-killing
+  (exit 137) every ~1h. Now stable with 66MB actual usage.
+
+### Added — Storage management (log rotation + cleanup hooks)
+
+- **docker-compose.yml**: Added `x-logging` YAML anchor (`max-size: 10m, max-file: 3`)
+  applied to all 38 services. Caps each container at 30MB log storage.
+- **scripts/deploy_aws_swarm.sh**: Pre-build cleanup (`container prune` +
+  `image prune --filter until=24h` + `builder prune`). Post-deploy cleanup
+  (`container prune` + `image prune --filter until=48h`).
+- Ran cleanup across all 3 swarm nodes: 62GB reclaimed (42.6GB dead containers
+  on compute, 13.3GB dangling images on core, 19.7GB build cache on core).
+
+### Added — binance-kline-ws: 8-shard WebSocket service for 1s klines
+
+- **src/kline_ws/**: New `binance-kline-ws` service modeled on `binance-ticker-ws` 8-shard architecture. Uses 8 parallel WebSocket connections to Binance, each subscribing to `{symbol}@kline_1s` for ~25 symbols. Parses kline payloads and writes directly to Redis `candle:1s:binance:{symbol}` sorted set via batched pipeline. Latency target: ~170ms end-to-end. Bypasses Kafka/Flink entirely.
+  - `config.py`: Symbol loading from Binance 24h ticker, shard split, WS/Redis config.
+  - `parser.py`: Binance @kline_1s payload → candle dict + JSON for ZADD.
+  - `redis_writer.py`: Buffered ZADD + EXPIRE pipeline, periodic cleanup.
+  - `shard.py`: Single WS connection with exponential-backoff reconnect.
+  - `main.py`: Entrypoint, spawns shards, Prometheus metrics on :9102, health on :9102/healthz.
+- **docker/kline-ws/Dockerfile**: Python 3.11-slim, aiohttp + websockets + redis + prometheus.
+- **docker-compose.yml**: Added `binance-kline-ws` service (profiles: dev, prod). 512MB memory limit, healthcheck via /healthz.
+- **docker-compose.swarm.yml**: Added placement constraint `role=core` for `binance-kline-ws`.
+
+### Changed — 1s klines always direct to Redis (producer)
+
+- **src/producer/main.py**: 1s klines now ALWAYS written directly to Redis via DirectRedisWriter, bypassing Kafka/Flink latency. Other event types (tickers, trades, depth, 1m+ klines) still use health-monitored failover. This cuts 1s candle latency from ~800ms (Kafka→Flink→Redis) to ~170ms (DirectRedis) when producer WS is alive.
+
+### Changed — REST poller 1s disabled (use WebSocket instead)
+
+- **src/kline_rest/config.py**: `ENABLE_1S` reverted to `false`. 1s via REST is rate-limit constrained; use `binance-kline-ws` (WebSocket 8-shard) instead.
+- **src/kline_rest/poller.py**: Reverted `_sweep()` symbol subset changes.
+- **docker-compose.yml**: `KLINE_REST_ENABLE_1S` reverted to `"false"`.
+
+### Changed — Stopgap scripts keep 1s refresh as option
+
+- **scripts/refresh_redis_klines.py**: `--with-1s` default changed to `True`.
+- **scripts/cron_refresh_klines.sh**: Pass `--with-1s --limit-1s 60`.
+
+### Documentation
+
+- **docs/system/01-architecture.md**: Added binance-kline-ws to data flow diagram, updated 1s latency path (~170ms via 8-shard WS).
+- **docs/system/03-data-pipeline.md**: Documented binance-kline-ws as primary 1s path, REST poller for 1m only.
+- **docs/CHANGELOG.md**: This entry.
+
+## [0.28.1] - 2026-06-26
+
+### Changed — 2-node → 3-node Swarm placement
+
+- **docker-compose.swarm.yml**: All data services moved from `role=core` to `role=data` (15 services: zookeeper, kafka-1/2/3, schema-registry, minio, postgres, influxdb, redis cluster). All compute services moved from `role=worker` to `role=compute` (18 services: flink, spark, trino, dagster, monitoring). Added placement constraints for `binance-kline-rest` and `binance-depth-trades-rest` (`role=core`). Updated header to 3-node config with correct node specs.
+- **docs/system/12-deployment.md**: Rewritten for 3-node setup — node table, labels, storage strategy, known issues.
+
 ## [0.28.1] - 2026-06-25
 
 ### Fixed — Script portability (all hardcoded IPs → env vars)

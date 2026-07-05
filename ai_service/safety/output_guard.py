@@ -33,18 +33,22 @@ _CODE_PATTERNS = [
     re.compile(r"\b(eval\(|exec\(|os\.system|subprocess)\b", re.IGNORECASE),
 ]
 
-# Required disclaimer keywords
+# Required disclaimer keywords. Keep this list substantive: generic words like
+# "risk" are common in analysis but are not, by themselves, disclaimers.
 _DISCLAIMER_KEYWORDS = [
     "not financial advice",
-    "educational",
-    "risk",
+    "educational purposes",
+    "for educational",
     "disclaimer",
     "not a recommendation",
     "do your own research",
     "dyor",
+    "not a financial advisor",
+    "cannot provide financial advice",
+    "can't provide financial",
     "không phải lời khuyên tài chính",
-    "mang tính giáo dục",
-    "rủi ro",
+    "chỉ mang tính giáo dục",
+    "tự nghiên cứu",
 ]
 
 DISCLAIMER_TEXT = (

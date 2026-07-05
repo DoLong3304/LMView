@@ -6,6 +6,7 @@ Connection parameters come from environment variables.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -15,6 +16,7 @@ logger = logging.getLogger("backend.core.postgres")
 
 # Lazy import: asyncpg is optional for test environments
 _pool = None
+_pool_loop = None
 _init_attempted = False
 
 
@@ -29,10 +31,19 @@ def _get_pg_dsn() -> str:
 
 
 async def init_pg_pool() -> None:
-    """Initialize the global asyncpg connection pool."""
-    global _pool
-    if _pool is not None:
+    """Initialize the global asyncpg connection pool for current event loop."""
+    global _pool, _pool_loop
+    current_loop = asyncio.get_running_loop()
+    if _pool is not None and _pool_loop is current_loop:
         return
+    if _pool is not None:
+        try:
+            await _pool.close()
+        except Exception:
+            logger.debug("Failed to close PostgreSQL pool from previous event loop", exc_info=True)
+        finally:
+            _pool = None
+            _pool_loop = None
 
     try:
         import asyncpg
@@ -55,16 +66,19 @@ async def init_pg_pool() -> None:
             max_size=10,
             command_timeout=30,
         )
+        _pool_loop = current_loop
         logger.info("PostgreSQL connection pool initialized")
     except Exception:
         logger.exception("Failed to initialize PostgreSQL pool")
         _pool = None
+        _pool_loop = None
 
 
 async def get_pg_pool():
     """Return the asyncpg pool, retrying initialization if pool was unavailable."""
     global _pool, _init_attempted
-    if _pool is not None:
+    current_loop = asyncio.get_running_loop()
+    if _pool is not None and _pool_loop is current_loop:
         return _pool
     # Retry initialization in case dependencies came up after first attempt
     await init_pg_pool()
@@ -73,10 +87,11 @@ async def get_pg_pool():
 
 async def close_pg_pool() -> None:
     """Close the PostgreSQL connection pool."""
-    global _pool
+    global _pool, _pool_loop
     if _pool is not None:
         await _pool.close()
         _pool = None
+        _pool_loop = None
         logger.info("PostgreSQL connection pool closed")
 
 

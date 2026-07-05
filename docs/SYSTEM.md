@@ -89,7 +89,7 @@ Phần này dành cho người mới. Nếu bạn chưa từng nghe "Kafka" hay 
 | Dữ liệu OKX, Bybit | ✅ | ❌ (chỉ Binance) |
 | AI trợ lý | ❌ | ✅ |
 | Mã nguồn mở | ❌ | ✅ |
-| Chi phí | $15-60/tháng | $5/tháng (server AWS) |
+
 
 ## 2. Triết Lý Thiết Kế (Design Philosophy)
 

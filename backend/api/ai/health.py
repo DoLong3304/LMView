@@ -10,7 +10,7 @@ from backend.core.postgres import pg_health_check
 from backend.models.ai.chart_actions import AIChartActionType
 from backend.models.ai.common import AIHealthResponse
 from ai_service.actions.registry import ACTION_CATALOG_VERSION
-from ai_service.config import load_settings
+from ai_service.config import list_models_by_tier, load_settings
 from ai_service.providers.router import get_provider_router
 
 router = APIRouter()
@@ -63,4 +63,5 @@ async def ai_health(user: dict | None = Depends(get_optional_user)):
         available_providers=providers,
         pgvector_ready=pgvector_ready,
         knowledge_source_count=source_count,
+        models_by_tier=list_models_by_tier(settings),
     )
